@@ -14,18 +14,24 @@ import SessionStatus from '@hongyan/ui/SessionStatus.vue';
 
 const router = createRouter({
   history: createWebHistory(),
-  routes: [{
-    path: '/',
-    component: BasicLayout,
-    children: [
-      { path: '', component: TaskInbox },
-      { path: 'schedule', component: SchedulePage, props: { scope: 'all' } },
-      { path: 'connection', name: 'connection', component: SessionStatus },
-      { path: 'hours/:id?', component: HourReview },
-      { path: 'reviews/:id?', component: ReviewPage, meta: { profile: true } },
-      { path: 'manage/:section(' + sectionKeys.join('|') + ')/:item?', component: ManagementPage, meta: { profile: true } },
-    ],
-  }],
+  routes: [
+    {
+      path: '/',
+      component: BasicLayout,
+      children: [
+        { path: '', component: TaskInbox },
+        { path: 'schedule', component: SchedulePage, props: { scope: 'all' } },
+        { path: 'connection', name: 'connection', component: SessionStatus },
+        { path: 'hours/:id?', component: HourReview },
+        { path: 'reviews/:id?', component: ReviewPage, meta: { profile: true } },
+        {
+          path: 'manage/:section(' + sectionKeys.join('|') + ')/:item?',
+          component: ManagementPage,
+          meta: { profile: true },
+        },
+      ],
+    },
+  ],
 });
 
 createApp(App).use(router).mount('#app');

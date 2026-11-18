@@ -1,6 +1,6 @@
 # 鸿雁志愿服务平台
 
-学生查看获批活动，负责人创建、修改、送审或撤回单次活动，老师核对差异后批准或驳回。报名名单与时长审核页标有“示例数据”。
+学生查看获批活动，负责人创建、修改、送审或撤回单次活动，老师核对差异后批准或驳回。批次 02 已补齐三端页面。各业务组的入口、数据来源、待接接口和报名演练见 [三端页面与业务交接](HANDOFF.md)。
 
 接口定义与导入格式随工程维护。[OpenAPI v1.2.4](packages/contracts/openapi_v1.2.4.yaml) · [学生建档模板 v1.3](packages/contracts/templates/学生建档导入模板_v1.3.xlsx) · [志愿时长模板 v1.5](packages/contracts/templates/志愿时长录入模板_v1.5.xlsx)
 
@@ -61,3 +61,7 @@ pnpm --filter @hongyan/api test:flow
 负责人工作区以 `/managed/:id` 为入口，成员与版本读取、保存和送审沿用真实服务。通知回执按待跟进与已确认分列，现场记录按服务日期查找。退出恢复、七列时长预览、漏记、修复组及异常报告使用合成记录，成员管理预览仅主负责人可见。
 
 后台首页单独统计真实活动待审，其他队列均注明示例来源。后台样例在 `apps/admin/src/management/`。验证老师与技术管理员差异时，另设 `DEMO_ADMIN_PASSWORD`（至少 12 字符，须区别于 `DEMO_STAFF_PASSWORD`）并运行种子命令，将建立合成技术管理员 `demo.admin`。学生档案启停由老师或技术管理员办理，独立后台账号启停仅技术管理员可见。
+
+## 三端页面回归
+
+安装本机 Google Chrome 后，在已配置开发数据库的仓库根目录运行 `pnpm test:pages`。该命令构建三个应用，新建专用 PostgreSQL 测试库，以独立端口启动 API 和两个前端的生产构建，并在独立浏览器会话中验证手机与桌面导航、真实地点修订、示例操作、成员切换及失权。进程结束后清理测试库。类型与服务回归分别运行 `pnpm typecheck` 和 `pnpm --filter @hongyan/api test:flow`。

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { TimelineActivity, TimelineItem } from '@hongyan/contracts';
 import { localTime, palette } from './examples';
 const props = defineProps<{
@@ -11,7 +11,17 @@ const props = defineProps<{
   selected?: string;
 }>();
 const emit = defineEmits<{ choose: [row: TimelineActivity, segment: TimelineItem] }>();
-const width = computed(() => (props.hour ? 1152 : 1008));
+const scroller = ref<HTMLDivElement>();
+const available = ref(1008);
+const nameWidth = 112;
+const width = computed(() => Math.max(props.hour ? 1152 : 504, available.value - nameWidth));
+const resize = new ResizeObserver(([entry]) => {
+  if (entry.contentRect.width) available.value = Math.floor(entry.contentRect.width);
+});
+onMounted(() => {
+  if (scroller.value) resize.observe(scroller.value);
+});
+onUnmounted(() => resize.disconnect());
 const ticks = computed(() =>
   Array.from({ length: props.hour ? 24 : 7 }, (_, i) => ({
     x: (i * width.value) / (props.hour ? 24 : 7),
@@ -55,7 +65,7 @@ function hit(event: MouseEvent, row: TimelineActivity) {
 }
 </script>
 <template>
-  <div class="chart-scroll" tabindex="0" aria-label="可横向滚动的活动时间轴">
+  <div class="chart-scroll" ref="scroller" tabindex="0" aria-label="可横向滚动的活动时间轴">
     <table class="chart">
       <thead>
         <tr>
@@ -155,8 +165,9 @@ function hit(event: MouseEvent, row: TimelineActivity) {
   left: 0;
   z-index: 1;
   background: white;
-  min-width: 108px;
-  max-width: 150px;
+  min-width: 112px;
+  max-width: 112px;
+  width: 112px;
   padding: 4px 8px;
   text-align: left;
   border-right: 1px solid var(--line);
@@ -171,6 +182,7 @@ function hit(event: MouseEvent, row: TimelineActivity) {
   gap: 6px;
   min-height: 44px;
   text-align: left;
+  overflow-wrap: anywhere;
   border: 0;
 }
 .chart i {

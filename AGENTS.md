@@ -1,6 +1,6 @@
 # 工程协作约定
 
-批次 01 已验收。登录改密、活动授权、草稿送审、审核和公开读取已接入真实服务。报名名单和时长审核使用示例数据，后续接入真实接口时沿用现有页面入口。
+批次 01 和批次 02 已完成。登录改密、活动授权、草稿送审、审核和公开读取已接入真实服务。六组页面、示例数据、待接接口与后续验收范围见 [HANDOFF.md](HANDOFF.md)。
 
 ## 目录与归档
 
@@ -8,11 +8,11 @@
 | --- | --- |
 | 根目录 | README 负责启动和验证，DESIGN 负责三端视觉与交互。工作区依赖、脚本和锁文件统一维护。 |
 | `config/` | 共享 TypeScript 和 Vite 设置。各应用保留自己的配置入口。 |
-| `apps/web/src/` | 学生与负责人共用的 Vue 应用。`router.ts` 定义路由，`activities/` 放活动列表、详情与编辑，`registrations/` 放名单。 |
-| `apps/admin/src/` | 独立审核后台。`layouts/` 放 Vben 布局及上游许可，`activities/` 放活动审核，`hours/` 放时长样板。 |
+| `apps/web/src/` | 学生与负责人共用的 Vue 应用。`router.ts` 定义路由，`activities/` 放活动列表、详情与编辑，`registrations/` 放名单与退出恢复。personal/ 放学生记录与反馈。notices/、hours/、incidents/ 放负责人各业务样例。 |
+| `apps/admin/src/` | 独立审核后台。`layouts/` 放 Vben 布局及上游许可，`activities/` 放活动审核，`hours/` 放时长样板。management/ 放分角色管理页与样例，TaskInbox.vue 读取真实待审队列。 |
 | `apps/api/` | NestJS 模块化单体。`src/auth/` 负责账号和会话，`src/activities/` 负责活动读写与审批，`prisma/` 保存模型和迁移，`scripts/` 放种子，`test/` 放集成回归。 |
 | `packages/contracts/` | OpenAPI、`templates/` 中的两份空白导入表、`src/index.ts` 共享请求入口及生成的客户端。 |
-| `packages/ui/src/` | 两个前端实际共用的身份入口、分页、状态组件和样式。 |
+| `packages/ui/src/` | 两个前端共用的身份入口、分页、示例列表详情、样式及 timeline/ 中的 Vue/SVG 日程。 |
 
 新增功能先查同一业务目录。页面专用组件与调用者放在一起，出现跨端复用时再提到共享包。Vue 组件沿用 PascalCase，服务端按职责命名，如 `csrf.controller.ts`。变更目录职责时同步本表。批次索引、规格、计划及验收证据保存在同级本地任务仓库。
 
