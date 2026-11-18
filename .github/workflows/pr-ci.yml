@@ -1,0 +1,63 @@
+name: PR CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# Credentials belong to this disposable CI service only.
+env:
+  DATABASE_URL: postgresql://postgres:ci_only@127.0.0.1:5432/volunteer_ci
+
+jobs:
+  engineering:
+    name: 工程检查
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: pnpm --filter @hongyan/api test:accounts
+
+  regression:
+    name: 业务与页面回归
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      HY_BROWSER: chromium
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci_only
+          POSTGRES_DB: volunteer_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d volunteer_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
+      - name: Prepare regression environment
+        run: |
+          printf 'DATABASE_URL=%s\n' "$DATABASE_URL" > apps/api/.env
+          pnpm exec playwright-core install --with-deps chromium
+      - run: pnpm --filter @hongyan/api test:flow
+      - run: pnpm test:pages
