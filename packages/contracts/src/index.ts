@@ -26,8 +26,12 @@ export class ApiError extends Error {
   }
 }
 
-client.interceptors.error.use((error, response) =>
-  new ApiError(response?.status, isContractError(error) ? error : undefined));
+client.interceptors.error.use((error, response) => {
+  if (response?.status === 401 && !response.url.endsWith('/auth/login')) {
+    window.dispatchEvent(new Event('hongyan-session-expired'));
+  }
+  return new ApiError(response?.status, isContractError(error) ? error : undefined);
+});
 
 /** 两端启动与重试共用的匿名会话。令牌只留在请求层内存中。 */
 export async function openSession() {

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import {computed,ref,watch} from 'vue';
 import {useRoute} from 'vue-router';
-import {getActivityMembers,type Registration,type ActivityRosterPage} from '@hongyan/contracts';
+import {getActivityMembers,type Registration,type Profile,type ActivityRosterPage} from '@hongyan/contracts';
 import Pager from '@hongyan/ui/Pager.vue';
+const props=defineProps<{profile:Profile}>();
 const route=useRoute(),allowed=ref(false),error=ref(''),q=ref(''),state=ref('submitted'),page=ref(1),selected=ref(new Set<string>()),notice=ref('');
 const labels={submitted:'待处理',accepted:'已录取',waitlisted:'候补',rejected:'未录取',withdrawn:'已撤回',exited:'已退出'};
 const samples=computed(()=>Array.from({length:36},(_,i)=>({id:'10000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),version:1,
@@ -19,7 +20,9 @@ function clear(){notice.value=selected.value.size?'筛选或活动已变更，�
 watch([q,state],clear);
 let serial=0;
 async function authorize(){const n=++serial;allowed.value=false;error.value='';clear();
- try{await getActivityMembers({path:{id:String(route.params.id)},throwOnError:true});if(n===serial)allowed.value=true;}
+ try{const result=await getActivityMembers({path:{id:String(route.params.id)},throwOnError:true});
+ if(!result.data.data.items.some(m=>m.account_id===props.profile.account_id))throw Error('当前账号不在本活动管理团队');
+ if(n===serial)allowed.value=true;}
  catch(e){if(n===serial)error.value=e instanceof Error?e.message:'访问失败';}}
 watch(()=>route.params.id,authorize,{immediate:true});
 function toggleAll(checked:boolean){for(const r of result.value.items)if(checked)selected.value.add(r.id);else selected.value.delete(r.id);}

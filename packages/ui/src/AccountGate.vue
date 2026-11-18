@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import { ApiError, changePassword, getProfile, login, logout, openSession, writeHeaders, type Profile } from '@hongyan/contracts';
 
 const props=defineProps<{admin?:boolean}>();
@@ -35,7 +35,19 @@ async function submit(action:'login'|'change'|'logout') {
     message.value=e instanceof Error?e.message:'请求失败';
   } finally {busy.value=false;}
 }
-onMounted(restore);
+function expired() {
+  if (stage.value==='ready' || stage.value==='change') void restore();
+}
+async function refreshIdentity() {
+  if(stage.value!=='ready' || busy.value)return;
+  const current=profile.value?.account_id;
+  try{
+    const result=(await getProfile({throwOnError:true})).data.data;
+    if(stage.value==='ready' && profile.value?.account_id===current)profile.value=result;
+  }catch(e){if(e instanceof ApiError && e.body?.code==='password_change_required') await restore();}
+}
+onMounted(()=>{window.addEventListener('focus',refreshIdentity);window.addEventListener('hongyan-session-expired',expired); void restore();});
+onUnmounted(()=>{window.removeEventListener('focus',refreshIdentity);window.removeEventListener('hongyan-session-expired',expired);});
 </script>
 <template>
   <p v-if="stage==='loading'" role="status">正在读取会话…</p>
@@ -52,7 +64,7 @@ onMounted(restore);
   <template v-else-if="profile">
     <div class="identity"><span>{{ profile.display_name }}</span><button :disabled="busy" @click="submit('logout')">退出登录</button></div>
     <p v-if="props.admin && !profile.roles.some(r=>r==='reviewer'||r==='tech_admin')" role="alert">当前账号无后台权限。</p>
-    <slot v-else :profile="profile" :restore="restore" />
+    <slot v-else :key="profile.account_id" :profile="profile" :restore="restore" />
   </template>
   <p v-if="message" role="alert">{{ message }}</p>
 </template>
