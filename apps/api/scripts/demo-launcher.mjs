@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { chromium } from 'playwright-core';
+import { launchBrowser } from './browser.mjs';
 import { readAccounts } from './demo-accounts.mjs';
 
 const accounts = readAccounts(new URL('../../../.local/', import.meta.url), process.env);
@@ -12,7 +12,7 @@ const escapeHtml = (value) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
   );
 class EntryError extends Error {}
-let browser;
+let launching;
 const template = readFileSync(new URL('./demo-entry.html', import.meta.url), 'utf8');
 const groups = [
   {
@@ -79,10 +79,23 @@ function render(message = '') {
 }
 
 async function enter(id, account) {
-  if (!browser?.isConnected())
-    browser = await chromium.launch({ channel: 'chrome', headless: false });
-  const context = await browser.newContext();
-  const base = account.admin ? 'http://localhost:5174' : 'http://localhost:5173';
+  launching ??= launchBrowser({ headless: false })
+    .then((browser) => {
+      browser.once('disconnected', () => {
+        launching = undefined;
+      });
+      return browser;
+    })
+    .catch((error) => {
+      launching = undefined;
+      throw error;
+    });
+  const browser = await launching;
+  const https = process.env.HY_LOCAL_HTTPS === '1';
+  if (!https && browser.browserType().name() === 'webkit')
+    throw new EntryError('WebKit 登录需要 HTTPS。请按 README 在 HTTPS 模式下启动两个前端和体验入口。');
+  const context = await browser.newContext({ ignoreHTTPSErrors: https });
+  const base = (https ? 'https' : 'http') + '://localhost:' + (account.admin ? 5174 : 5173);
   try {
     const client = context.request;
     const csrf = async () =>
@@ -148,7 +161,7 @@ createServer(async (req, res) => {
     const message =
       e instanceof EntryError
         ? e.message
-        : '体验窗口未能打开，请确认 Chrome 和本地服务可用后重试。';
+        : '体验窗口未能打开，请检查 README 中的浏览器配置及本地服务后重试。';
     res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' }).end(render(message));
   }
 }).listen(port, '127.0.0.1', () => console.log('本地测试入口 ' + origin));

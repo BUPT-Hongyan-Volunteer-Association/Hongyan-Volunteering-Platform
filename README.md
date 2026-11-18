@@ -6,13 +6,97 @@
 
 已完成首次配置的 Mac 可在 Finder 中双击 [一键启动.command](一键启动.command)，启动本地服务并打开身份选择页。重复打开会复用运行中的服务。
 
+团队成员可按操作系统查看 [Windows 本地开发与测试](#windows-本地开发与测试) 或 [macOS 本地开发](#macos-本地开发)。
+
 ## 界面设计入口
 
 修改跨页组件、角色导航或日程交互时，以三端界面规范为准。五个代表页面的 PRD 原图、浏览器截图、示例状态及复验命令集中在界面对照目录。[三端界面规范](DESIGN.md) · [界面对照与复验](docs/ui-samples/README.md) · [工程协作约定](AGENTS.md)
 
-## 启动本地开发
+## 浏览器与访问地址
 
-使用 Node.js 24（版本见 `.nvmrc`）、pnpm 10.32.1 和 PostgreSQL 18。在本机已配置的工作副本中，每个新终端先从工程根目录执行 `source .local/env.sh`。首次使用时克隆组织仓库，在仓库根目录运行下列命令。请先安装上述工具，并确保 `initdb`、`pg_ctl`、`createdb` 在 PATH 中。
+| 使用方式 | 浏览器要求 |
+| --- | --- |
+| 手动登录、浏览和调试网页 | 在常用浏览器打开 [学生与负责人端](http://localhost:5173/) 或 [审核后台](http://localhost:5174/)。使用 Safari 时按下方说明启用 HTTPS。 |
+| 类型检查、构建、服务端回归、体验账号配置测试 | 直接在终端运行。 |
+| 自动页面回归、点选身份自动登录 | 共用 Playwright 启动配置。每次运行选一种浏览器，开始时会打印浏览器名称和版本。 |
+
+默认 `HY_BROWSER=auto`，依次尝试 Playwright Chromium、本机 Microsoft Edge、本机 Google Chrome、Playwright Firefox，启动成功即停止尝试。已有 Edge 或 Chrome 的成员可直接运行。也可在安装项目依赖后执行 `pnpm exec playwright-core install firefox`，将末尾的名称换成 `chromium` 或 `webkit` 即可安装对应引擎。Windows PowerShell 中可使用 `pnpm.cmd`。Firefox 和 WebKit 选项使用 Playwright 配套构建。
+
+要复现某个浏览器的问题，显式指定 `HY_BROWSER` 为 `chromium`、`msedge`、`chrome`、`firefox` 或 `webkit`。指定项启动失败会报错。以下示例使用已安装的 Edge，同一设置也适用于 `demo:open`。
+
+| 环境 | 在仓库根目录执行 |
+| --- | --- |
+| macOS 终端 | `HY_BROWSER=msedge pnpm test:pages` |
+| Windows PowerShell | 先执行 `$env:HY_BROWSER = 'msedge'`，再执行 `pnpm.cmd test:pages`。用 `Remove-Item Env:HY_BROWSER` 恢复自动选择。 |
+
+`localhost` 和 `127.0.0.1` 指打开链接的那台电脑。每位成员在自己的电脑启动服务后，都能使用上表的本地地址。团队共用同一套环境时，请使用该环境对外提供的网址。
+
+### 使用 Safari 或 WebKit 在本机登录
+
+页面回归会自动通过 HTTPS 访问临时测试服务。手动使用 Safari 或通过 WebKit 体验身份时，也需要 HTTPS，浏览器才能保存安全会话 Cookie。在启动两个前端和 `demo:open` 的每个终端设置以下变量，再运行各自的启动命令。使用同样的设置也可以在 Edge、Chrome 和 Firefox 中验证 HTTPS。
+
+| macOS 终端 | Windows PowerShell |
+| --- | --- |
+| `export HY_LOCAL_HTTPS=1` | `$env:HY_LOCAL_HTTPS = '1'` |
+
+如服务已运行，先关闭对应进程再按新设置启动。此时请打开 [学生与负责人端](https://localhost:5173/) 或 [审核后台](https://localhost:5174/)。开发服务会生成本机自签名证书，首次手动访问时请核对地址为 `localhost` 后允许访问。身份选择页仍在 [本机 5180 端口](http://127.0.0.1:5180/)。关闭终端即可恢复默认设置。
+
+WebKit 需显式设置 `HY_BROWSER=webkit`。本次 macOS 验证通过了 WebKit 的 HTTPS 登录及刷新后会话保持，但其自动鼠标点击在此机器上有坐标偏移，完整页面回归尚未通过。日常自动回归可使用 Edge、Chrome 或 Playwright Firefox。
+
+## Windows 本地开发与测试
+
+在 64 位 Windows 电脑上安装 Node.js 24.x（具体版本见 `.nvmrc`）、PostgreSQL 18。页面回归和免手输登录的浏览器配置见上表。使用仓库根目录作为 PowerShell 的工作目录。以下命令使用 Windows 的 `.cmd` 入口。数据库命令需要将 PostgreSQL 的 `bin` 目录加入 PATH。
+
+### 首次配置
+
+首次配置时，启动 PostgreSQL 的 Windows 服务。下例使用本机端口 5432，以安装时的 postgres 管理账号创建专用开发角色和数据库。测试会新建并清理独立数据库，因此开发角色需要建库权限。已有符合条件的角色和数据库可直接使用。
+
+```powershell
+npm.cmd install --global pnpm@10.32.1
+createuser -h 127.0.0.1 -p 5432 -U postgres --createdb -P volunteer_dev
+createdb -h 127.0.0.1 -p 5432 -U postgres -O volunteer_dev volunteer_dev
+if (!(Test-Path apps/api/.env)) { Copy-Item apps/api/.env.example apps/api/.env }
+notepad apps/api/.env
+```
+
+在 `apps/api/.env` 中把 `DATABASE_URL` 设为 `postgresql://volunteer_dev:你的密码@127.0.0.1:5432/volunteer_dev`，替换为实际密码并对特殊字符做百分号编码。示例文件默认使用 55432，填写时以本机服务端口为准。
+
+```powershell
+pnpm.cmd install --frozen-lockfile
+pnpm.cmd contracts:generate
+pnpm.cmd db:generate
+pnpm.cmd db:migrate
+```
+
+### 自动回归
+
+保持 PostgreSQL 服务运行，在工程根目录执行下列命令。
+
+```powershell
+pnpm.cmd typecheck
+pnpm.cmd --filter @hongyan/api test:accounts
+pnpm.cmd --filter @hongyan/api test:flow
+pnpm.cmd test:pages
+```
+
+服务和页面回归会自行准备测试账号、建库并启动测试服务。页面回归会先构建工程。运行完整套件需要开发数据库角色具有建库权限。
+
+### 手动体验
+
+在三个 PowerShell 窗口分别运行 `pnpm.cmd dev:api`、`pnpm.cmd dev:web`、`pnpm.cmd dev:admin`。学生与负责人访问 [5173](http://localhost:5173/)，审核后台访问 [5174](http://localhost:5174/)。
+
+首次准备手动体验账号时，另开一个 PowerShell 窗口，先运行 `pnpm.cmd build`，再依次执行以下命令，输入至少 12 个字符的本地体验密码。服务就绪后打开 [身份选择页](http://127.0.0.1:5180/)。
+
+```powershell
+$credential = Get-Credential -UserName demo.teacher -Message '设置本地体验审核员密码'
+$env:DEMO_STAFF_PASSWORD = $credential.GetNetworkCredential().Password
+pnpm.cmd --filter @hongyan/api db:seed
+pnpm.cmd demo:open
+```
+
+## macOS 本地开发
+
+使用 Node.js 24（版本见 `.nvmrc`）、pnpm 10.32.1 和 PostgreSQL 18。首次使用时安装上述工具，确保 `initdb`、`pg_ctl`、`createdb` 在 PATH 中，再克隆仓库并从仓库根目录运行下列命令。已有工作副本若使用 `.local/env.sh` 配置工具路径，每次打开终端时先执行 `source .local/env.sh`。
 
 ```sh
 pnpm install --frozen-lockfile
@@ -42,7 +126,7 @@ cp apps/api/.env.example apps/api/.env
 
 ## 本地免手输登录测试入口
 
-先启动上表三个服务，并安装 Google Chrome。在工程根目录另开终端运行 `pnpm demo:open`，打开 [本地测试入口](http://127.0.0.1:5180/)，点选身份即可进入相应系统。每次选择都会打开独立浏览器会话，可同时验证多个角色。
+先启动上表三个服务，并按“浏览器与访问地址”准备一种可用的浏览器。在工程根目录另开终端运行 `pnpm demo:open`，打开 [本地测试入口](http://127.0.0.1:5180/)，点选身份即可进入相应系统。每次选择都会打开独立浏览器会话，可同时验证多个角色。
 
 新副本先按上文创建体验账号。首次启动入口时使用与种子相同的 `DEMO_STAFF_PASSWORD`，如已创建技术管理员也提供 `DEMO_ADMIN_PASSWORD`。可通过环境变量或本机 `.local/demo.env` 提供。启动器将体验凭证保存到被 Git 忽略的 `.local/demo-logins.json`，已有配置中各身份的密码优先。后续创建技术管理员后，设置对应的 `DEMO_ADMIN_PASSWORD` 并重启入口，即可补入缺少的管理员身份。学生首次使用时会自动走首登改密流程，已手动改密的体验账号需在该本地文件填入现有密码。入口只监听本机，关闭启动器用 Ctrl+C。
 
@@ -76,4 +160,4 @@ pnpm --filter @hongyan/api test:flow
 
 ## 三端页面回归
 
-安装本机 Google Chrome 后，在已配置开发数据库的仓库根目录运行 `pnpm test:pages`。该命令构建三个应用，新建专用 PostgreSQL 测试库，以独立端口启动 API 和两个前端的生产构建，并在独立浏览器会话中验证手机与桌面导航、真实地点修订、示例操作、成员切换及失权。进程结束后清理测试库。类型与服务回归分别运行 `pnpm typecheck` 和 `pnpm --filter @hongyan/api test:flow`。
+在已配置开发数据库的仓库根目录运行 `pnpm test:pages`。日常手动访问和其他测试的要求见[浏览器与访问地址](#浏览器与访问地址)。该命令构建三个应用，新建专用 PostgreSQL 测试库，以独立端口启动 API 和两个前端的生产构建，并在独立浏览器会话中验证手机与桌面导航、真实地点修订、示例操作、成员切换及失权。进程结束后清理测试库。类型与服务回归分别运行 `pnpm typecheck` 和 `pnpm --filter @hongyan/api test:flow`。

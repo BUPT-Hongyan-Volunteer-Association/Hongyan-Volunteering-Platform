@@ -14,15 +14,16 @@ test('已有体验配置只补缺失管理员，重启保留手动凭证', () =>
     const original = readAccounts(dir, { DEMO_STAFF_PASSWORD: 'teacher-fixture' });
     original['demo.teacher'].password = 'edited-fixture';
     writeFileSync(file, JSON.stringify(original));
-    const before = statSync(file);
+    const before = statSync(file, { bigint: true });
     const merged = readAccounts(dir, { DEMO_ADMIN_PASSWORD: 'admin-fixture' });
     assert.deepEqual(merged, {
       ...original,
       'demo.admin': { label: '技术管理员', admin: true, password: 'admin-fixture' },
     });
     const after = statSync(file, { bigint: true });
-    assert.notEqual(Number(after.ino), before.ino);
-    assert.equal(Number(after.mode & 0o777n), 0o600);
+    assert.notEqual(after.ino, before.ino);
+    // Windows uses ACLs to control access to files.
+    if (process.platform !== 'win32') assert.equal(Number(after.mode & 0o777n), 0o600);
     assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), merged);
     assert.deepEqual(readAccounts(dir, { DEMO_ADMIN_PASSWORD: 'different' }), merged);
     assert.equal(statSync(file, { bigint: true }).mtimeNs, after.mtimeNs);

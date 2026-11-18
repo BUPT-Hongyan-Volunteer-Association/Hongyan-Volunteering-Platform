@@ -40,14 +40,23 @@
 
 ## 复验
 
-在已完成本机配置的工程根目录运行以下命令。日常回归直接运行 `pnpm test:pages`。需要更新对照图时，按下方命令另存原始截图，核对页面状态后再更新对应的正式图片。页面回归使用独立数据库，覆盖三端导航、名单跨页选择、时长逐行核实、日期筛选、四种时间刻度以及从审核和详情返回日程。
+完成 [macOS 或 Windows 环境配置](../../README.md) 后，在工程根目录运行回归。日常回归直接运行 `pnpm test:pages`。需要更新对照图时，按下方命令另存原始截图，核对页面状态后再更新对应的正式图片。页面回归使用独立数据库，覆盖三端导航、名单跨页选择、时长逐行核实、日期筛选、四种时间刻度以及从审核和详情返回日程。
+
+macOS 示例
 
 ```sh
-source .local/env.sh
 pnpm typecheck
 mkdir -p .local/ui-verification
 UI_CAPTURE_DIR="$PWD/.local/ui-verification" pnpm test:pages
 pnpm --filter @hongyan/api test:flow
+```
+
+Windows PowerShell 示例
+
+```powershell
+New-Item -ItemType Directory -Force .local/ui-verification | Out-Null
+$env:UI_CAPTURE_DIR = (Resolve-Path .local/ui-verification).Path
+try { pnpm.cmd test:pages } finally { Remove-Item Env:UI_CAPTURE_DIR }
 ```
 
 [三端界面规范](../../DESIGN.md) · [页面回归](../../apps/api/test/pages.test.mjs)

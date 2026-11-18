@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { createApp } from '../dist/app.js';
+import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { Database } from '../dist/database.js';
 
 function browser(base) {
@@ -54,10 +54,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     source.pathname = '/' + name;
     process.env.DATABASE_URL = source.href;
     const staffPassword = randomUUID();
-    execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], { stdio: 'pipe' });
-    execFileSync(process.execPath, ['scripts/seed.mjs'], {
-      env: { ...process.env, DEMO_STAFF_PASSWORD: staffPassword },
-    });
+    prepareTestDatabase({ DEMO_STAFF_PASSWORD: staffPassword });
     app = await createApp();
     await app.listen(0, '127.0.0.1');
     const db = app.get(Database);

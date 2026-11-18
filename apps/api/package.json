@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "dev": "tsc && node --env-file=.env dist/main.js",
+    "test:accounts": "node --test test/demo-accounts.test.mjs",
     "test:flow": "tsc && node --env-file=.env --test test/activity-flow.test.mjs",
     "db:seed": "node --env-file=.env scripts/seed.mjs",
     "test:pages": "node --env-file=.env --test test/pages.test.mjs"

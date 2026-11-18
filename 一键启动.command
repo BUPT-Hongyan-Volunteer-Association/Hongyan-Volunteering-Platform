@@ -14,7 +14,10 @@ if [[ -f .local/pgdata/PG_VERSION ]]; then
     pg_ctl -D .local/pgdata -l .local/postgres.log -o "-h 127.0.0.1 -p 55432" -w start || fail "数据库启动失败，请查看 .local/postgres.log。"
   fi
 fi
-ready() { curl --noproxy '*' --max-time 2 -fsS "$1" 2>/dev/null | grep -Fq "$2"; }
+scheme=http
+if [[ "${HY_LOCAL_HTTPS:-0}" == 1 ]]; then scheme=https; fi
+# Readiness probes only connect to the local development services.
+ready() { curl --insecure --noproxy '*' --max-time 2 -fsS "$1" 2>/dev/null | grep -Fq "$2"; }
 start() {
   local task="$1" port="$2" url="$3" marker="$4" log=".local/start-logs/${1/:/-}.log"
   if ready "$url" "$marker"; then echo "$task 已就绪"; return; fi
@@ -37,8 +40,8 @@ start() {
   fail "$task 启动失败，请查看 $PWD/$log。"
 }
 start dev:api 3000 http://127.0.0.1:3000/api/v1/auth/csrf csrf_token
-start dev:web 5173 http://localhost:5173/ '/src/main.ts'
-start dev:admin 5174 http://localhost:5174/ '/src/main.ts'
+start dev:web 5173 "$scheme://localhost:5173/" '/src/main.ts'
+start dev:admin 5174 "$scheme://localhost:5174/" '/src/main.ts'
 start demo:open 5180 http://127.0.0.1:5180/ 选择测试身份
 open http://127.0.0.1:5180/
 echo "身份选择页已打开。"

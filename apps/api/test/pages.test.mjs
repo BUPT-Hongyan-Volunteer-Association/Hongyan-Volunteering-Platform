@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { chromium } from 'playwright-core';
+import { launchBrowser } from '../scripts/browser.mjs';
 import { preview } from 'vite';
 import { createApp } from '../dist/app.js';
+import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { Database } from '../dist/database.js';
 
 const link = (page, name) => page.getByRole('link', { name, exact: true });
@@ -30,7 +30,7 @@ async function pickOption(page, label, option) {
 }
 
 async function signIn(browser, origin, username, password, width) {
-  const context = await browser.newContext({ viewport: { width, height: 900 } });
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width, height: 900 } });
   const page = await context.newPage();
   page.setDefaultTimeout(8000);
   await page.goto(origin);
@@ -106,13 +106,12 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
     process.env.DATABASE_URL = source.href;
     const password = 'T1' + randomUUID();
     const adminPassword = 'A2' + randomUUID();
-    execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], { stdio: 'pipe' });
-    execFileSync(process.execPath, ['scripts/seed.mjs'], {
-      env: { ...process.env, DEMO_STAFF_PASSWORD: password, DEMO_ADMIN_PASSWORD: adminPassword },
-    });
+    prepareTestDatabase({ DEMO_STAFF_PASSWORD: password, DEMO_ADMIN_PASSWORD: adminPassword });
     api = await createApp();
     await api.listen(0, '127.0.0.1');
     const apiOrigin = await api.getUrl();
+    // All engines receive Secure session cookies over HTTPS, including on loopback.
+    process.env.HY_LOCAL_HTTPS = '1';
     for (const app of ['web', 'admin']) {
       const root = resolve('..', app);
       const server = await preview({
@@ -127,8 +126,8 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       });
       servers.push(server);
     }
-    const [web, admin] = servers.map((s) => 'http://127.0.0.1:' + s.httpServer.address().port);
-    browser = await chromium.launch({ channel: 'chrome', headless: true });
+    const [web, admin] = servers.map((s) => 'https://127.0.0.1:' + s.httpServer.address().port);
+    browser = await launchBrowser({ headless: true });
     const student = await signIn(browser, web, '0000000001', password, 390);
     const owner = await signIn(browser, web, '0000000002', password, 390);
     const teacher = await signIn(browser, admin, 'demo.teacher', password, 1440);
@@ -347,14 +346,16 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       await focus();
       await verified;
       assert.equal(await title.inputValue(), '尚未保存的标题');
-      await owner.context().setOffline(true);
+      // Fail the revalidation request even in engines that keep loopback reachable offline.
+      const membership = '**/organizer/activities/' + first.id + '/members';
+      await owner.route(membership, (route) => route.abort('internetdisconnected'));
       try {
         await focus();
         await visible(owner.getByRole('alert'));
         assert.equal(await title.inputValue(), '尚未保存的标题');
         assert.equal(await button(owner, '保存草稿').isEnabled(), false);
       } finally {
-        await owner.context().setOffline(false);
+        await owner.unroute(membership);
       }
       await button(owner, '重试').click();
       await visible(owner.getByRole('button', { name: '保存草稿', disabled: false }));
@@ -829,28 +830,21 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
         assert.equal(await teacher.locator('.time-choices').count(), 0);
         await visible(teacher.getByRole('complementary', { name: '时段详情' }));
       }
-      await teacher.setViewportSize({ width: 390, height: 844 });
-      const cdp = await teacher.context().newCDPSession(teacher);
+      const touch = await browser.newContext({
+        ignoreHTTPSErrors: true,
+        viewport: { width: 390, height: 844 },
+        hasTouch: true,
+        storageState: await teacher.context().storageState(),
+      });
       try {
-        await cdp.send('Emulation.setTouchEmulationEnabled', {
-          enabled: true,
-          maxTouchPoints: 1,
-        });
-        await teacher.goto(admin + '/schedule?date=2026-11-18&unit=week&view=chart');
-        const target = teacher.getByRole('button', { name: /校园服务甲.*14:15 至/ });
-        await target.scrollIntoViewIfNeeded();
-        const bar = await target.boundingBox();
-        await cdp.send('Input.dispatchTouchEvent', {
-          type: 'touchStart',
-          touchPoints: [{ x: bar.x + bar.width / 2, y: bar.y + bar.height / 2 }],
-        });
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-        await teacher.waitForURL((u) => u.searchParams.get('slot')?.includes('T14:15'));
-        await visible(teacher.getByRole('complementary', { name: '时段详情' }));
-        assert.equal(await teacher.locator('.time-choices').count(), 0);
+        const phone = await touch.newPage();
+        await phone.goto(admin + '/schedule?date=2026-11-18&unit=week&view=chart');
+        await phone.getByRole('button', { name: /校园服务甲.*14:15 至/ }).tap();
+        await phone.waitForURL((u) => u.searchParams.get('slot')?.includes('T14:15'));
+        await visible(phone.getByRole('complementary', { name: '时段详情' }));
+        assert.equal(await phone.locator('.time-choices').count(), 0);
       } finally {
-        await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
-        await cdp.detach();
+        await touch.close();
       }
       await teacher.setViewportSize({ width: 1440, height: 900 });
     });
