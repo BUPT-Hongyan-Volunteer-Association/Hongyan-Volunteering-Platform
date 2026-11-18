@@ -7,7 +7,9 @@
     "./theme.css": "./src/theme.css",
     "./AccountGate.vue": "./src/AccountGate.vue",
     "./Pager.vue": "./src/Pager.vue",
-    "./pages.css": "./src/pages.css"
+    "./pages.css": "./src/pages.css",
+    "./PreviewRecords.vue": "./src/PreviewRecords.vue",
+    "./preview": "./src/preview.ts"
   },
   "dependencies": {
     "@hongyan/contracts": "workspace:*",

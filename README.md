@@ -55,3 +55,5 @@ pnpm --filter @hongyan/api test:flow
 回归命令需要有建库权限的本地数据库角色，会创建并清理独立测试库，验证发布与修订、授权、幂等重试、并发冲突和审核历史分页。目录及归档规则见 [AGENTS.md](AGENTS.md)，界面约定见 [DESIGN.md](DESIGN.md)。
 
 后台布局取自 Vue Vben Admin v5.7.0 的 Element Plus 入口与布局组件，上游提交为 `63a38dce49ba109f61607994e21ba921d8e970e9`。[MIT 许可](apps/admin/src/layouts/vben/LICENSE)
+
+学生从「我的报名」查看报名及退出恢复进度，从「通知」查看回执状态，从「我的」打开时长、本人记录与反馈、账号设置。个人业务样例位于 `apps/web/src/personal/`，标有示例数据。账号信息来自当前真实会话。

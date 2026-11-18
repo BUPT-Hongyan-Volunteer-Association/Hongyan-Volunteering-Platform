@@ -5,6 +5,7 @@ import ActivityEditor from './activities/ActivityEditor.vue';
 import ActivityWorkspace from './activities/ActivityWorkspace.vue';
 import Roster from './registrations/Roster.vue';
 import PersonalPage from './PersonalPage.vue';
+import StudentRecords from './personal/StudentRecords.vue';
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -23,7 +24,11 @@ export const router = createRouter({
       ],
     },
     { path: '/mine', component: PersonalPage, meta: { profile: true } },
-    { path: '/registrations', component: PersonalPage, meta: { profile: true } },
-    { path: '/notices', component: PersonalPage, meta: { profile: true } },
+    { path: '/mine/settings', component: PersonalPage, meta: { profile: true } },
+    { path: '/mine/example-activity', component: PersonalPage, meta: { profile: true } },
+    { path: '/registrations/:item?', name: 'registrations', component: StudentRecords },
+    { path: '/notices/:item?', name: 'notices', component: StudentRecords },
+    { path: '/mine/hours/:item?', name: 'hours', component: StudentRecords },
+    { path: '/mine/feedback/:item?', name: 'feedback', component: StudentRecords },
   ],
 });

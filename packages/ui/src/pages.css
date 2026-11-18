@@ -79,3 +79,8 @@ dt {
   main a, main button { min-width: 44px; }
   .identity button { min-height: 44px; }
 }
+.sample-label { width: fit-content; color: #44566f; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; font-size: 13px; }
+.preview-form { display: grid; gap: 12px; max-width: 34rem; margin: 16px 0; }
+.preview-form label { display: grid; gap: 4px; }
+.preview-form textarea { font: inherit; min-height: 5em; border: 1px solid #b5c1d1; border-radius: 6px; padding: 8px; }
+.preview-form button { justify-self: start; }
