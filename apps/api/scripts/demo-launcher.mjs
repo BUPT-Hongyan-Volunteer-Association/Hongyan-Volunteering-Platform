@@ -1,51 +1,8 @@
 import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
+import { readAccounts } from './demo-accounts.mjs';
 
-const directory = new URL('../../../.local/', import.meta.url);
-const config = new URL('demo-logins.json', directory);
-function readAccounts() {
-  try {
-    return JSON.parse(readFileSync(config, 'utf8'));
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-  }
-  const staff = process.env.DEMO_STAFF_PASSWORD;
-  if (!staff)
-    throw Error('请设置建种时使用的 DEMO_STAFF_PASSWORD 后重新启动。');
-  const accounts = {};
-  for (const [i, label] of [
-    '体验学生',
-    '甲负责人',
-    '乙负责人',
-    '活动协作者',
-  ].entries())
-    accounts[String(i + 1).padStart(10, '0')] = {
-      label,
-      admin: false,
-      password: 'T1' + randomUUID(),
-    };
-  accounts['demo.teacher'] = {
-    label: '老师审核员',
-    admin: true,
-    password: staff,
-  };
-  accounts['demo.dual'] = { label: '兼任审核员', admin: true, password: staff };
-  if (process.env.DEMO_ADMIN_PASSWORD)
-    accounts['demo.admin'] = {
-      label: '技术管理员',
-      admin: true,
-      password: process.env.DEMO_ADMIN_PASSWORD,
-    };
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  writeFileSync(config, JSON.stringify(accounts, null, 2), {
-    mode: 0o600,
-    flag: 'wx',
-  });
-  return accounts;
-}
-const accounts = readAccounts();
+const accounts = readAccounts(new URL('../../../.local/', import.meta.url), process.env);
 const port = Number(process.env.DEMO_LAUNCHER_PORT || 5180);
 const origin = 'http://127.0.0.1:' + port;
 const escapeHtml = (value) =>

@@ -62,12 +62,20 @@ const rows = computed(() =>
     }))
     .filter((r) => r.segments.length),
 );
-const selected = computed(() => rows.value.find((r) => r.activity_id === route.query.item));
-const segment = computed(
-  () =>
-    selected.value?.segments.find((s) => s.occurrence_key === route.query.slot) ??
-    selected.value?.segments[0],
+const activity = computed(() => rows.value.find((r) => r.activity_id === route.query.item));
+const segment = computed(() =>
+  route.query.slot === undefined
+    ? activity.value?.segments[0]
+    : activity.value?.segments.find((s) => s.occurrence_key === route.query.slot),
 );
+const selected = computed(() => (segment.value ? activity.value : undefined));
+const selectionMessage = ref('');
+watch([page, selected, () => route.query.item, () => route.query.slot], () => {
+  if (!page.value || !route.query.item || selected.value) return;
+  selectionMessage.value =
+    route.query.slot !== undefined ? '所选时段已移出当前窗口' : '所选活动已移出当前筛选。';
+  void router.replace({ query: { ...route.query, item: undefined, slot: undefined } });
+});
 const availableStates = computed(() =>
   Object.entries(statusLabels).filter(
     ([key]) => managed.value || ['published', 'cancelled', 'completed'].includes(key),
@@ -90,11 +98,13 @@ async function load() {
   }
 }
 function set(key: string, value: string) {
+  selectionMessage.value = '';
   void router.push({ query: { ...route.query, [key]: value || undefined } });
 }
 const valueOf = (event: Event) => (event.target as HTMLInputElement).value;
 let opener: Element | null = null;
 async function choose(r: TimelineActivity, s: TimelineItem) {
+  selectionMessage.value = '';
   opener = document.activeElement;
   await router.push({ query: { ...route.query, item: r.activity_id, slot: s.occurrence_key } });
   await nextTick();
@@ -236,7 +246,7 @@ onUnmounted(() => {
   <p v-if="loading" role="status">正在读取活动范围…</p>
   <p v-else-if="error" role="alert">{{ error }} <button @click="load">重新读取</button></p>
   <template v-else>
-    <p v-if="route.query.item && !selected" role="status">所选活动已移出当前筛选。</p>
+    <p v-if="selectionMessage" role="status">{{ selectionMessage }}</p>
     <p v-if="!rows.length">该窗口和筛选条件下没有活动</p>
     <div v-else class="schedule-view" :class="{ split: selected && !mobile }">
       <section v-show="!mobile || !selected" aria-label="筛选结果">

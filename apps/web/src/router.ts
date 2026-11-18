@@ -26,7 +26,7 @@ export const router = createRouter({
           name: 'organizer-section',
           component: OrganizerSection,
         },
-        { path: 'edit', component: ActivityEditor },
+        { path: 'edit', name: 'activity-edit', component: ActivityEditor },
         { path: 'roster', name: 'roster', component: Roster },
       ],
     },

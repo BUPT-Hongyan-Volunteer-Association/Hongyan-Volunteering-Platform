@@ -30,6 +30,36 @@ async function signIn(browser, origin, username, password, width) {
   return page;
 }
 
+// Hold one real API response until the newer route has finished rendering.
+async function holdResponse(page, pattern) {
+  const received = Promise.withResolvers(),
+    release = Promise.withResolvers(),
+    delivered = Promise.withResolvers();
+  await page.route(
+    pattern,
+    async (route) => {
+      const response = await route.fetch();
+      received.resolve();
+      await release.promise;
+      await route.fulfill({ response });
+      delivered.resolve();
+    },
+    { times: 1 },
+  );
+  return {
+    received: received.promise,
+    release: async () => {
+      release.resolve();
+      await delivered.promise;
+    },
+  };
+}
+async function settleRender(page) {
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+}
+
 async function fits(page) {
   assert.ok(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
@@ -249,6 +279,109 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       for (const p of [student, owner, tech]) p.off('request', collect);
     });
 
+    await t.test('编辑中恢复焦点和网络后保留输入，后台核验失败时暂停保存', async () => {
+      await owner.goto(web + '/managed/' + first.id + '/edit');
+      const title = owner.getByLabel('活动标题', { exact: true });
+      await title.fill('尚未保存的标题');
+      const focus = () => owner.evaluate(() => window.dispatchEvent(new Event('focus')));
+      const verified = owner.waitForResponse((r) =>
+        r.url().endsWith('/organizer/activities/' + first.id),
+      );
+      await focus();
+      await verified;
+      assert.equal(await title.inputValue(), '尚未保存的标题');
+      await owner.context().setOffline(true);
+      try {
+        await focus();
+        await visible(owner.getByRole('alert'));
+        assert.equal(await title.inputValue(), '尚未保存的标题');
+        assert.equal(await button(owner, '保存草稿').isEnabled(), false);
+      } finally {
+        await owner.context().setOffline(false);
+      }
+      await button(owner, '重试').click();
+      await visible(owner.getByRole('button', { name: '保存草稿', disabled: false }));
+      assert.equal(await title.inputValue(), '尚未保存的标题');
+    });
+
+    await t.test('管理活动的第二页及三种子页面保留来源', async () => {
+      const account = await db.account.findUniqueOrThrow({ where: { username: '0000000002' } });
+      const revision = await db.activityRevision.findFirstOrThrow({
+        where: { activity_id: first.id },
+      });
+      await owner.goto(web + '/managed');
+      await visible(link(owner, '校园服务甲'));
+      assert.equal(await button(owner, '下一页').count(), 0);
+      for (let i = 1; i <= 20; i++) {
+        await db.activity.create({
+          data: {
+            activity_code: 'TEST-' + String(i).padStart(2, '0'),
+            status: 'draft',
+            working_revision: 1,
+            members: { create: { account_id: account.id, member_role: 'owner' } },
+            revisions: {
+              create: {
+                revision: 1,
+                revision_state: 'draft',
+                created_by: account.id,
+                content: { ...revision.content, title: '分页样例' + i },
+              },
+            },
+          },
+        });
+      }
+      await owner.reload();
+      await visible(button(owner, '下一页'));
+      assert.equal(await owner.locator('main li').count(), 20);
+      await button(owner, '下一页').click();
+      await visible(link(owner, '分页样例20'));
+      assert.equal(await owner.locator('main li').count(), 1);
+      const slow = await holdResponse(
+        owner,
+        (url) =>
+          url.pathname.endsWith('/organizer/activities') && url.searchParams.get('page') === '1',
+      );
+      await button(owner, '上一页').click();
+      try {
+        await slow.received;
+        await owner.goBack();
+        await visible(link(owner, '分页样例20'));
+      } finally {
+        await slow.release();
+      }
+      await settleRender(owner);
+      assert.equal(await owner.locator('main li').count(), 1);
+      for (const entry of ['分页样例20', '编辑与送审', '报名名单']) {
+        await link(owner, entry).click();
+        await visible(link(owner, '返回我的管理活动'));
+        await owner.goBack();
+        await visible(link(owner, '分页样例20'));
+        await link(owner, entry).click();
+        await link(owner, '返回我的管理活动').click();
+        await visible(link(owner, '分页样例20'));
+        assert.equal(new URL(owner.url()).searchParams.get('page'), '2');
+      }
+    });
+
+    await t.test('手机和桌面的失效时段链接保留筛选并关闭详情', async () => {
+      for (const width of [390, 1440]) {
+        await student.setViewportSize({ width, height: 900 });
+        await student.goto(web + '/schedule?unit=hour&view=chart&date=2026-11-21&status=published');
+        const afternoon = student.getByRole('button', { name: /校园服务甲.*14:15/ });
+        await afternoon.focus();
+        await student.keyboard.press('Enter');
+        await visible(student.getByRole('complementary', { name: '时段详情' }));
+        const url = new URL(student.url());
+        url.searchParams.set('date', '2026-11-18');
+        await student.goto(url.href);
+        await visible(student.getByText('所选时段已移出当前窗口', { exact: true }));
+        await student.waitForURL((u) => !u.searchParams.has('slot') && !u.searchParams.has('item'));
+        assert.equal(new URL(student.url()).searchParams.get('status'), 'published');
+        assert.equal(await student.locator('.schedule-detail').count(), 0);
+        await visible(student.getByRole('button', { name: /校园服务甲.*09:15/ }));
+      }
+    });
+
     await t.test('切换活动清空名单选择，回收成员后移除已显示内容', async () => {
       const helper = await signIn(browser, web, '0000000004', password, 390);
       const second = await db.activity.findUniqueOrThrow({
@@ -258,18 +391,36 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       await db.activityMember.create({
         data: { activity_id: second.id, account_id: account.id, member_role: 'collaborator' },
       });
+      await helper.goto(web + '/managed/' + first.id);
+      await visible(helper.getByRole('heading', { name: '校园服务甲', exact: true }));
+      const delayed = await holdResponse(helper, '**/organizer/activities/' + first.id);
+      await helper.evaluate(() => window.dispatchEvent(new Event('focus')));
+      try {
+        await delayed.received;
+        await helper.evaluate((id) => {
+          history.pushState(history.state, '', '/managed/' + id);
+          window.dispatchEvent(new PopStateEvent('popstate', { state: history.state }));
+        }, second.id);
+        await visible(helper.getByRole('heading', { name: '校园服务乙', exact: true }));
+      } finally {
+        await delayed.release();
+      }
+      await settleRender(helper);
+      assert.equal(await helper.locator('.section-heading h1').innerText(), '校园服务乙');
       await helper.goto(web + '/managed/' + first.id + '/roster');
       await helper.getByLabel('选择本页').check();
       await link(helper, '返回我的管理活动').click();
       await link(helper, '校园服务乙').click();
       await link(helper, '报名名单').click();
       await visible(helper.getByText(/已选 0 人/));
+      await link(helper, '编辑与送审').click();
+      await visible(helper.getByLabel('活动标题', { exact: true }));
       await db.activityMember.delete({
         where: { activity_id_account_id: { activity_id: second.id, account_id: account.id } },
       });
       await helper.evaluate(() => window.dispatchEvent(new Event('focus')));
       await visible(helper.getByRole('alert'));
-      assert.equal(await helper.getByLabel('选择本页').count(), 0);
+      assert.equal(await helper.getByLabel('活动标题', { exact: true }).count(), 0);
       await student.goto(web + '/managed/' + first.id + '/roster');
       await visible(student.getByText('当前账号无活动管理权限。'));
       await student.goto(admin);

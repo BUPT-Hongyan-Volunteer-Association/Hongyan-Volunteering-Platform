@@ -38,7 +38,7 @@ cp apps/api/.env.example apps/api/.env
 
 先启动上表三个服务，并安装 Google Chrome。在工程根目录另开终端运行 `pnpm demo:open`，打开 [本地测试入口](http://127.0.0.1:5180/)，点选身份即可进入相应系统。每次选择都会打开独立浏览器会话，可同时验证多个角色。
 
-新副本先按上文创建体验账号。首次启动入口时使用与种子相同的 `DEMO_STAFF_PASSWORD`，如已创建技术管理员也提供 `DEMO_ADMIN_PASSWORD`。可通过环境变量或本机 `.local/demo.env` 提供。启动器将体验凭证保存到被 Git 忽略的 `.local/demo-logins.json`，原有配置优先。学生首次使用时会自动走首登改密流程，已手动改密的体验账号需在该本地文件填入现有密码。入口只监听本机，关闭启动器用 Ctrl+C。
+新副本先按上文创建体验账号。首次启动入口时使用与种子相同的 `DEMO_STAFF_PASSWORD`，如已创建技术管理员也提供 `DEMO_ADMIN_PASSWORD`。可通过环境变量或本机 `.local/demo.env` 提供。启动器将体验凭证保存到被 Git 忽略的 `.local/demo-logins.json`，已有配置中各身份的密码优先。后续创建技术管理员后，设置对应的 `DEMO_ADMIN_PASSWORD` 并重启入口，即可补入缺少的管理员身份。学生首次使用时会自动走首登改密流程，已手动改密的体验账号需在该本地文件填入现有密码。入口只监听本机，关闭启动器用 Ctrl+C。
 
 ## 体验与验证
 

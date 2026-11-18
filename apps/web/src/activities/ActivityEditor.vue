@@ -17,6 +17,7 @@ import {
   type ActivityRevision,
 } from '@hongyan/contracts';
 
+const props = defineProps<{ writesPaused?: boolean }>();
 const route = useRoute(),
   router = useRouter(),
   id = computed(() => String(route.params.id ?? ''));
@@ -164,7 +165,7 @@ function payload(partial: boolean) {
 }
 const command = createCommand();
 async function run(action: 'save' | 'submit' | 'withdraw') {
-  if (busy.value) return;
+  if (busy.value || props.writesPaused) return;
   busy.value = true;
   fieldErrors.value = {};
   confirmation.value = undefined;
@@ -294,12 +295,12 @@ const dirty = computed(() => fields.some(([k]) => form.value[k] !== base.value[k
             :step="type === 'datetime-local' ? 1 : undefined"
           /><small v-if="fieldErrors[key]">{{ fieldErrors[key] }}</small></label
         >
-        <button type="submit" :disabled="conflict">保存草稿</button>
+        <button type="submit" :disabled="writesPaused || conflict">保存草稿</button>
       </fieldset>
     </form>
     <button
       v-if="detail && !readonly && detail.working_snapshot.revision_state === 'draft'"
-      :disabled="busy || dirty || conflict"
+      :disabled="writesPaused || busy || dirty || conflict"
       @click="run('submit')"
     >
       提交审核
@@ -307,7 +308,7 @@ const dirty = computed(() => fields.some(([k]) => form.value[k] !== base.value[k
     <p v-if="dirty && id">请先保存修改，再提交审核。</p>
     <template v-if="pending"
       ><label>撤回原因 <input v-model="reason" /></label
-      ><button :disabled="busy || conflict || !reason.trim()" @click="run('withdraw')">
+      ><button :disabled="writesPaused || busy || conflict || !reason.trim()" @click="run('withdraw')">
         撤回送审
       </button></template
     >

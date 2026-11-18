@@ -24,7 +24,7 @@ const record = computed(() => props.records.find((r) => r.id === props.selected)
 <template>
   <p class="sample-label">示例数据</p>
   <template v-if="selected">
-    <RouterLink :to="base">返回{{ title }}</RouterLink>
+    <RouterLink :to="{path:base, query:$route.query}">返回{{ title }}</RouterLink>
     <article v-if="record">
       <h2>{{ record.title }}</h2>
       <p>{{ record.status }}</p>
@@ -43,7 +43,7 @@ const record = computed(() => props.records.find((r) => r.id === props.selected)
     <slot name="summary" />
     <label>筛选记录 <input v-model="search" type="search" placeholder="名称或状态" /></label>
     <div v-if="visible.length" class="entry-list">
-      <RouterLink v-for="r in visible" :key="r.id" :to="base + '/' + r.id"
+      <RouterLink v-for="r in visible" :key="r.id" :to="{path:base + '/' + r.id, query:$route.query}"
         >{{ r.title }} <span>{{ r.status }}</span></RouterLink
       >
     </div>
