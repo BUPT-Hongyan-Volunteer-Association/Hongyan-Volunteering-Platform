@@ -37,7 +37,7 @@ const actions = computed(() => {
     case 'corrections':
       return ['批准整组', '驳回整组'];
     case 'appeals':
-      return ['开始核查', '驳回申请'];
+      return route.params.item === 'A2026-014' ? ['开始核查', '驳回申请'] : ['驳回申请'];
     default:
       return [];
   }

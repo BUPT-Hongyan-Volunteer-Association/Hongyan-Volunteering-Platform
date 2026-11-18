@@ -184,6 +184,17 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       await fits(student);
     });
 
+    await t.test('学生与老师能打开同一条待受理的异常申诉', async () => {
+      await student.goto(web + '/mine/feedback');
+      await student.getByRole('link', { name: /异常申诉/ }).click();
+      await visible(student.getByText('A2026-014', { exact: true }));
+      await visible(student.getByText('已提交，等待老师核查'));
+      await teacher.goto(admin + '/manage/appeals');
+      await teacher.getByRole('link', { name: /A2026-014/ }).click();
+      await visible(teacher.getByText('待受理', { exact: true }));
+      await visible(teacher.getByText('本人已提前联系负责人，请复核签到说明。'));
+    });
+
     await t.test('三端同一活动的公开地点仅在批准后由 A 变为 B', async () => {
       await student.goto(web);
       await link(student, '校园服务甲').click();

@@ -94,6 +94,14 @@ const appeal: Appeal = {
   service_date: '2026-11-15',
   description: '协助整理归还书籍，反馈当日时长漏记。',
 };
+const incidentAppeal: Appeal = {
+  ...common,
+  id: '71000000-0000-4000-8000-000000000025',
+  target_id: incident.id,
+  target_type: 'incident',
+  description: '本人已提前联系负责人，请复核签到说明。',
+  status: 'pending',
+};
 export const totalHours = hour.credited_hours;
 export const personalRecords: Record<
   'registrations' | 'notices' | 'hours' | 'feedback',
@@ -146,6 +154,17 @@ export const personalRecords: Record<
         ['核实意见', incident.review_reason!],
         ['本人可见附件', '暂无已发布的脱敏副本'],
         ['处罚', '未启用'],
+      ],
+    },
+    {
+      id: incidentAppeal.id,
+      title: '异常申诉',
+      status: '待受理',
+      fields: [
+        ['申请编号', 'A2026-014'],
+        ['关联事实', incident.facts],
+        ['本人说明', incidentAppeal.description],
+        ['办理进度', '已提交，等待老师核查'],
       ],
     },
     {
