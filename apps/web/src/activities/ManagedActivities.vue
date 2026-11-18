@@ -27,6 +27,7 @@ onMounted(load);
 <template>
   <RouterLink to="/mine">返回我的</RouterLink>
   <h1>我的管理活动</h1>
+  <RouterLink to="/managed-schedule">本人管理日程</RouterLink> ·
   <RouterLink to="/managed/new">新建单次活动</RouterLink>
   <p v-if="loading">正在读取活动…</p>
   <p v-else-if="error" role="alert">{{ error }} <button @click="load">刷新</button></p>

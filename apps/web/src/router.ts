@@ -7,6 +7,7 @@ import ActivityWorkspace from './activities/ActivityWorkspace.vue';
 import Roster from './registrations/Roster.vue';
 import PersonalPage from './PersonalPage.vue';
 import StudentRecords from './personal/StudentRecords.vue';
+import SchedulePage from '@hongyan/ui/SchedulePage.vue';
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -25,6 +26,9 @@ export const router = createRouter({
         { path: 'roster', name: 'roster', component: Roster },
       ],
     },
+    { path: '/schedule', component: SchedulePage, props: { scope: 'public' } },
+    { path: '/mine/schedule', component: SchedulePage, props: { scope: 'mine' } },
+    { path: '/managed-schedule', component: SchedulePage, props: { scope: 'managed' }, meta: { organizer: true } },
     { path: '/mine', component: PersonalPage, meta: { profile: true } },
     { path: '/mine/settings', component: PersonalPage, meta: { profile: true } },
     { path: '/mine/example-activity', component: PersonalPage, meta: { profile: true } },

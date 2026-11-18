@@ -9,11 +9,13 @@
     "./Pager.vue": "./src/Pager.vue",
     "./pages.css": "./src/pages.css",
     "./PreviewRecords.vue": "./src/PreviewRecords.vue",
-    "./preview": "./src/preview.ts"
+    "./preview": "./src/preview.ts",
+    "./SchedulePage.vue": "./src/timeline/SchedulePage.vue"
   },
   "dependencies": {
     "@hongyan/contracts": "workspace:*",
     "element-plus": "2.14.8",
-    "vue": "3.5.45"
+    "vue": "3.5.45",
+    "vue-router": "4.6.4"
   }
 }

@@ -53,6 +53,7 @@ watch(() => route.fullPath, load, { immediate: true });
     >返回活动列表</RouterLink
   >
   <h1>{{ detail?.title || (route.params.id ? '活动详情' : '活动') }}</h1>
+  <RouterLink v-if="!route.params.id" to="/schedule">活动日程（示例）</RouterLink>
   <p v-if="busy" role="status">正在读取…</p>
   <p v-else-if="error" role="alert">{{ error }} <button @click="load">重试</button></p>
   <article v-else-if="detail">
