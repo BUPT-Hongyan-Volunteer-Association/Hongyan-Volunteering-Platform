@@ -4,6 +4,9 @@ import { hashPassword } from '../dist/auth/password.js';
 const staffPassword = process.env.DEMO_STAFF_PASSWORD;
 if (!staffPassword || staffPassword.length < 12)
   throw Error('请设置至少 12 字符的 DEMO_STAFF_PASSWORD');
+const adminPassword = process.env.DEMO_ADMIN_PASSWORD;
+if (adminPassword && (adminPassword.length < 12 || adminPassword === staffPassword))
+  throw Error('技术管理员体验账号需要独立且至少 12 字符的凭证');
 const db = new Database();
 const people = [
   ['0000000001', '体验学生', ['student']],
@@ -12,6 +15,7 @@ const people = [
   ['0000000004', '活动协作者', ['student', 'organizer']],
   ['demo.teacher', '独立审核员', ['reviewer']],
   ['demo.dual', '兼任审核员', ['reviewer', 'organizer']],
+  ...(adminPassword ? [['demo.admin', '合成技术管理员', ['tech_admin']]] : []),
 ];
 try {
   await db.$transaction(
@@ -25,7 +29,7 @@ try {
           create: {
             username,
             display_name,
-            password_hash: await hashPassword(student ? username.slice(-6) : staffPassword),
+            password_hash: await hashPassword(student ? username.slice(-6) : roles.includes('tech_admin') ? adminPassword : staffPassword),
             must_change_password: student,
             roles: { create: roles.map((role) => ({ role })) },
             ...(student && { student: { create: { student_no: username } } }),

@@ -2,6 +2,8 @@ import { createApp } from 'vue';
 import { createRouter, createWebHistory } from 'vue-router';
 import '@hongyan/ui/theme.css';
 import '@hongyan/ui/pages.css';
+import ManagementPage from './management/ManagementPage.vue';
+import { sectionKeys } from './management/sections';
 import TaskInbox from './TaskInbox.vue';
 import ReviewPage from './activities/ReviewPage.vue';
 import HourReview from './hours/HourReview.vue';
@@ -14,7 +16,13 @@ const router = createRouter({
   routes: [{
     path: '/',
     component: BasicLayout,
-    children: [{path:'', component:TaskInbox}, { path: 'connection', name: 'connection', component: SessionStatus },{path:'hours/:id?', component:HourReview},{path:'reviews/:id?',component:ReviewPage}],
+    children: [
+      { path: '', component: TaskInbox },
+      { path: 'connection', name: 'connection', component: SessionStatus },
+      { path: 'hours/:id?', component: HourReview },
+      { path: 'reviews/:id?', component: ReviewPage, meta: { profile: true } },
+      { path: 'manage/:section(' + sectionKeys.join('|') + ')/:item?', component: ManagementPage, meta: { profile: true } },
+    ],
   }],
 });
 

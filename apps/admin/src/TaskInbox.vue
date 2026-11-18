@@ -1,7 +1,39 @@
+<script setup lang="ts">
+import { onMounted, ref } from 'vue';
+import { listActivityReviews, type ActivityReview } from '@hongyan/contracts';
+import { sections } from './management/sections';
+const previews = ['corrections', 'incidents', 'appeals'] as const;
+const rows = ref<ActivityReview[]>([]);
+const total = ref(0);
+const busy = ref(true);
+const error = ref('');
+async function load() {
+  busy.value = true;
+  error.value = '';
+  rows.value = [];
+  try {
+    const response = (await listActivityReviews({ query: { status: 'pending', page_size: 3 }, throwOnError: true })).data.data;
+    rows.value = response.items;
+    total.value = response.total;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '待审队列读取失败';
+  } finally { busy.value = false; }
+}
+onMounted(load);
+</script>
 <template>
   <h1>待办</h1>
-  <div class="entry-list">
-    <RouterLink to="/reviews">活动审核 <span>查看待审版本</span></RouterLink>
-    <RouterLink to="/hours">时长审核 <span>示例数据</span></RouterLink>
-  </div>
+  <section><h2>活动待审</h2>
+    <p v-if="busy" role="status">正在读取待审版本…</p>
+    <p v-else-if="error" role="alert">{{ error }} <button @click="load">重试</button></p>
+    <template v-else><p>{{ total ? '待审 ' + total + ' 项' : '暂无待审活动' }}</p><div class="entry-list">
+      <RouterLink v-for="r in rows" :key="r.id" :to="'/reviews/' + r.id">{{ r.snapshot.content.title }} <span>版本 {{ r.revision }}</span></RouterLink>
+    </div></template>
+    <RouterLink to="/reviews">查看活动审核队列</RouterLink>
+  </section>
+  <section><h2>其他审核待办</h2><p class="sample-label">示例数据</p>
+    <div class="entry-list"><RouterLink to="/hours">时长批次 <span>待审核</span></RouterLink>
+      <RouterLink v-for="key in previews" :key="key" :to="'/manage/' + key">{{ sections[key].title }} <span>{{ sections[key].records[0].status }}</span></RouterLink>
+    </div>
+  </section>
 </template>
