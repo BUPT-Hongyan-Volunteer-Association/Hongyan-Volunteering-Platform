@@ -58,6 +58,6 @@ jobs:
       - name: Prepare regression environment
         run: |
           printf 'DATABASE_URL=%s\n' "$DATABASE_URL" > apps/api/.env
-          pnpm exec playwright-core install --with-deps chromium
+          pnpm exec playwright-core install --only-shell chromium
       - run: pnpm --filter @hongyan/api test:flow
       - run: pnpm test:pages
