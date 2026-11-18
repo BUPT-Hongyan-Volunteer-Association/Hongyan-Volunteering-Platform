@@ -20,6 +20,6 @@ onMounted(load);
  <h2>我的管理活动</h2>
  <p v-if="loading">正在读取活动…</p><p v-else-if="error" role="alert">{{error}} <button @click="load">刷新</button></p>
  <p v-else-if="!activities.length">暂无可管理的活动</p>
- <ul><li v-for="a in activities" :key="a.id"><button @click="select(a.id)">{{a.title}}</button> <slot name="actions" :activity="a" /></li></ul>
+ <ul><li v-for="a in activities" :key="a.id"><button @click="select(a.id)">{{a.title}}</button> <RouterLink :to="'/managed/'+a.id+'/roster'">报名名单</RouterLink></li></ul>
  <ul aria-label="活动成员"><li v-for="m in members" :key="m.account_id">{{m.display_name}} · {{m.member_role==='owner'?'主负责人':'协作者'}}</li></ul>
 </template>

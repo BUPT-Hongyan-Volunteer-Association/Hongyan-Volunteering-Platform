@@ -1,0 +1,13 @@
+main { min-width:0; }
+main label { display:inline-block; margin:4px 0; }
+main button, main input:not([type=checkbox]), main select { font:inherit; padding:6px 10px; border:1px solid #b5c1d1; border-radius:6px; background:white; color:inherit; }
+main button:enabled { cursor:pointer; color:#003399; }
+main li { margin:.5rem 0; }
+dl { display:grid; grid-template-columns:minmax(6em,auto) 1fr; gap:8px 16px; }
+dd { margin:0; overflow-wrap:anywhere; }
+dt { color:#526174; }
+.scroll-table { max-width:100%; overflow:auto; }
+.scroll-table table { border-collapse:collapse; min-width:100%; }
+.scroll-table th,.scroll-table td { padding:8px 12px; text-align:left; border-bottom:1px solid #e4e9f0; white-space:nowrap; }
+.scroll-table tr>:first-child { position:sticky; left:0; background:white; }
+@media(max-width:600px){main button,main select,main input:not([type=checkbox]),main a { min-height:44px; }main a {display:inline-flex; align-items:center;} }

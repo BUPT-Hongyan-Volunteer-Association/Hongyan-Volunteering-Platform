@@ -3,6 +3,8 @@ import { createRouter, createWebHistory } from 'vue-router';
 import 'element-plus/es/components/base/style/css';
 import 'element-plus/es/components/button/style/css';
 import '@hongyan/ui/theme.css';
+import '@hongyan/ui/pages.css';
+import HourReview from './hours/HourReview.vue';
 import App from './App.vue';
 import BasicLayout from './layouts/BasicLayout.vue';
 import SessionStatus from '@hongyan/ui/SessionStatus.vue';
@@ -12,7 +14,7 @@ const router = createRouter({
   routes: [{
     path: '/',
     component: BasicLayout,
-    children: [{ path: '', name: 'connection', component: SessionStatus }],
+    children: [{path:'',redirect:'/hours'}, { path: 'connection', name: 'connection', component: SessionStatus },{path:'hours/:id?', component:HourReview}],
   }],
 });
 

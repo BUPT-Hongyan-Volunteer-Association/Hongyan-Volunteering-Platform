@@ -33,6 +33,10 @@ try {
       working_revision:1,published_revision:i?null:1,members:{create:members},revisions:{create:{revision:1,
       revision_state:i?'pending_review':'approved',content,created_by:owner,...(!i && {approved_at:new Date()})}}}});
   }
+  const student=await tx.student.findUniqueOrThrow({where:{student_no:'0000000004'}});
+  const activity=await tx.activity.findUniqueOrThrow({where:{activity_code:'P2026-0001'}});
+  const relation={student_id:student.id,activity_id:activity.id};
+  await tx.registration.upsert({where:{activity_id_student_id:relation},update:{},create:{...relation,status:'accepted'}});
  },{timeout:30000});
  console.log('合成账号及两项活动已就绪。已有记录保留。');
 } finally {await db.$disconnect()}
