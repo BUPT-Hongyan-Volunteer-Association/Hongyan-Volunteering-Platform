@@ -7,13 +7,19 @@ const props = defineProps<{ profile: Profile }>();
 const route = useRoute();
 const base = computed(() => '/managed/' + route.params.id);
 const title = ref('');
+const activityCode = ref('');
+const memberMessage = ref('');
+const sections = [
+  ['requests','退出与恢复'], ['notices','通知与回执'], ['attendance','现场人员记录'],
+  ['batches','时长批次'], ['appeals','漏记反馈'], ['corrections','错账修复组'], ['incidents','异常上报'],
+];
 const members = ref<ActivityMember[]>([]);
 const error = ref('');
 const self = computed(() => members.value.find(m => m.account_id === props.profile.account_id));
 let generation = 0;
 async function load(clear = true) {
   const turn = ++generation;
-  if (clear) members.value = [];
+  if (clear) { members.value = []; memberMessage.value = ''; }
   error.value = '';
   try {
     const path = { id: String(route.params.id) };
@@ -22,6 +28,7 @@ async function load(clear = true) {
     const detail = (await getManagedActivity({ path, throwOnError: true })).data.data;
     if (turn !== generation) return;
     title.value = detail.activity.title;
+    activityCode.value = detail.activity.activity_code;
     members.value = team;
   } catch (e) {
     if (turn !== generation) return;
@@ -45,10 +52,17 @@ onUnmounted(() => { generation++; window.removeEventListener('focus', refresh); 
       <RouterLink :to="base">活动概览</RouterLink>
       <RouterLink :to="base + '/edit'">编辑与送审</RouterLink>
       <RouterLink :to="base + '/roster'">报名名单</RouterLink>
+      <RouterLink v-for="[path, label] in sections" :key="path" :to="base + '/' + path">{{ label }}</RouterLink>
     </nav>
     <RouterView v-if="route.name !== 'managed-overview'" v-slot="{ Component }">
-      <component :is="Component" v-bind="route.name === 'roster' ? { profile } : {}" :key="base" />
+      <component :is="Component" v-bind="route.name === 'roster' ? { profile } : route.name === 'organizer-section' ? { activityCode } : {}" :key="base" />
     </RouterView>
-    <section v-else><h2>活动成员</h2><ul><li v-for="m in members" :key="m.account_id">{{ m.display_name }} · {{ m.member_role === 'owner' ? '主负责人' : '协作者' }}</li></ul></section>
+    <section v-else><h2>活动成员</h2><ul><li v-for="m in members" :key="m.account_id">{{ m.display_name }} · {{ m.member_role === 'owner' ? '主负责人' : '协作者' }}</li></ul>
+      <details v-if="self.member_role === 'owner'"><summary>管理成员（预览）</summary>
+        <form class="preview-form" @submit.prevent="memberMessage = '示例操作尚待接入，活动成员未变更。'">
+          <label>操作<select><option>添加协作者</option><option v-if="members.length > 1">移除协作者</option><option v-if="members.length > 1">转移主负责人</option></select></label>
+          <label>成员学号<input required pattern="[0-9]{10}" maxlength="10" /></label><label>原因<input required /></label><button>预览成员变更</button>
+        </form><p v-if="memberMessage" role="status">{{ memberMessage }}</p>
+      </details></section>
   </template>
 </template>

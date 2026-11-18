@@ -57,3 +57,5 @@ pnpm --filter @hongyan/api test:flow
 后台布局取自 Vue Vben Admin v5.7.0 的 Element Plus 入口与布局组件，上游提交为 `63a38dce49ba109f61607994e21ba921d8e970e9`。[MIT 许可](apps/admin/src/layouts/vben/LICENSE)
 
 学生从「我的报名」查看报名及退出恢复进度，从「通知」查看回执状态，从「我的」打开时长、本人记录与反馈、账号设置。个人业务样例位于 `apps/web/src/personal/`，标有示例数据。账号信息来自当前真实会话。
+
+负责人工作区以 `/managed/:id` 为入口，成员与版本读取、保存和送审沿用真实服务。通知回执按待跟进与已确认分列，现场记录按服务日期查找。退出恢复、七列时长预览、漏记、修复组及异常报告使用合成记录，成员管理预览仅主负责人可见。

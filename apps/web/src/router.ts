@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import PublicActivities from './activities/PublicActivities.vue';
 import ManagedActivities from './activities/ManagedActivities.vue';
 import ActivityEditor from './activities/ActivityEditor.vue';
+import OrganizerSection from './activities/OrganizerSection.vue';
 import ActivityWorkspace from './activities/ActivityWorkspace.vue';
 import Roster from './registrations/Roster.vue';
 import PersonalPage from './PersonalPage.vue';
@@ -19,6 +20,7 @@ export const router = createRouter({
       component: ActivityWorkspace,
       meta: { organizer: true, profile: true },
       children: [
+        { path: ':area(requests|notices|attendance|batches|appeals|corrections|incidents)/:item?', name: 'organizer-section', component: OrganizerSection },
         { path: 'edit', component: ActivityEditor },
         { path: 'roster', name: 'roster', component: Roster },
       ],
