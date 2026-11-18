@@ -29,8 +29,6 @@
 | macOS 终端 | `HY_BROWSER=msedge pnpm test:pages` |
 | Windows PowerShell | 先执行 `$env:HY_BROWSER = 'msedge'`，再执行 `pnpm.cmd test:pages`。用 `Remove-Item Env:HY_BROWSER` 恢复自动选择。 |
 
-`localhost` 和 `127.0.0.1` 指打开链接的那台电脑。每位成员在自己的电脑启动服务后，都能使用上表的本地地址。团队共用同一套环境时，请使用该环境对外提供的网址。
-
 ### 使用 Safari 或 WebKit 在本机登录
 
 页面回归会自动通过 HTTPS 访问临时测试服务。手动使用 Safari 或通过 WebKit 体验身份时，也需要 HTTPS，浏览器才能保存安全会话 Cookie。在启动两个前端和 `demo:open` 的每个终端设置以下变量，再运行各自的启动命令。使用同样的设置也可以在 Edge、Chrome 和 Firefox 中验证 HTTPS。
