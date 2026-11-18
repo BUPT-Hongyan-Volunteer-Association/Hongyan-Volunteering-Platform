@@ -1,7 +1,14 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { STATUS_CODES } from 'node:http';
-import { Catch, HttpException, Logger, Module, type ArgumentsHost, type ExceptionFilter } from '@nestjs/common';
+import {
+  Catch,
+  HttpException,
+  Logger,
+  Module,
+  type ArgumentsHost,
+  type ExceptionFilter,
+} from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { Response } from 'express';
 import { CsrfController } from './auth/csrf.controller.js';
@@ -24,7 +31,10 @@ class HttpErrorFilter implements ExceptionFilter {
     const status = error instanceof HttpException ? error.getStatus() : 500;
     const request_id = randomUUID();
     if (error instanceof BusinessError) {
-      response.status(status).set('Cache-Control','no-store').json({...error.getResponse() as object, request_id});
+      response
+        .status(status)
+        .set('Cache-Control', 'no-store')
+        .json({ ...(error.getResponse() as object), request_id });
       return;
     }
     let code = 'internal_error';
@@ -39,7 +49,17 @@ class HttpErrorFilter implements ExceptionFilter {
   }
 }
 
-@Module({ controllers: [CsrfController, AccountController, ManagedController, PublicController, DraftController, ReviewController], providers: [SessionService, SessionGuard, Database, Workflow] })
+@Module({
+  controllers: [
+    CsrfController,
+    AccountController,
+    ManagedController,
+    PublicController,
+    DraftController,
+    ReviewController,
+  ],
+  providers: [SessionService, SessionGuard, Database, Workflow],
+})
 class AppModule {}
 
 export async function createApp() {
