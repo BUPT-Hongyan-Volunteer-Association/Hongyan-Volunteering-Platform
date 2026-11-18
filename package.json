@@ -15,7 +15,8 @@
     "dev:api": "pnpm --filter @hongyan/api dev",
     "typecheck": "pnpm -r --if-present typecheck",
     "build": "pnpm -r --if-present build",
-    "test:pages": "pnpm build && pnpm --filter @hongyan/api test:pages"
+    "test:pages": "pnpm build && pnpm --filter @hongyan/api test:pages",
+    "demo:open": "node --env-file-if-exists=.local/demo.env apps/api/scripts/demo-launcher.mjs"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

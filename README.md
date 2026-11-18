@@ -1,6 +1,6 @@
 # 鸿雁志愿服务平台
 
-学生查看获批活动，负责人创建、修改、送审或撤回单次活动，老师核对差异后批准或驳回。批次 02 已补齐三端页面。各业务组的入口、数据来源、待接接口和报名演练见 [三端页面与业务交接](HANDOFF.md)。
+学生查看获批活动，负责人创建、修改、送审或撤回单次活动，老师核对差异后批准或驳回。批次 02 已补齐三端页面。项目正在继续开发。
 
 接口定义与导入格式随工程维护。[OpenAPI v1.2.4](packages/contracts/openapi_v1.2.4.yaml) · [学生建档模板 v1.3](packages/contracts/templates/学生建档导入模板_v1.3.xlsx) · [志愿时长模板 v1.5](packages/contracts/templates/志愿时长录入模板_v1.5.xlsx)
 
@@ -33,6 +33,12 @@ cp apps/api/.env.example apps/api/.env
 | `pnpm dev:admin` | [审核后台](http://localhost:5174/) |
 
 已有数据库下次启动只需运行上面的 `pg_ctl … start` 命令。结束应用用 Ctrl+C，停止专用数据库用 `pg_ctl -D .local/pgdata -m fast -w stop`。
+
+## 本地免手输登录测试入口
+
+先启动上表三个服务，并安装 Google Chrome。在工程根目录另开终端运行 `pnpm demo:open`，打开 [本地测试入口](http://127.0.0.1:5180/)，点选身份即可进入相应系统。每次选择都会打开独立浏览器会话，可同时验证多个角色。
+
+新副本先按上文创建体验账号。首次启动入口时使用与种子相同的 `DEMO_STAFF_PASSWORD`，如已创建技术管理员也提供 `DEMO_ADMIN_PASSWORD`。可通过环境变量或本机 `.local/demo.env` 提供。启动器将体验凭证保存到被 Git 忽略的 `.local/demo-logins.json`，原有配置优先。学生首次使用时会自动走首登改密流程，已手动改密的体验账号需在该本地文件填入现有密码。入口只监听本机，关闭启动器用 Ctrl+C。
 
 ## 体验与验证
 
