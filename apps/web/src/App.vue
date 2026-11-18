@@ -6,7 +6,7 @@ import AccountGate from '@hongyan/ui/AccountGate.vue';
  <main><AccountGate v-slot="{profile}">
   <nav aria-label="学生导航"><RouterLink to="/">活动</RouterLink><RouterLink to="/registrations">我的报名</RouterLink><RouterLink to="/notices">通知</RouterLink><RouterLink to="/mine">我的</RouterLink></nav>
   <p v-if="$route.meta.organizer && !profile.roles.includes('organizer')" role="alert">当前账号无活动管理权限。</p>
-  <RouterView v-else v-slot="{Component}"><component :is="Component" :profile="profile" /></RouterView>
+  <RouterView v-else v-slot="{Component}"><component :is="Component" v-bind="$route.meta.profile ? { profile } : {}" /></RouterView>
  </AccountGate></main>
 </template>
 <style scoped>

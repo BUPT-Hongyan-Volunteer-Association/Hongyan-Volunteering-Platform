@@ -99,7 +99,6 @@ function toggleAll(checked: boolean) {
 }
 </script>
 <template>
-  <RouterLink to="/managed">返回活动管理</RouterLink>
   <h1>报名名单</h1>
   <p v-if="error" role="alert">{{ error }} <button @click="authorize">重试</button></p>
   <p v-else-if="!allowed">正在核验访问权限…</p>

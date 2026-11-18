@@ -228,7 +228,7 @@ async function run(action: 'save' | 'submit' | 'withdraw') {
     id: nextId,
     text: { save: '草稿已保存', submit: '已送审，内容已冻结', withdraw: '已撤回' }[action],
   };
-  if (nextId !== target) await router.replace('/managed/' + nextId + '/edit');
+  if (nextId !== target) await router.replace({ path: '/managed/' + nextId + '/edit', state: { savedDraftId: nextId } });
   else await load();
 }
 async function inspect(revision: number) {
@@ -244,6 +244,10 @@ watch(
   id,
   () => {
     if (confirmation.value?.id !== id.value) confirmation.value = undefined;
+    if (id.value && window.history.state?.savedDraftId === id.value) {
+      confirmation.value = { id: id.value, text: '草稿已保存' };
+      window.history.replaceState({ ...window.history.state, savedDraftId: null }, '');
+    }
     base.value = {};
     form.value = {};
     reason.value = '';
@@ -254,7 +258,7 @@ watch(
 const dirty = computed(() => fields.some(([k]) => form.value[k] !== base.value[k]));
 </script>
 <template>
-  <RouterLink to="/managed">返回活动管理</RouterLink>
+  <RouterLink v-if="!id" to="/managed">返回活动管理</RouterLink>
   <h1>{{ id ? '活动编辑与送审' : '新建单次活动' }}</h1>
   <p v-if="loading">正在读取…</p>
   <p v-if="confirmation?.id === id" role="status">{{ confirmation.text }}</p>

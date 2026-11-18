@@ -66,3 +66,16 @@ dt {
     align-items: center;
   }
 }
+
+.section-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; margin-top: 16px; }
+.section-heading h1 { margin-bottom: 8px; }
+.section-heading span, .entry-list span { color: var(--muted); font-size: 14px; }
+.section-nav { display: flex; flex-wrap: wrap; gap: 4px 16px; border-bottom: 1px solid var(--line); margin: 8px 0 24px; }
+.section-nav a, .entry-list a { display: flex; align-items: center; min-height: 44px; text-decoration: none; }
+.section-nav a.router-link-exact-active { font-weight: 650; border-bottom: 2px solid var(--brand); }
+.entry-list { display: grid; }
+.entry-list a { justify-content: space-between; gap: 12px; padding: 12px 4px; border-bottom: 1px solid var(--line); }
+@media (max-width: 600px) {
+  main a, main button { min-width: 44px; }
+  .identity button { min-height: 44px; }
+}
