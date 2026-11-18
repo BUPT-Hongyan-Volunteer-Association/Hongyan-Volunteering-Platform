@@ -14,6 +14,106 @@ model HttpSession {
   csrf_token String
   expires_at DateTime @db.Timestamptz(3)
 
+  account_id String?  @db.Uuid
+  account    Account? @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@index([account_id])
   @@index([expires_at])
   @@map("http_session")
+}
+
+enum Role {
+  student
+  organizer
+  reviewer
+  tech_admin
+}
+
+enum MemberRole {
+  owner
+  collaborator
+}
+
+model Account {
+  id                   String           @id @default(uuid()) @db.Uuid
+  username             String           @unique
+  display_name         String
+  password_hash        String
+  must_change_password Boolean          @default(true)
+  active               Boolean          @default(true)
+  roles                RoleGrant[]
+  sessions             HttpSession[]
+  members              ActivityMember[]
+  student              Student?
+
+  @@map("account")
+}
+
+model Student {
+  id         String  @id @default(uuid()) @db.Uuid
+  account_id String  @unique @db.Uuid
+  student_no String  @unique @db.Char(10)
+  version    Int     @default(1)
+  account    Account @relation(fields: [account_id], references: [id])
+
+  @@map("student")
+}
+
+model RoleGrant {
+  account_id String    @db.Uuid
+  role       Role
+  expires_at DateTime? @db.Timestamptz(3)
+  account    Account   @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@id([account_id, role])
+  @@map("role_grant")
+}
+
+model LoginWindow {
+  key        String   @id
+  attempts   Int
+  expires_at DateTime @db.Timestamptz(3)
+
+  @@index([expires_at])
+  @@map("login_window")
+}
+
+model Activity {
+  id                 String             @id @default(uuid()) @db.Uuid
+  activity_code      String             @unique
+  status             String             @default("draft")
+  version            Int                @default(1)
+  team_version       Int                @default(1)
+  working_revision   Int
+  published_revision Int?
+  members            ActivityMember[]
+  revisions          ActivityRevision[]
+
+  @@map("activity")
+}
+
+model ActivityRevision {
+  activity_id    String    @db.Uuid
+  revision       Int
+  revision_state String
+  content        Json
+  created_by     String    @db.Uuid
+  created_at     DateTime  @default(now()) @db.Timestamptz(3)
+  approved_at    DateTime? @db.Timestamptz(3)
+  activity       Activity  @relation(fields: [activity_id], references: [id], onDelete: Cascade)
+
+  @@id([activity_id, revision])
+  @@map("activity_revision")
+}
+
+model ActivityMember {
+  activity_id String     @db.Uuid
+  account_id  String     @db.Uuid
+  member_role MemberRole
+  activity    Activity   @relation(fields: [activity_id], references: [id], onDelete: Cascade)
+  account     Account    @relation(fields: [account_id], references: [id])
+
+  @@id([activity_id, account_id])
+  @@index([account_id])
+  @@map("activity_member")
 }

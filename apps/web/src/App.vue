@@ -1,17 +1,18 @@
 <script setup lang="ts">
-import SessionStatus from '@hongyan/ui/SessionStatus.vue';
+import { ref } from 'vue';
+import AccountGate from '@hongyan/ui/AccountGate.vue';
+import ManagedActivities from './activities/ManagedActivities.vue';
+const manage=ref(false);
 </script>
-
 <template>
-  <header><strong>鸿雁志愿服务平台</strong></header>
-  <main>
-    <h1>学生与负责人入口</h1>
-    <SessionStatus />
-  </main>
+ <header><strong>鸿雁志愿服务平台</strong></header>
+ <main><AccountGate v-slot="{profile}">
+   <h1>我的</h1>
+   <button v-if="profile.roles.includes('organizer')" @click="manage=!manage">活动管理</button>
+   <ManagedActivities v-if="manage && profile.roles.includes('organizer')" />
+ </AccountGate></main>
 </template>
-
 <style scoped>
-header { border-bottom: 1px solid var(--line); padding: 16px max(24px, calc((100vw - 960px) / 2));
-  color: var(--brand); font-size: 18px; }
-main { max-width: 1008px; margin: 0 auto; padding: clamp(32px, 5vw, 64px) 24px; }
+header { padding:16px 24px; border-bottom:1px solid var(--line); color:var(--brand); }
+main { max-width:960px; margin:auto; padding:24px; }
 </style>

@@ -40,3 +40,11 @@ export async function openSession() {
   csrfToken = session.csrf_token;
   return { expiresAt: session.expires_at };
 }
+
+export * from './generated/sdk.gen';
+export type * from './generated/types.gen';
+
+export function writeHeaders() {
+  if (!csrfToken) throw new Error('会话尚未建立，请刷新后重试');
+  return { 'X-CSRF-Token': csrfToken };
+}

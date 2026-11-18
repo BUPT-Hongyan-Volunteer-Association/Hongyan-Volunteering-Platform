@@ -61,3 +61,16 @@ pnpm build
 | `packages/ui/src/SessionStatus.vue` | 请求加载、成功、失败与重试。真实请求失败时直接反馈。 |
 | `apps/api/src/auth/` | CSRF 接口与数据库会话。会话标识的摘要、独立 CSRF 值和到期时间存入 PostgreSQL，匿名会话有效期 30 分钟。 |
 | `apps/admin/src/layouts/` | Vben Admin v5.7.0 的 Element Plus 入口与精简侧栏布局，保留路由内容区、顶栏及折叠导航。上游源码版本为 `63a38dce49ba109f61607994e21ba921d8e970e9`，来源为 `vbenjs/vue-vben-admin` 的 `apps/web-ele` 与 `packages/@core/ui-kit/layout-ui`。原版顶栏和布局的 MIT 许可随 `vben/LICENSE` 保留。 |
+
+## 登录与本地体验账号
+
+从工程根目录运行 `pnpm db:generate`、`pnpm db:migrate`、`pnpm --filter @hongyan/api build`。在专用开发库中需要合成账号时，设置仅本机使用的环境变量 `DEMO_STAFF_PASSWORD`（至少 12 个字符），执行 `pnpm --filter @hongyan/api exec node --env-file=.env scripts/seed.mjs`。重复执行保留已有账号、密码与活动。
+
+| 账号 | 合成身份 |
+| --- | --- |
+| 0000000001 | 学生 |
+| 0000000002、0000000003 | 分别管理活动甲、乙 |
+| 0000000004 | 活动甲协作者 |
+| demo.teacher、demo.dual | 独立审核员、兼任活动甲协作者的审核员 |
+
+学生初始密码取学号后六位，首次登录后须设置至少八位、同时含英文字母与数字的新密码。后台体验账号使用初始化时设置的独立凭证。登录与修改密码轮换 Cookie，退出后原会话失效。学生和负责人从 5173 进入，后台账号从 5174 进入。两个入口沿用同源 CSRF 客户端。

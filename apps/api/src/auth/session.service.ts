@@ -1,37 +1,32 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
+import { parse } from 'cookie';
+import type { Response } from 'express';
 import { Database } from '../database.js';
 
-const anonymousLifetimeMs = 30 * 60 * 1000;
-const hashCookie = (value: string) => createHash('sha256').update(value).digest('hex');
-const sessionFields = { csrf_token: true, expires_at: true } as const;
+const cookieName = 'volunteer_session';
+const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+export const cookieHash = (header?: string) => hash(parse(header ?? '')[cookieName] ?? '');
+
+export function issueSession(account_id?: string) {
+  const value = randomBytes(32).toString('base64url');
+  return { value, data: { id_hash: hash(value), account_id, csrf_token: randomBytes(32).toString('base64url'),
+    expires_at: new Date(Date.now() + 30 * 60_000) } };
+}
+export function setCookie(res: Response, issued: ReturnType<typeof issueSession>) {
+  res.cookie(cookieName, issued.value, { httpOnly:true, secure:true, sameSite:'lax', path:'/api/v1', expires:issued.data.expires_at });
+}
 
 @Injectable()
 export class SessionService {
   constructor(private readonly db: Database) {}
-
-  async open(cookieValue?: string) {
-    const now = new Date();
-    if (cookieValue) {
-      const session = await this.db.httpSession.findUnique({
-        where: { id_hash: hashCookie(cookieValue), expires_at: { gt: now } },
-        select: sessionFields,
-      });
-      if (session) return { session };
-    }
-
-    const newCookie = randomBytes(32).toString('base64url');
-    const [, session] = await this.db.$transaction([
-      this.db.httpSession.deleteMany({ where: { expires_at: { lte: now } } }),
-      this.db.httpSession.create({
-        data: {
-          id_hash: hashCookie(newCookie),
-          csrf_token: randomBytes(32).toString('base64url'),
-          expires_at: new Date(now.getTime() + anonymousLifetimeMs),
-        },
-        select: sessionFields,
-      }),
-    ]);
-    return { session, newCookie };
+  async open(header: string | undefined, res: Response) {
+    const session = await this.db.httpSession.findUnique({where:{id_hash:cookieHash(header),expires_at:{gt:new Date()}},
+      select:{csrf_token:true,expires_at:true}});
+    if (session) return session;
+    const issued=issueSession();
+    await this.db.$transaction([this.db.httpSession.deleteMany({where:{expires_at:{lte:new Date()}}}),this.db.httpSession.create({data:issued.data})]);
+    setCookie(res,issued);
+    return issued.data;
   }
 }
