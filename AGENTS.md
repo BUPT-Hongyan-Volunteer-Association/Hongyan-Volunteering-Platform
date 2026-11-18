@@ -8,6 +8,40 @@
 - 工程以仓库内的契约生成客户端。两份 Excel 模板与契约一起版本管理，修改模板时核对工作表、列名、顺序及兼容规则。团队使用的都是空白模板，验收使用合成数据。[OpenAPI v1.2.4](packages/contracts/openapi_v1.2.4.yaml) · [学生建档 v1.3](packages/contracts/templates/学生建档导入模板_v1.3.xlsx) · [时长录入 v1.5](packages/contracts/templates/志愿时长录入模板_v1.5.xlsx)
 - 共用的视觉与交互规则见设计指南。具体页面的字段、状态转换、异常和验收用例随任务维护。[DESIGN.md](DESIGN.md)
 
+## 仓库文件结构
+
+以下路径均相对开发仓库根目录。根目录保存工程入口、协作指南和工作区配置。
+
+```text
+README.md                 本地安装、启动和验证
+AGENTS.md / DESIGN.md     工程约定与三端设计规范
+package.json              工作区级命令与工具版本
+pnpm-workspace.yaml       工作区成员
+pnpm-lock.yaml            全仓依赖锁文件
+config/                   跨应用共用的 TypeScript、Vite 配置
+apps/
+  web/src/                学生与负责人前端，main.ts 启动，App.vue 装配页面
+  admin/src/              审核后台入口与页面
+    layouts/              后台布局，vben/ 保存适配的上游布局及其许可
+  api/
+    src/                  服务启动与数据库连接，auth/ 处理身份和会话
+    prisma/               schema.prisma 数据模型，migrations/ 迁移历史
+packages/
+  contracts/              OpenAPI 源文件
+    src/                  index.ts 为共享请求入口，generated/ 为生成的 SDK
+    templates/            版本化的空白导入模板
+  ui/src/                 两个前端共用的 Vue 组件与主题样式
+```
+
+### 新文件放在哪里
+
+- 新功能按业务归档。例如开发活动功能时，学生与负责人的页面放在 `apps/web/src/activities/`，老师的审核页面放在 `apps/admin/src/activities/`，控制器和服务放在 `apps/api/src/activities/`。只在本次实际涉及的应用中建目录。入口文件负责装配，具体业务逻辑留在功能目录。
+- 单个页面使用的表单、组件和辅助函数与该页面放在一起。两个前端确实共用时再提取到 `packages/ui/src/`。Vue 组件沿用 `SessionStatus.vue` 的命名方式，NestJS 文件沿用 `csrf.controller.ts`、`session.service.ts` 的职责后缀。
+- 接口字段和操作先改 `packages/contracts/` 下的 OpenAPI 源文件，再生成客户端。数据库结构变更更新 `apps/api/prisma/schema.prisma`，在 `migrations/` 下新增独立迁移目录，保留已应用的迁移。
+- 多个应用共用的构建设置放在 `config/`。各应用自己的依赖、脚本、TypeScript 和 Vite 入口配置留在所属应用目录。
+- 批次索引、任务规格、实施计划和验收记录放在同级的本地任务仓库。本机运行数据放在已忽略的 `.local/`。提交前核对文件清单，排除本地凭证、生成目录和构建产物。
+- 新增顶层目录或调整现有目录职责时，在同一变更中更新本节，并检查受影响的导入路径、工作区配置和 README 命令。
+
 ## 目录与调用
 
 | 落点 | 职责 |
