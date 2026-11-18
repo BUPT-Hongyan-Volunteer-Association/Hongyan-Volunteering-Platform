@@ -69,3 +69,5 @@ packages/
 - 提交前从正常入口复核结果，检查暂存文件和差异。交接写明覆盖的验收条目、实际运行的检查、结果及待处理项。
 
 账号身份在 `apps/api/src/auth/session.guard.ts` 逐请求读取。新增受限操作使用该请求身份，活动范围复用 `apps/api/src/activities/read.ts` 的成员与后台范围判断。演示账号仅通过显式的本地种子命令初始化。
+
+活动写入从 `apps/api/src/activities/workflow.ts` 进入同一事务。活动 ID 定位活动，审核 ID 定位审核命令，内容版本号定位冻结快照。先锁定活动，再校验权限和目标对象版本。命令回放也须重新授权。活动输入采用共享 OpenAPI 的实际 schema 校验，页面通过生成的操作提交。

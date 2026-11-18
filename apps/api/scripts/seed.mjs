@@ -33,6 +33,10 @@ try {
       working_revision:1,published_revision:i?null:1,members:{create:members},revisions:{create:{revision:1,
       revision_state:i?'pending_review':'approved',content,created_by:owner,...(!i && {approved_at:new Date()})}}}});
   }
+  const pending=await tx.activity.findUniqueOrThrow({where:{activity_code:'P2026-0002'}});
+  if(pending.status==='pending_review') await tx.activityReview.upsert({
+    where:{activity_id_revision:{activity_id:pending.id,revision:pending.working_revision}},update:{},
+    create:{activity_id:pending.id,revision:pending.working_revision,submitted_by:ids[2]}});
   const student=await tx.student.findUniqueOrThrow({where:{student_no:'0000000004'}});
   const activity=await tx.activity.findUniqueOrThrow({where:{activity_code:'P2026-0001'}});
   const relation={student_id:student.id,activity_id:activity.id};

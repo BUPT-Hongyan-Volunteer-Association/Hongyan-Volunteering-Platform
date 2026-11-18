@@ -11,7 +11,7 @@ export function managedScope(actor:Actor, scope = staff(actor) ? 'all' : 'manage
   return { members: { some: { account_id:actor.account_id } } };
 }
 export const includeView = {
-  revisions:true, members:{where:{member_role:'owner'},include:{account:{select:{display_name:true}}}},
+  revisions:true, reviews:true, members:{where:{member_role:'owner'},include:{account:{select:{display_name:true}}}},
 } as const;
 export type LoadedActivity = Prisma.ActivityGetPayload<{include:typeof includeView}>;
 export function slots(s:ActivitySchedule): ScheduleSlot[] {
@@ -44,7 +44,7 @@ export function project(row:LoadedActivity, scope:'working'|'published', now:Dat
     registration_phase:row.status!=='published'?'unavailable':t<Date.parse(input.registration_opens_at)?'not_open':t<Date.parse(input.registration_closes_at)?'open':'closed',
     schedule_revision:rev.revision,revision_state:rev.revision_state as View['revision_state'],
     state_evaluated_at:now.toISOString(),is_ongoing:row.status==='published' && live.some(s=>Date.parse(s.starts_at)<=t && t<Date.parse(s.ends_at)),
-    ...(management && {has_pending_review:row.revisions.some(r=>r.revision_state==='pending_review')}),
+    ...(management && {has_pending_review:row.reviews.some(r=>r.status==='pending'),current_review_id:row.reviews.find(r=>r.status==='pending')?.id}),
     ...(row.published_revision!==null && {published_revision:row.published_revision})};
   if(!management) delete item.group_join_instructions;
   return item;
