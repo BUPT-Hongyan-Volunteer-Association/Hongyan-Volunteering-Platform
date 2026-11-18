@@ -33,7 +33,16 @@ export class ManagedController {
   ) {
     const row = await this.db.activity.findFirst({
       where: { id, ...managedScope(req.actor) },
-      include: { members: { include: { account: { include: { student: true } } } } },
+      select: {
+        team_version: true,
+        members: {
+          select: {
+            account_id: true,
+            member_role: true,
+            account: { select: { display_name: true, student: { select: { student_no: true } } } },
+          },
+        },
+      },
     });
     if (!row) invisible();
     return envelope({

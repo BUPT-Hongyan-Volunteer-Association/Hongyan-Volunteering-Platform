@@ -5,13 +5,14 @@ import {
   ApiError,
   getActivityReview,
   getManagedActivity,
-  getProfile,
+  type Profile,
   listActivityReviews,
   reviewActivity,
-  writeHeaders,
+  createCommand,
   type ActivityReview,
 } from '@hongyan/contracts';
 import Pager from '@hongyan/ui/Pager.vue';
+const props = defineProps<{ profile: Profile }>();
 const route = useRoute(),
   router = useRouter(),
   review = ref<ActivityReview>(),
@@ -19,7 +20,7 @@ const route = useRoute(),
   total = ref(0),
   busy = ref(false),
   loading = ref(false),
-  canDecide = ref(false),
+  currentPending = ref(false),
   reason = ref(''),
   error = ref(''),
   notice = ref('');
@@ -68,32 +69,35 @@ function display(value: unknown): string {
 }
 const windowScroll = () => window.scrollY;
 let serial = 0,
-  savedScroll = 0,
-  last = { signature: '', key: '' };
+  savedScroll = 0;
+const command = createCommand();
+const canDecide = computed(
+  () =>
+    currentPending.value &&
+    review.value?.status === 'pending' &&
+    review.value.submitted_by !== props.profile.account_id,
+);
+let completed: ActivityReview | undefined;
 async function load() {
   const n = ++serial;
   loading.value = true;
   error.value = '';
   rows.value = [];
   review.value = undefined;
-  canDecide.value = false;
-  reason.value = '';
+  currentPending.value = false;
   try {
     if (route.params.id) {
-      const r = (
-        await getActivityReview({ path: { id: String(route.params.id) }, throwOnError: true })
+      const id = String(route.params.id);
+      const r = (await getActivityReview({ path: { id }, throwOnError: true })).data.data;
+      const managed = (
+        await getManagedActivity({ path: { id: r.activity_id }, throwOnError: true })
       ).data.data;
-      const [managed, profile] = await Promise.all([
-        getManagedActivity({ path: { id: r.activity_id }, throwOnError: true }),
-        getProfile({ throwOnError: true }),
-      ]);
       if (n !== serial) return;
       review.value = r;
-      canDecide.value =
-        r.status === 'pending' &&
-        managed.data.data.current_review?.id === r.id &&
-        ['pending_review', 'published'].includes(managed.data.data.activity.status) &&
-        profile.data.data.account_id !== r.submitted_by;
+      currentPending.value =
+        managed.current_review?.id === r.id &&
+        ['pending_review', 'published'].includes(managed.activity.status);
+      if (completed?.id === id) await router.push({ path: '/reviews', query: route.query });
     } else {
       const result = (
         await listActivityReviews({
@@ -106,7 +110,8 @@ async function load() {
       total.value = result.total;
     }
   } catch (e) {
-    if (n === serial) error.value = e instanceof Error ? e.message : '读取失败';
+    if (n === serial)
+      error.value = '读取最新数据失败：' + (e instanceof Error ? e.message : '请重试');
   } finally {
     if (n === serial) {
       loading.value = false;
@@ -127,28 +132,44 @@ async function decide(decision: 'approved' | 'rejected') {
   error.value = '';
   const id = review.value.id,
     body = { decision, expected_version: review.value.version, reason: reason.value.trim() };
-  const signature = JSON.stringify([id, body]);
-  if (last.signature !== signature) last = { signature, key: crypto.randomUUID() };
+  const from = route.fullPath;
   try {
-    await reviewActivity({
+    const result = await reviewActivity({
       path: { id },
-      headers: { ...writeHeaders(), 'Idempotency-Key': last.key },
+      headers: command.headers('decide', id, body),
       body,
       throwOnError: true,
     });
-    canDecide.value = false;
-    await getManagedActivity({ path: { id: review.value.activity_id }, throwOnError: true });
-    notice.value = (decision === 'approved' ? '已批准' : '已驳回') + '，审核队列已更新';
-    await router.push({ path: '/reviews', query: route.query });
+    command.confirmed();
+    if (route.fullPath !== from) return;
+    completed = result.data.data;
+    review.value = completed;
+    notice.value = completed.status === 'approved' ? '已批准发布' : '已驳回';
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '提交失败';
-    if (e instanceof ApiError && [403, 404, 409].includes(e.status ?? 0)) await load();
-    error.value = msg;
+    if (route.fullPath === from) {
+      error.value = e instanceof Error ? e.message : '提交失败';
+      if (e instanceof ApiError && !e.body) error.value = '审核结果尚未确认，可用相同内容重试。';
+      if (e instanceof ApiError && [403, 404, 409].includes(e.status ?? 0)) {
+        currentPending.value = false;
+        if (e.status !== 409) review.value = undefined;
+      }
+    }
+    return;
   } finally {
     busy.value = false;
   }
+  await load();
 }
-watch(() => route.fullPath, load, { immediate: true });
+watch(
+  () => route.fullPath,
+  () => {
+    if (route.params.id && completed?.id !== route.params.id) notice.value = '';
+    completed = undefined;
+    reason.value = '';
+    return load();
+  },
+  { immediate: true },
+);
 </script>
 <template>
   <h1>活动审核</h1>

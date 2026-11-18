@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { Profile } from '@hongyan/contracts';
+defineProps<{profile:Profile}>();
 import VbenLayout from './vben/VbenLayout.vue';
 </script>
 
@@ -9,7 +11,7 @@ import VbenLayout from './vben/VbenLayout.vue';
     <template #header>审核后台</template>
     <template #content>
       <h1 v-if="$route.name==='connection'">服务连接</h1>
-      <RouterView />
+      <RouterView v-bind="$route.path.startsWith('/reviews') ? { profile } : {}" />
     </template>
   </VbenLayout>
 </template>

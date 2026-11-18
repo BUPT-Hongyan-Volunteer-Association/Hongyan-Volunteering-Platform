@@ -9,12 +9,20 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
+import type { ActivityReview } from '../generated/prisma/client.js';
 import type { ReviewDecision } from '@hongyan/contracts/types';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import { BusinessError, denied, envelope, invalid, invisible } from '../http.js';
-import { includeView, paginate, staff } from './read.js';
-import { checkVersion, reviewView, Workflow, wrongState } from './workflow.js';
+import { includeView, pagination, staff } from './read.js';
+import {
+  checkVersion,
+  reviewResponse,
+  reviewView,
+  type Tx,
+  Workflow,
+  wrongState,
+} from './workflow.js';
 import { content, validate } from './validation.js';
 
 const notifiedFields = new Set([
@@ -36,6 +44,25 @@ const notifiedFields = new Set([
   'hours_import_expected_at',
 ]);
 
+// Each review references a frozen revision and, for amendments, its previous public revision.
+async function snapshotsForReviews(tx: Tx, reviews: ActivityReview[]) {
+  const refs = reviews.flatMap((r) =>
+    [r.revision, r.previous_revision]
+      .filter((revision) => revision !== null)
+      .map((revision) => ({ activity_id: r.activity_id, revision })),
+  );
+  if (!refs.length) return [];
+  const snapshots = await tx.activityRevision.findMany({ where: { OR: refs } });
+  const byVersion = new Map(snapshots.map((s) => [s.activity_id + '/' + s.revision, s]));
+  return reviews.map((r) =>
+    reviewResponse(
+      r,
+      byVersion.get(r.activity_id + '/' + r.revision)!,
+      byVersion.get(r.activity_id + '/' + r.previous_revision),
+    ),
+  );
+}
+
 @Controller('admin/activity-reviews')
 export class ReviewController {
   constructor(
@@ -46,26 +73,36 @@ export class ReviewController {
     if (!staff(req.actor)) denied();
     if (q.status && !['pending', 'approved', 'rejected'].includes(q.status))
       invalid('status', '审核状态无效');
-    const reviews = await this.db.activityReview.findMany({
-      where: { status: q.status },
-      include: { activity: { include: includeView } },
-      orderBy: [{ created_at: 'desc' }, { id: 'asc' }],
-    });
-    return envelope(
-      paginate(
-        reviews.map((r) => reviewView(r.activity, r)),
-        q,
-      ),
+    const { page, page_size, skip } = pagination(q);
+    const where = { status: q.status };
+    return this.db.$transaction(
+      async (tx) => {
+        const total = await tx.activityReview.count({ where });
+        const rows =
+          skip < total
+            ? await tx.activityReview.findMany({
+                where,
+                orderBy: [{ created_at: 'desc' }, { id: 'asc' }],
+                skip,
+                take: page_size,
+              })
+            : [];
+        return envelope({ items: await snapshotsForReviews(tx, rows), total, page, page_size });
+      },
+      { isolationLevel: 'RepeatableRead' },
     );
   }
   @Get(':id') async get(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string) {
     if (!staff(req.actor)) denied();
-    const r = await this.db.activityReview.findUnique({
-      where: { id },
-      include: { activity: { include: includeView } },
-    });
-    if (!r) invisible();
-    return envelope(reviewView(r.activity, r));
+    return this.db.$transaction(
+      async (tx) => {
+        const review = await tx.activityReview.findUnique({ where: { id } });
+        if (!review) invisible();
+        const [item] = await snapshotsForReviews(tx, [review]);
+        return envelope(item);
+      },
+      { isolationLevel: 'RepeatableRead' },
+    );
   }
   @Post(':id/decision') @HttpCode(200) decide(
     @Req() req: SessionRequest,

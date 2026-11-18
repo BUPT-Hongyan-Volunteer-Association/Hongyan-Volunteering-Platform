@@ -20,7 +20,7 @@ import type {
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import { envelope, invisible } from '../http.js';
-import { managedScope, includeView, project, paginate } from './read.js';
+import { managedScope, includeView, project, pagination } from './read.js';
 import {
   Workflow,
   checkVersion,
@@ -38,28 +38,42 @@ export class DraftController {
     private db: Database,
     private workflow: Workflow,
   ) {}
-  private async read(req: SessionRequest, id: string) {
+  @Get('activities/:id') async detail(
+    @Req() req: SessionRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     const row = await this.db.activity.findFirst({
       where: { id, ...managedScope(req.actor) },
       include: includeView,
     });
     if (!row) invisible();
-    return row;
-  }
-  @Get('activities/:id') async detail(
-    @Req() req: SessionRequest,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
-    return envelope(detail(await this.read(req, id)));
+    return envelope(detail(row));
   }
   @Get('activities/:id/revisions') async revisions(
     @Req() req: SessionRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Query() q: Record<string, string>,
   ) {
-    const row = await this.read(req, id);
-    return envelope(
-      paginate(row.revisions.sort((a, b) => b.revision - a.revision).map(snapshot), q),
+    const scope = managedScope(req.actor);
+    return this.db.$transaction(
+      async (tx) => {
+        if (!(await tx.activity.findFirst({ where: { id, ...scope }, select: { id: true } })))
+          invisible();
+        const { page, page_size, skip } = pagination(q);
+        const where = { activity_id: id };
+        const total = await tx.activityRevision.count({ where });
+        const rows =
+          skip < total
+            ? await tx.activityRevision.findMany({
+                where,
+                orderBy: { revision: 'desc' },
+                skip,
+                take: page_size,
+              })
+            : [];
+        return envelope({ items: rows.map(snapshot), total, page, page_size });
+      },
+      { isolationLevel: 'RepeatableRead' },
     );
   }
   @Get('activities/:id/revisions/:rev') async revision(
@@ -67,7 +81,15 @@ export class DraftController {
     @Param('id', ParseUUIDPipe) id: string,
     @Param('rev', ParseIntPipe) rev: number,
   ) {
-    const r = (await this.read(req, id)).revisions.find((r) => r.revision === rev);
+    const scope = managedScope(req.actor);
+    // ParseIntPipe accepts integers beyond PostgreSQL's integer range.
+    if (rev > 2147483647 || rev < -2147483648) invisible();
+    const r = await this.db.activityRevision.findUnique({
+      where: {
+        activity_id_revision: { activity_id: id, revision: rev },
+        activity: scope,
+      },
+    });
     if (!r) invisible();
     return envelope(snapshot(r));
   }

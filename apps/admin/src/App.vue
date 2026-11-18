@@ -6,6 +6,6 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn';
 
 <template>
   <ElConfigProvider :locale="zhCn">
-    <AccountGate admin><RouterView /></AccountGate>
+    <AccountGate admin v-slot="{ profile }"><RouterView :profile="profile" /></AccountGate>
   </ElConfigProvider>
 </template>

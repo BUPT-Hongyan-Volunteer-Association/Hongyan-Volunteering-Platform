@@ -4,7 +4,7 @@ import type { Response } from 'express';
 import { Database } from '../database.js';
 import { BusinessError, envelope, expired, invalid } from '../http.js';
 import { hashPassword, matches } from './password.js';
-import { issueSession, setCookie } from './session.service.js';
+import { clearCookie, issueSession, setCookie } from './session.service.js';
 import { SessionAccess, type SessionRequest } from './session.guard.js';
 
 const dummyHash = hashPassword(randomBytes(32).toString('hex'));
@@ -118,12 +118,7 @@ export class AccountController {
   @SessionAccess('limited')
   async logout(@Req() req: SessionRequest, @Res({ passthrough: true }) res: Response) {
     await this.db.httpSession.deleteMany({ where: { id_hash: req.sessionHash } });
-    res.clearCookie('volunteer_session', {
-      path: '/api/v1',
-      httpOnly: true,
-      secure: true,
-      sameSite: 'lax',
-    });
+    clearCookie(res);
     return envelope({ completed: true });
   }
   @Get('me') me(@Req() req: SessionRequest) {

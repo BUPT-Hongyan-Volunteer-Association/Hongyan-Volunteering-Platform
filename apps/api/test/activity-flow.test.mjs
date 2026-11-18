@@ -141,6 +141,99 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal(await db.activityChangeEvent.count({ where: { review_id: r.id } }), 1);
       assert.equal(await db.reviewAudit.count({ where: { review_id: r.id } }), 1);
     });
+    await t.test('按页读取审核快照、差异和活动版本', async () => {
+      // Ties deliberately span pages. Keep the seed activity in the result set.
+      await db.activityReview.updateMany({
+        data: { created_at: new Date('2026-01-01T00:00:00Z') },
+      });
+      const expected = await db.activityReview.findMany({
+        orderBy: [{ created_at: 'desc' }, { id: 'asc' }],
+      });
+      const queue = '/admin/activity-reviews';
+      const seen = [];
+      for (let page = 1; page <= Math.ceil(expected.length / 2) + 1; page++) {
+        const result = await teacher.request(queue + '?page_size=2&page=' + page);
+        assert.equal(result.status, 200);
+        assert.equal(result.data.total, expected.length);
+        assert.deepEqual(
+          result.data.items.map((r) => r.id),
+          expected.slice((page - 1) * 2, page * 2).map((r) => r.id),
+        );
+        for (const review of result.data.items) {
+          assert.deepEqual(review, (await teacher.request(queue + '/' + review.id)).data);
+          assert.equal(review.snapshot.activity_id, review.activity_id);
+          seen.push(review);
+        }
+      }
+      const approved = seen.find(
+        (r) => r.activity_id === id && r.status === 'approved' && r.previous_published_snapshot,
+      );
+      assert.equal(approved.previous_published_snapshot.content.location, 'A');
+      assert.equal(approved.snapshot.content.location, 'B');
+      assert.deepEqual(approved.changes, [
+        { field_path: 'location', before_value: '"A"', after_value: '"B"' },
+      ]);
+      const filtered = await teacher.request(queue + '?status=approved&page_size=1&page=2');
+      assert.equal(filtered.data.total, 2);
+      assert.equal(filtered.data.items[0].id, seen.filter((r) => r.status === 'approved')[1].id);
+      assert.equal((await student.request(queue)).status, 403);
+      assert.equal((await teacher.request(queue + '?page_size=101')).status, 422);
+
+      const history = path + '/revisions';
+      const all = (await owner.request(history)).data.items;
+      assert.deepEqual(
+        all.map((r) => r.revision),
+        [4, 3, 2, 1],
+      );
+      for (const page of [1, 2, 3]) {
+        const result = (await owner.request(history + '?page_size=3&page=' + page)).data;
+        assert.equal(result.total, 4);
+        assert.deepEqual(result.items, all.slice((page - 1) * 3, page * 3));
+      }
+      assert.deepEqual((await owner.request(history + '/4')).data, approved.snapshot);
+      assert.deepEqual(
+        (await owner.request(history + '/2')).data,
+        approved.previous_published_snapshot,
+      );
+      assert.equal((await owner.request(history + '?page=0')).status, 422);
+      for (const [actor, url, status, code] of [
+        [owner, history + '/99', 404, 'not_found'],
+        [owner, history + '/9007199254740991', 404, 'not_found'],
+        [other, history, 404, 'not_found'],
+        [other, history + '/1', 404, 'not_found'],
+        [student, history + '/1', 403, 'forbidden'],
+      ]) {
+        const r = await actor.request(url);
+        assert.equal(r.status, status);
+        assert.equal(r.code, code);
+      }
+    });
+    await t.test('录取者入群信息、自审拒绝和退出', async () => {
+      const member = browser(base),
+        dual = browser(base);
+      await member.signIn('0000000004', '000004', 't1' + randomUUID());
+      assert.equal(
+        (await member.request('/activities/' + id)).data.group_join_instructions,
+        '录取后向负责人领取群号',
+      );
+      assert.equal((await member.request('/auth/logout', { method: 'POST' })).status, 200);
+      assert.equal((await member.request('/me')).status, 401);
+      await dual.signIn('demo.dual', staffPassword);
+      const item = (await dual.write('POST', '/organizer/activities', sample.revisions[0].content))
+        .data;
+      const submitted = (
+        await dual.write('POST', '/organizer/activities/' + item.id + '/submit', {
+          expected_version: item.version,
+        })
+      ).data;
+      const denied = await dual.write(
+        'POST',
+        '/admin/activity-reviews/' + submitted.id + '/decision',
+        { expected_version: submitted.version, decision: 'approved' },
+      );
+      assert.equal(denied.status, 403);
+      assert.equal(denied.code, 'forbidden');
+    });
     await t.test('跨活动操作与两个旧窗口', async () => {
       const original = await version();
       assert.equal((await other.request(path)).status, 404);

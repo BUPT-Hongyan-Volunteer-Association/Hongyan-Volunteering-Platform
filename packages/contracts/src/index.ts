@@ -52,3 +52,20 @@ export function writeHeaders() {
   if (!csrfToken) throw new Error('会话尚未建立，请刷新后重试');
   return { 'X-CSRF-Token': csrfToken };
 }
+
+/** 每个表单实例持有一个命令。原请求结果未知时保留相同的幂等键。 */
+export function createCommand() {
+  let signature: string | undefined;
+  let key: string;
+  return {
+    headers(operation: string, target: string, body: unknown) {
+      const next = JSON.stringify([operation, target, body]);
+      if (signature !== next) {
+        signature = next;
+        key = crypto.randomUUID();
+      }
+      return { ...writeHeaders(), 'Idempotency-Key': key };
+    },
+    confirmed() { signature = undefined; },
+  };
+}

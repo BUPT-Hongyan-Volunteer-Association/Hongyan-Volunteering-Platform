@@ -65,7 +65,12 @@ export function project(
   const input = rev.content as unknown as ActivityInput;
   const times = slots(input.schedule);
   const published = row.revisions.find((r) => r.revision === row.published_revision);
-  const live = published ? slots((published.content as unknown as ActivityInput).schedule) : [];
+  const live =
+    rev === published
+      ? times
+      : published
+        ? slots((published.content as unknown as ActivityInput).schedule)
+        : [];
   const t = now.getTime();
   const item: View = {
     ...input,
@@ -102,12 +107,16 @@ export function project(
 }
 
 type Query = Record<string, string>;
-export function paginate<T>(items: T[], query: Query) {
+export function pagination(query: Query) {
   const page = Number(query.page ?? 1),
     page_size = Number(query.page_size ?? 20);
   if (!Number.isSafeInteger(page) || page < 1) invalid('page', '页码必须为正整数');
   if (!Number.isInteger(page_size) || page_size < 1 || page_size > 100)
     invalid('page_size', '每页显示 1 至 100 条');
+  return { page, page_size, skip: (page - 1) * page_size };
+}
+export function paginate<T>(items: T[], query: Query) {
+  const { page, page_size } = pagination(query);
   return {
     items: items.slice((page - 1) * page_size, page * page_size),
     total: items.length,

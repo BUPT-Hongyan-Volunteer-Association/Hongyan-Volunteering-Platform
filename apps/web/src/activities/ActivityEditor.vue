@@ -10,7 +10,7 @@ import {
   updateActivityDraft,
   submitActivity,
   withdrawActivityReview,
-  writeHeaders,
+  createCommand,
   type ActivityInput,
   type ActivityDraftPatch,
   type ManagedActivityDetail,
@@ -27,6 +27,8 @@ const detail = ref<ManagedActivityDetail>(),
   base = ref<Record<string, string>>({});
 const reason = ref(''),
   message = ref(''),
+  confirmation = ref<{ id: string; text: string }>(),
+  readError = ref(''),
   fieldErrors = ref<Record<string, string>>({}),
   busy = ref(false),
   loading = ref(false),
@@ -85,6 +87,7 @@ async function load(preserve = false) {
   const n = ++serial,
     local = Object.entries(form.value).filter(([k, v]) => v !== base.value[k]);
   loading.value = true;
+  readError.value = '';
   message.value = '';
   fieldErrors.value = {};
   conflict.value = false;
@@ -110,7 +113,7 @@ async function load(preserve = false) {
     if (n === serial) {
       detail.value = undefined;
       history.value = [];
-      report(e);
+      readError.value = e instanceof Error ? e.message : '读取失败';
     }
   } finally {
     if (n === serial) loading.value = false;
@@ -159,27 +162,25 @@ function payload(partial: boolean) {
   }
   return result;
 }
-let previous = { signature: '', key: '' };
-function headers(action: string, body: unknown) {
-  const signature = JSON.stringify([action, id.value, body]);
-  if (previous.signature !== signature) previous = { signature, key: crypto.randomUUID() };
-  return { ...writeHeaders(), 'Idempotency-Key': previous.key };
-}
+const command = createCommand();
 async function run(action: 'save' | 'submit' | 'withdraw') {
   if (busy.value) return;
   busy.value = true;
   fieldErrors.value = {};
+  confirmation.value = undefined;
   message.value = '';
+  const target = id.value;
+  const path = { id: target };
+  let nextId = target;
   try {
-    const path = { id: id.value };
-    if (action === 'save' && !id.value) {
+    if (action === 'save' && !target) {
       const body = payload(false) as ActivityInput;
       const result = await createActivity({
-        headers: headers(action, body),
+        headers: command.headers('create', target, body),
         body,
         throwOnError: true,
       });
-      await router.replace('/managed/' + result.data.data.id + '/edit');
+      nextId = result.data.data.id;
     } else {
       const d = detail.value!;
       if (action === 'save') {
@@ -189,34 +190,46 @@ async function run(action: 'save' | 'submit' | 'withdraw') {
         } as ActivityDraftPatch;
         await updateActivityDraft({
           path,
-          headers: headers(action, body),
+          headers: command.headers(action, target, body),
           body,
           throwOnError: true,
         });
       } else if (action === 'submit') {
         const body = { expected_version: d.activity.version };
-        await submitActivity({ path, headers: headers(action, body), body, throwOnError: true });
+        await submitActivity({
+          path,
+          headers: command.headers(action, target, body),
+          body,
+          throwOnError: true,
+        });
       } else {
         const r = d.current_review!,
           body = { expected_version: r.version, reason: reason.value };
         await withdrawActivityReview({
           path: { id: r.id },
-          headers: headers(action, body),
+          headers: command.headers(action, r.id, body),
           body,
           throwOnError: true,
         });
       }
-      await load();
     }
-    previous.signature = '';
-    message.value = { save: '草稿已保存', submit: '已送审，内容已冻结', withdraw: '已撤回' }[
-      action
-    ];
   } catch (e) {
-    report(e);
+    if (id.value === target) {
+      report(e);
+      if (e instanceof ApiError && !e.body) message.value = '写入结果尚未确认，可用相同内容重试。';
+    }
+    return;
   } finally {
     busy.value = false;
   }
+  command.confirmed();
+  if (id.value !== target) return;
+  confirmation.value = {
+    id: nextId,
+    text: { save: '草稿已保存', submit: '已送审，内容已冻结', withdraw: '已撤回' }[action],
+  };
+  if (nextId !== target) await router.replace('/managed/' + nextId + '/edit');
+  else await load();
 }
 async function inspect(revision: number) {
   try {
@@ -227,15 +240,29 @@ async function inspect(revision: number) {
     report(e);
   }
 }
-watch(id, () => load(), { immediate: true });
+watch(
+  id,
+  () => {
+    if (confirmation.value?.id !== id.value) confirmation.value = undefined;
+    base.value = {};
+    form.value = {};
+    reason.value = '';
+    return load();
+  },
+  { immediate: true },
+);
 const dirty = computed(() => fields.some(([k]) => form.value[k] !== base.value[k]));
 </script>
 <template>
   <RouterLink to="/managed">返回活动管理</RouterLink>
   <h1>{{ id ? '活动编辑与送审' : '新建单次活动' }}</h1>
   <p v-if="loading">正在读取…</p>
+  <p v-if="confirmation?.id === id" role="status">{{ confirmation.text }}</p>
+  <p v-if="readError" role="alert">最新版本读取失败：{{ readError }}</p>
   <p v-if="message" role="status">{{ message }}</p>
-  <button v-if="conflict || (id && !detail && !loading)" @click="load(true)">刷新版本并复核</button>
+  <button v-if="conflict || (id && !detail && !loading)" @click="load(confirmation?.id !== id)">
+    刷新版本并复核
+  </button>
   <template v-if="!loading && (!id || detail)">
     <p v-if="detail">
       工作版本 {{ detail.working_snapshot.revision }} ·
@@ -276,7 +303,7 @@ const dirty = computed(() => fields.some(([k]) => form.value[k] !== base.value[k
     <p v-if="dirty && id">请先保存修改，再提交审核。</p>
     <template v-if="pending"
       ><label>撤回原因 <input v-model="reason" /></label
-      ><button :disabled="busy || !reason.trim()" @click="run('withdraw')">
+      ><button :disabled="busy || conflict || !reason.trim()" @click="run('withdraw')">
         撤回送审
       </button></template
     >

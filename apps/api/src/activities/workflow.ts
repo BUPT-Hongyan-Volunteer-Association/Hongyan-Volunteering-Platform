@@ -59,6 +59,13 @@ function differences(
 export function reviewView(row: LoadedActivity, r: ActivityReview) {
   const current = row.revisions.find((v) => v.revision === r.revision)!;
   const before = row.revisions.find((v) => v.revision === r.previous_revision);
+  return reviewResponse(r, current, before);
+}
+export function reviewResponse(
+  r: ActivityReview,
+  current: ActivityRevision,
+  before?: ActivityRevision,
+) {
   return {
     id: r.id,
     version: r.version,
