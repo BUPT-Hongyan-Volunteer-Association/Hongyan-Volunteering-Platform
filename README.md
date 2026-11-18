@@ -4,7 +4,7 @@
 
 ## 本地环境
 
-在包含本版本的工程克隆根目录执行下面的命令。使用 Node.js 24（`.nvmrc` 固定 24.22.3）、pnpm 10.32.1 和 PostgreSQL 18。用 `node -v`、`pnpm -v`、`postgres --version` 核对版本。使用 nvm 时可运行 `nvm install` 和 `nvm use`，然后用 `npm install --global pnpm@10.32.1` 安装指定包管理器。PostgreSQL 的 `initdb`、`pg_ctl` 需要在 PATH 中。macOS 上用 Homebrew 安装的 postgresql@18，其 bin 目录在该 formula 的安装前缀下。
+在包含本版本的工程克隆根目录执行下面的命令。使用 Node.js 24（`.nvmrc` 固定 24.22.3）、pnpm 10.32.1 和 PostgreSQL 18。用 `node -v`、`pnpm -v`、`postgres --version` 核对版本。使用 nvm 时可运行 `nvm install` 和 `nvm use`，然后用 `npm install --global pnpm@10.32.1` 安装指定包管理器。PostgreSQL 的 `initdb`、`pg_ctl` 和 `createdb` 需要在 PATH 中。macOS 上用 Homebrew 安装的 postgresql@18，其 bin 目录在该 formula 的安装前缀下。
 
 ### 1. 安装并生成
 
@@ -24,10 +24,11 @@ pnpm db:generate
 mkdir -p .local
 initdb -D .local/pgdata -U volunteer_dev -A scram-sha-256 --locale=C -E UTF8 -W
 pg_ctl -D .local/pgdata -l .local/postgres.log -o "-h 127.0.0.1 -p 55432" -w start
+createdb -h 127.0.0.1 -p 55432 -U volunteer_dev volunteer_dev
 cp apps/api/.env.example apps/api/.env
 ```
 
-把 `apps/api/.env` 中的 `CHANGE_ME` 换成刚设置的密码。密码中的 URI 特殊字符需百分号编码。自动化验收可把 `initdb` 的 `-W` 换为 `--pwfile=文件路径`，从限本机用户读取的文件传入同一个密码。使用已有 PostgreSQL 18 时，可直接将 `DATABASE_URL` 指向专用的空开发库。
+`createdb` 提示时输入同一密码。也可用数据库客户端连接该实例的 `postgres` 维护库，执行 `CREATE DATABASE volunteer_dev;`。把 `apps/api/.env` 中的 `CHANGE_ME` 换成刚设置的密码。密码中的 URI 特殊字符需百分号编码。自动化验收可把 `initdb` 的 `-W` 换为 `--pwfile=文件路径`，从限本机用户读取的文件传入密码。使用已有 PostgreSQL 18 时，可直接将 `DATABASE_URL` 指向专用的空开发库。
 
 ```sh
 pnpm db:migrate
@@ -35,7 +36,7 @@ pnpm typecheck
 pnpm build
 ```
 
-迁移会在实例中建立 `volunteer_dev` 数据库（若尚未创建，须有建库权限）并建立匿名会话表。第二次运行只应用待执行迁移。`.env`、本地数据库及生成物均由 Git 忽略。
+迁移会在已建好的空库中建立匿名会话表。第二次运行只应用待执行迁移。`.env`、本地数据库及生成物均由 Git 忽略。
 
 ### 3. 启动与复验
 
