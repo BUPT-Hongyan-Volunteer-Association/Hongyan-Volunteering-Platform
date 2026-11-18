@@ -1,0 +1,19 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model HttpSession {
+  id_hash    String   @id @db.Char(64)
+  csrf_token String
+  expires_at DateTime @db.Timestamptz(3)
+
+  @@index([expires_at])
+  @@map("http_session")
+}

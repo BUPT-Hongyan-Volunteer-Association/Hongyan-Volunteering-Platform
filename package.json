@@ -1,0 +1,26 @@
+{
+  "name": "hongyan-volunteering-platform",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "contracts:generate": "pnpm --filter @hongyan/contracts generate",
+    "db:generate": "pnpm --filter @hongyan/api db:generate",
+    "db:migrate": "pnpm --filter @hongyan/api db:migrate",
+    "dev:web": "pnpm --filter @hongyan/web dev",
+    "dev:admin": "pnpm --filter @hongyan/admin dev",
+    "dev:api": "pnpm --filter @hongyan/api dev",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "build": "pnpm -r --if-present build"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@vitejs/plugin-vue": "6.0.11",
+    "typescript": "5.9.3",
+    "vite": "8.3.8",
+    "vue-tsc": "3.3.14"
+  }
+}

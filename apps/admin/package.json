@@ -1,0 +1,16 @@
+{
+  "name": "@hongyan/admin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "vue-tsc -p tsconfig.json --noEmit",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@hongyan/ui": "workspace:*",
+    "element-plus": "2.14.8",
+    "vue": "3.5.45",
+    "vue-router": "4.6.4"
+  }
+}

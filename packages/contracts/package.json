@@ -1,0 +1,13 @@
+{
+  "name": "@hongyan/contracts",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "generate": "openapi-ts -i openapi_v1.2.4.yaml -o src/generated",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "0.99.0"
+  }
+}

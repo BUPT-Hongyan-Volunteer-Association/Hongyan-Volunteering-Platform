@@ -1,0 +1,14 @@
+{
+  "name": "@hongyan/ui",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./SessionStatus.vue": "./src/SessionStatus.vue",
+    "./theme.css": "./src/theme.css"
+  },
+  "dependencies": {
+    "@hongyan/contracts": "workspace:*",
+    "element-plus": "2.14.8",
+    "vue": "3.5.45"
+  }
+}
