@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "dev": "tsc && node --env-file=.env dist/main.js",
-    "test:flow": "tsc && node --env-file=.env --test test/activity-flow.test.mjs"
+    "test:flow": "tsc && node --env-file=.env --test test/activity-flow.test.mjs",
+    "db:seed": "node --env-file=.env scripts/seed.mjs"
   },
   "dependencies": {
     "@nestjs/common": "11.2.10",

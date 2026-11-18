@@ -64,7 +64,7 @@ pnpm build
 
 ## 登录与本地体验账号
 
-从工程根目录运行 `pnpm db:generate`、`pnpm db:migrate`、`pnpm --filter @hongyan/api build`。在专用开发库中需要合成账号时，设置仅本机使用的环境变量 `DEMO_STAFF_PASSWORD`（至少 12 个字符），执行 `pnpm --filter @hongyan/api exec node --env-file=.env scripts/seed.mjs`。重复执行保留已有账号、密码与活动。
+从工程根目录运行 `pnpm db:generate`、`pnpm db:migrate`、`pnpm --filter @hongyan/api build`。在专用开发库中需要合成账号时，设置仅本机使用的环境变量 `DEMO_STAFF_PASSWORD`（至少 12 个字符），执行 `pnpm --filter @hongyan/api db:seed`。重复执行保留已有账号、密码与活动。
 
 | 账号 | 合成身份 |
 | --- | --- |
