@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import type { Profile } from '@hongyan/contracts';
+import UiIcon from '@hongyan/ui/UiIcon.vue';
 import { personalRecords, title } from './personal/examples';
 defineProps<{ profile: Profile }>();
+const entries = [
+  { to: '/mine/schedule', label: '我的日程', icon: 'Calendar' },
+  { to: '/mine/hours', label: '我的时长', icon: 'Clock' },
+  { to: '/mine/feedback', label: '本人记录与反馈', icon: 'ChatLineSquare' },
+  { to: '/mine/settings', label: '账号设置', icon: 'Setting' },
+] as const;
 </script>
 <template>
   <template v-if="$route.path === '/mine/settings'">
-    <RouterLink to="/mine">返回我的</RouterLink>
+    <RouterLink class="back-link" to="/mine"><UiIcon name="ArrowLeft" />返回我的</RouterLink>
     <h1>账号设置</h1>
-    <dl>
+    <dl class="detail-fields">
       <dt>姓名</dt>
       <dd>{{ profile.display_name }}</dd>
       <dt>登录账号</dt>
@@ -19,12 +26,16 @@ defineProps<{ profile: Profile }>();
     </dl>
   </template>
   <template v-else-if="$route.path === '/mine/example-activity'">
-    <RouterLink :to="'/registrations/' + personalRecords.registrations[0].id"
-      >返回报名详情</RouterLink
+    <RouterLink class="back-link" :to="'/registrations/' + personalRecords.registrations[0].id"
+      ><UiIcon name="ArrowLeft" />返回报名详情</RouterLink
     >
-    <p class="sample-label">示例数据 · 获批活动</p>
-    <h1>{{ title }}</h1>
-    <dl>
+    <div class="page-heading">
+      <div class="page-title">
+        <h1>{{ title }}</h1>
+        <span class="sample-label">示例数据 · 获批活动</span>
+      </div>
+    </div>
+    <dl class="detail-fields">
       <dt>服务地点</dt>
       <dd>沙河校区图书馆</dd>
       <dt>服务安排</dt>
@@ -33,15 +44,66 @@ defineProps<{ profile: Profile }>();
       <dd>整项活动统一报名</dd>
     </dl>
   </template>
-  <template v-else
-    ><h1>我的</h1>
-    <p>{{ profile.display_name }} · {{ profile.username }}</p>
-    <div class="entry-list">
-      <RouterLink to="/mine/schedule">我的日程</RouterLink
-      ><RouterLink to="/mine/hours">我的时长</RouterLink
-      ><RouterLink to="/mine/feedback">本人记录与反馈</RouterLink
-      ><RouterLink to="/mine/settings">账号设置</RouterLink>
-      <RouterLink v-if="profile.roles.includes('organizer')" to="/managed">活动管理</RouterLink>
+  <template v-else>
+    <h1>我的</h1>
+    <div class="profile-strip">
+      <span class="avatar" aria-hidden="true">{{ profile.display_name.slice(0, 1) }}</span>
+      <div>
+        <h2>{{ profile.display_name }}</h2>
+        <span class="meta-line"
+          >{{ profile.student ? '学号' : '账号' }} {{ profile.username }}</span
+        >
+      </div>
+      <RouterLink
+        v-if="profile.roles.includes('organizer')"
+        class="button manager-entry"
+        to="/managed"
+        ><UiIcon name="FolderOpened" />活动管理</RouterLink
+      >
+    </div>
+    <div class="entry-list personal-entries">
+      <RouterLink v-for="entry in entries" :key="entry.to" :to="entry.to">
+        <span class="item-icon"><UiIcon :name="entry.icon" /></span
+        ><strong>{{ entry.label }}</strong
+        ><UiIcon name="ArrowRight" class="row-arrow" />
+      </RouterLink>
     </div>
   </template>
 </template>
+<style scoped>
+.profile-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.profile-strip h2 {
+  margin: 0 0 3px;
+}
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  background: var(--brand);
+  color: white;
+  border-radius: 50%;
+  font-weight: 650;
+  font-size: 20px;
+}
+.manager-entry {
+  margin-left: auto;
+}
+.row-arrow {
+  margin-left: auto;
+  width: 15px;
+  color: var(--muted);
+}
+.personal-entries strong {
+  font-weight: 550;
+}
+</style>

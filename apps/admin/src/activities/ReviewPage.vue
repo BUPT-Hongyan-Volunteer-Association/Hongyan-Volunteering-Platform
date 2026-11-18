@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { computed, nextTick, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -11,6 +12,10 @@ import {
   createCommand,
   type ActivityReview,
 } from '@hongyan/contracts';
+import UiIcon from '@hongyan/ui/UiIcon.vue';
+import ActivitySnapshot from '@hongyan/ui/ActivitySnapshot.vue';
+import { fieldLabel, fieldValue } from '@hongyan/ui/activityFields';
+import { localDateTime, reviewLabels } from '@hongyan/ui/activityDisplay';
 import Pager from '@hongyan/ui/Pager.vue';
 const props = defineProps<{ profile: Profile }>();
 const route = useRoute(),
@@ -28,46 +33,11 @@ const status = computed(
   () => String(route.query.status || 'pending') as 'pending' | 'approved' | 'rejected',
 );
 const page = computed(() => Number(route.query.page || 1));
-const labels: Record<string, string> = {
-  title: '活动标题',
-  description: '服务内容',
-  beneficiaries: '服务对象',
-  schedule: '活动安排',
-  starts_at: '开始时间',
-  ends_at: '结束时间',
-  schedule_type: '时间类型',
-  location: '活动地点',
-  meeting_point: '集合地点',
-  campus: '校区',
-  transport_notes: '交通说明',
-  capacity: '计划名额',
-  registration_opens_at: '报名开放',
-  registration_closes_at: '报名截止',
-  result_expected_at: '预计结果公布',
-  eligibility_text: '报名条件',
-  selection_text: '录取说明',
-  group_join_instructions: '入群方式',
-  hours_rule_text: '时长认定',
-  hours_import_expected_at: '预计导入时间',
-  contact_text: '联系渠道',
-  expected_hours: '预计时长',
-  expected_hours_basis: '时长口径',
-  safety_notes: '安全说明',
-};
-const label = (k: string) =>
-  k
-    .split('.')
-    .map((f) => labels[f] ?? f)
-    .join(' / ');
-function display(value: unknown): string {
-  if (value == null) return '无';
-  if (typeof value === 'object')
-    return Object.entries(value)
-      .map(([k, v]) => label(k) + ' ' + display(v))
-      .join('，');
-  return String(value);
-}
 const windowScroll = () => window.scrollY;
+function scheduleReturn() {
+  const origin = window.history.state?.scheduleReturn;
+  return typeof origin === 'string' && /^\/schedule(?:\?|$)/.test(origin) ? origin : undefined;
+}
 let serial = 0,
   savedScroll = 0;
 const command = createCommand();
@@ -97,7 +67,16 @@ async function load() {
       currentPending.value =
         managed.current_review?.id === r.id &&
         ['pending_review', 'published'].includes(managed.activity.status);
-      if (completed?.id === id) await router.push({ path: '/reviews', query: route.query });
+      if (completed?.id === id) {
+        const origin = scheduleReturn();
+        if (origin)
+          await router.push({
+            path: '/schedule',
+            query: router.resolve(origin).query,
+            state: { scheduleNotice: notice.value },
+          });
+        else await router.push({ path: '/reviews', query: route.query });
+      }
     } else {
       const result = (
         await listActivityReviews({
@@ -171,86 +150,174 @@ watch(
   { immediate: true },
 );
 </script>
+
 <template>
-  <h1>活动审核</h1>
-  <p v-if="notice" role="status">{{ notice }}</p>
-  <p v-if="error" role="alert">{{ error }} <button @click="load">刷新</button></p>
-  <p v-if="loading">正在读取…</p>
-  <template v-else-if="!route.params.id">
-    <label
+  <div class="page-heading">
+    <h1>活动审核</h1>
+    <label v-if="!route.params.id" class="review-filter"
       >审核状态
-      <select
-        :value="status"
-        @change="
+      <UiSelect
+        label="审核状态"
+        :model-value="status"
+        :options="[
+          { value: 'pending', label: '待审' },
+          { value: 'approved', label: '已批准' },
+          { value: 'rejected', label: '已驳回' },
+        ]"
+        @update:model-value="
           savedScroll = 0;
-          router.push({ query: { status: ($event.target as HTMLSelectElement).value, page: 1 } });
+          router.push({ query: { status: $event, page: 1 } });
         "
-      >
-        <option value="pending">待审</option>
-        <option value="approved">已批准</option>
-        <option value="rejected">已驳回</option>
-      </select></label
+      />
+    </label>
+    <RouterLink
+      v-else
+      class="button"
+      :to="scheduleReturn() || { path: '/reviews', query: route.query }"
+      ><UiIcon name="ArrowLeft" />{{ scheduleReturn() ? '返回日程' : '返回审核队列' }}</RouterLink
     >
-    <ul>
-      <li v-for="r in rows" :key="r.id">
-        <RouterLink
-          :to="{ path: '/reviews/' + r.id, query: route.query }"
-          @click="savedScroll = windowScroll()"
-          >{{ r.snapshot.content.title }} · 版本 {{ r.revision }}</RouterLink
-        >
-      </li>
-    </ul>
-    <p v-if="!rows.length && !error">暂无匹配的审核</p>
+  </div>
+  <p v-if="notice" role="status" class="notice">{{ notice }}</p>
+  <p v-if="error" role="alert">{{ error }} <button @click="load">刷新</button></p>
+  <p v-if="loading" role="status">正在读取…</p>
+  <template v-else-if="!route.params.id">
+    <div v-if="rows.length" class="entry-list">
+      <RouterLink
+        v-for="r in rows"
+        :key="r.id"
+        :to="{ path: '/reviews/' + r.id, query: route.query }"
+        @click="savedScroll = windowScroll()"
+      >
+        <span class="item-icon"><UiIcon name="DocumentChecked" /></span>
+        <div>
+          <strong>{{ r.snapshot.content.title }} · 版本 {{ r.revision }}</strong
+          ><small v-if="r.created_at">送审 {{ localDateTime(r.created_at) }}</small>
+        </div>
+        <span class="row-end"
+          ><span class="state-chip" :class="{ attention: r.status === 'pending' }">{{
+            reviewLabels[r.status]
+          }}</span
+          ><UiIcon name="ArrowRight"
+        /></span>
+      </RouterLink>
+    </div>
+    <div v-else-if="!error" class="empty-state">
+      <UiIcon name="CircleCheck" />
+      <p>暂无匹配的审核</p>
+    </div>
     <Pager
+      v-if="total > 20 && !error"
       :page="page"
       :size="20"
       :total="total"
       @change="(p) => router.push({ query: { ...route.query, page: p } })"
-  /></template>
-  <template v-else
-    ><RouterLink :to="{ path: '/reviews', query: route.query }">返回审核队列</RouterLink>
-    <article v-if="review">
+    />
+  </template>
+  <article v-else-if="review" class="review-detail">
+    <div class="page-title">
       <h2>{{ review.snapshot.content.title }} · 送审版本 {{ review.revision }}</h2>
-      <p>
-        {{
-          review.previous_published_snapshot
-            ? '原公开版本 ' + review.previous_published_snapshot.revision
-            : '首次发布，尚无公开版本'
-        }}
-      </p>
-      <details open>
-        <summary>冻结内容</summary>
-        <dl>
-          <template v-for="(value, k) in review.snapshot.content"
-            ><dt>{{ label(String(k)) }}</dt>
-            <dd>{{ display(value) }}</dd></template
-          >
-        </dl>
-      </details>
-      <template v-if="review.previous_published_snapshot"
-        ><details>
-          <summary>原公开内容</summary>
-          <dl>
-            <template v-for="(value, k) in review.previous_published_snapshot.content"
-              ><dt>{{ label(String(k)) }}</dt>
-              <dd>{{ display(value) }}</dd></template
-            >
-          </dl>
-        </details>
-        <h3>逐字段差异</h3>
-        <ul>
-          <li v-for="c in review.changes" :key="c.field_path">
-            {{ label(c.field_path) }}：{{ display(JSON.parse(c.before_value)) }} →
-            {{ display(JSON.parse(c.after_value)) }}
-          </li>
-        </ul></template
-      >
-      <template v-if="canDecide"
-        ><label>审核意见（驳回必填）<input v-model="reason" /></label>
-        <button :disabled="busy" @click="decide('approved')">批准发布</button>
-        <button :disabled="busy" @click="decide('rejected')">驳回</button></template
-      >
-      <p v-else>当前审核只读 · {{ review.status }} {{ review.reason }}</p>
-    </article></template
-  >
+      <span class="state-chip" :class="{ attention: review.status === 'pending' }">{{
+        reviewLabels[review.status]
+      }}</span>
+    </div>
+    <p class="meta-line">
+      {{
+        review.previous_published_snapshot
+          ? '原公开版本 ' + review.previous_published_snapshot.revision
+          : '首次发布，尚无公开版本'
+      }}
+    </p>
+    <section v-if="review.previous_published_snapshot" class="diff">
+      <h3>逐字段差异</h3>
+      <dl v-if="review.changes.length">
+        <template v-for="c in review.changes" :key="c.field_path"
+          ><dt>{{ fieldLabel(c.field_path) }}</dt>
+          <dd>
+            <span>{{ fieldValue(c.field_path, JSON.parse(c.before_value)) }}</span> →
+            <strong>{{ fieldValue(c.field_path, JSON.parse(c.after_value)) }}</strong>
+          </dd>
+        </template>
+      </dl>
+      <p v-else>与原公开版本一致</p>
+    </section>
+    <details :open="!review.previous_published_snapshot">
+      <summary>冻结内容</summary>
+      <ActivitySnapshot :content="review.snapshot.content" />
+    </details>
+    <details v-if="review.previous_published_snapshot">
+      <summary>原公开内容</summary>
+      <ActivitySnapshot :content="review.previous_published_snapshot.content" />
+    </details>
+    <form v-if="canDecide" class="decision-form" @submit.prevent="decide('approved')">
+      <label>审核意见（驳回必填）<textarea v-model="reason" rows="2" /></label>
+      <div class="page-actions">
+        <button type="button" :disabled="busy" @click="decide('rejected')">驳回</button>
+        <button class="primary" type="submit" :disabled="busy">
+          <UiIcon name="Check" />批准发布
+        </button>
+      </div>
+    </form>
+    <p v-else class="notice">
+      当前审核只读 · {{ reviewLabels[review.status] }} {{ review.reason }}
+    </p>
+  </article>
 </template>
+<style scoped>
+.review-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.entry-list small {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+.review-detail > .meta-line {
+  margin: 8px 0 20px;
+}
+.review-detail details {
+  border-top: 1px solid var(--line);
+  padding-block: 10px;
+}
+.review-detail summary {
+  display: list-item;
+  align-content: center;
+  padding: 4px 0;
+}
+.diff {
+  padding: 16px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  margin-bottom: 18px;
+}
+.diff dl {
+  margin: 8px 0 0;
+  font-size: 14px;
+  grid-template-columns: minmax(6em, 20%) minmax(0, 1fr);
+}
+.diff dd {
+  white-space: pre-line;
+}
+.diff dd span {
+  color: var(--muted);
+}
+.diff dd strong {
+  color: var(--brand);
+  font-weight: 550;
+}
+.decision-form {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.decision-form label {
+  display: grid;
+  gap: 6px;
+}
+.decision-form .page-actions {
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+</style>

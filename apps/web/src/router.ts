@@ -11,8 +11,8 @@ import SchedulePage from '@hongyan/ui/SchedulePage.vue';
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', component: PublicActivities },
-    { path: '/activities/:id', component: PublicActivities },
+    { path: '/', component: PublicActivities, meta: { profile: true } },
+    { path: '/activities/:id', component: PublicActivities, meta: { profile: true } },
     { path: '/managed', component: ManagedActivities, meta: { organizer: true } },
     { path: '/managed/new', component: ActivityEditor, meta: { organizer: true } },
     {
@@ -30,12 +30,17 @@ export const router = createRouter({
         { path: 'roster', name: 'roster', component: Roster },
       ],
     },
-    { path: '/schedule', component: SchedulePage, props: { scope: 'public' } },
+    {
+      path: '/schedule',
+      component: SchedulePage,
+      props: { scope: 'public' },
+      meta: { studentSchedule: true },
+    },
     {
       path: '/mine/schedule',
       component: SchedulePage,
       props: { scope: 'mine' },
-      meta: { personal: true },
+      meta: { personal: true, studentSchedule: true },
     },
     {
       path: '/managed-schedule',

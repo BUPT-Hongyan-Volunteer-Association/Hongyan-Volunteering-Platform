@@ -9,20 +9,7 @@ import {
 export type Scope = 'public' | 'mine' | 'managed' | 'all';
 export const evaluatedAt = '2026-11-18T10:00:00+08:00';
 export const palette = ['#3B82F6', '#10B981', '#8B5CF6', '#06B6D4', '#F97316', '#84CC16'];
-export const statusLabels = {
-  draft: '草稿',
-  pending_review: '待审核',
-  published: '已发布',
-  cancelled: '已取消',
-  completed: '已结束',
-  archived: '已归档',
-};
-export const phaseLabels = {
-  not_open: '未开放',
-  open: '报名中',
-  closed: '已截止',
-  unavailable: '不适用',
-};
+export { statusLabels, phaseLabels } from '../activityDisplay';
 export const standalone = '72000000-0000-4000-8000-000000000015';
 const multi = [
   ['2026-11-18T09:15:00+08:00', '2026-11-18T11:30:00+08:00'],
@@ -52,6 +39,7 @@ function sample(a?: Activity): TimelineActivity {
         ? 'closed'
         : 'open'
       : 'unavailable') as TimelineActivity['registration_phase'],
+    campus: a?.campus,
     location: a?.location || '社区服务中心',
     schedule_revision: a?.schedule_revision ?? 1,
     revision_state: a?.revision_state ?? 'approved',
@@ -99,8 +87,7 @@ export async function examplePage(
   if (scope === 'public' || scope === 'all') items.push(sample());
   return { items, total: items.length, page: 1, page_size: 20, state_evaluated_at: evaluatedAt };
 }
-export const beijingDate = (time: number) =>
-  new Date(time + 8 * 3600000).toISOString().slice(0, 10);
+export { localDate as beijingDate } from '../activityDisplay';
 export const localTime = (iso: string) =>
   new Date(iso).toLocaleString('zh-CN', {
     timeZone: 'Asia/Shanghai',

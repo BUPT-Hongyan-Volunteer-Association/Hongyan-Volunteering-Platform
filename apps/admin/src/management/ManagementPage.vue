@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import type { Profile } from '@hongyan/contracts';
@@ -86,12 +87,9 @@ watch(
         class="preview-form"
         @submit.prevent="message = '当前为示例预览，' + action + '尚未提交。'"
       >
-        <label
-          >操作<select v-model="action" aria-label="操作">
-            <option v-for="option in actions" :key="option">{{ option }}</option>
-          </select></label
-        >
-        <label>处理意见<textarea v-model="reason" /></label><button>预览操作</button>
+        <label>操作<UiSelect label="操作" v-model="action" :options="actions" /></label>
+        <label>处理意见<textarea v-model="reason" /></label
+        ><button class="primary">预览操作</button>
       </form>
       <p v-if="message" role="status">{{ message }}</p>
     </template>

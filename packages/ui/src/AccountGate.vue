@@ -11,6 +11,11 @@ import {
   type Profile,
 } from '@hongyan/contracts';
 
+import BrandName from './BrandName.vue';
+import AccountIdentity from './AccountIdentity.vue';
+import UiIcon from './UiIcon.vue';
+
+const showPassword = ref(false);
 const props = defineProps<{ admin?: boolean }>();
 const stage = ref<'loading' | 'failed' | 'login' | 'change' | 'ready'>('loading');
 const profile = ref<Profile>();
@@ -56,6 +61,7 @@ async function submit(action: 'login' | 'change' | 'logout') {
         throwOnError: true,
       });
     if (action === 'logout') await logout({ headers, throwOnError: true });
+    showPassword.value = false;
     password.value = '';
     next.value = '';
     await restore();
@@ -89,88 +95,298 @@ onUnmounted(() => {
   window.removeEventListener('hongyan-session-expired', expired);
 });
 </script>
+
 <template>
-  <p v-if="stage === 'loading'" role="status">正在读取会话…</p>
-  <section v-else-if="stage === 'failed'">
-    <h2>连接失败</h2>
-    <button @click="restore">重试</button>
-  </section>
-  <form
-    v-else-if="stage === 'login' || stage === 'change'"
-    class="credentials"
-    @submit.prevent="submit(stage)"
-  >
-    <h2>{{ stage === 'login' ? '登录' : '首次登录，请修改密码' }}</h2>
-    <label v-if="stage === 'login'"
-      >账号<input v-model="username" required autocomplete="username"
-    /></label>
-    <label
-      >当前密码<input v-model="password" type="password" required autocomplete="current-password"
-    /></label>
-    <label v-if="stage === 'change'"
-      >新密码<input
-        v-model="next"
-        type="password"
-        required
-        autocomplete="new-password"
-        aria-describedby="pw-rule"
-    /></label>
-    <small v-if="stage === 'change'" id="pw-rule">至少 8 个字符，包含英文字母和数字。</small>
-    <button :disabled="busy">{{ stage === 'login' ? '登录' : '保存新密码' }}</button>
-    <button v-if="stage === 'change'" type="button" :disabled="busy" @click="submit('logout')">
-      退出
-    </button>
-  </form>
-  <template v-else-if="profile">
-    <div class="identity">
-      <span>{{ profile.display_name }}</span
-      ><button :disabled="busy" @click="submit('logout')">退出登录</button>
-    </div>
-    <p
+  <template v-if="stage === 'ready' && profile">
+    <template
       v-if="props.admin && !profile.roles.some((r) => r === 'reviewer' || r === 'tech_admin')"
-      role="alert"
     >
-      当前账号无后台权限。
-    </p>
-    <slot v-else :key="profile.account_id" :profile="profile" :restore="restore" />
+      <header class="auth-top">
+        <BrandName /><AccountIdentity
+          :name="profile.display_name"
+          :busy="busy"
+          @logout="submit('logout')"
+        />
+      </header>
+      <main class="auth-state">
+        <UiIcon name="Lock" />
+        <h1>后台访问受限</h1>
+        <p role="alert">当前账号无后台权限。</p>
+      </main>
+    </template>
+    <slot
+      v-else
+      :key="profile.account_id"
+      :profile="profile"
+      :restore="restore"
+      :busy="busy"
+      :logout="() => submit('logout')"
+    />
+    <p v-if="message" class="account-error" role="alert">{{ message }}</p>
   </template>
-  <p v-if="message" role="alert">{{ message }}</p>
+  <div v-else class="auth-page">
+    <header class="auth-top">
+      <BrandName /><span>{{ admin ? '审核后台' : '学生与负责人端' }}</span>
+    </header>
+    <main v-if="stage === 'loading' || stage === 'failed'" class="auth-state">
+      <UiIcon :name="stage === 'loading' ? 'Clock' : 'Connection'" />
+      <p v-if="stage === 'loading'" role="status">正在读取会话…</p>
+      <template v-else
+        ><h1>连接失败</h1>
+        <p role="alert">{{ message }}</p>
+        <button type="button" @click="restore"><UiIcon name="Refresh" />重试</button></template
+      >
+    </main>
+    <main v-else class="auth-main">
+      <aside class="access-info">
+        <h2>{{ admin ? '审核后台' : '学生与负责人入口' }}</h2>
+        <div class="access-row">
+          <UiIcon :name="admin ? 'Stamp' : 'User'" />
+          <div>
+            <h3>{{ admin ? '审核账号' : '学生账号' }}</h3>
+            <p>
+              {{
+                admin
+                  ? '使用分配的审核员或技术管理员账号登录。'
+                  : '使用十位学号登录，保留开头的零。'
+              }}
+            </p>
+          </div>
+        </div>
+        <div class="access-row">
+          <UiIcon :name="admin ? 'Files' : 'Key'" />
+          <div>
+            <h3>{{ admin ? '审核范围' : '首次登录' }}</h3>
+            <p>
+              {{
+                admin
+                  ? '在待办中查看活动版本，并进入对应审核页面。'
+                  : '初始密码为学号后六位，首次登录后需设置新密码。'
+              }}
+            </p>
+          </div>
+        </div>
+        <div v-if="!admin" class="access-row">
+          <UiIcon name="Calendar" />
+          <div>
+            <h3>活动负责人</h3>
+            <p>登录后可从导航栏直接管理活动。</p>
+          </div>
+        </div>
+      </aside>
+      <form class="credentials" @submit.prevent="submit(stage === 'change' ? 'change' : 'login')">
+        <h1>{{ stage === 'login' ? '登录' : '首次登录，请修改密码' }}</h1>
+        <label v-if="stage === 'login'" class="form-label"
+          >账号
+          <span class="input-with-icon"
+            ><UiIcon name="User" /><input
+              v-model="username"
+              required
+              :placeholder="admin ? '输入后台账号' : '输入学号或平台账号'"
+              autocomplete="username"
+          /></span>
+        </label>
+        <div class="form-label">
+          <label for="hy-password">当前密码</label>
+          <div class="input-with-icon">
+            <UiIcon name="Lock" /><input
+              id="hy-password"
+              v-model="password"
+              :type="showPassword ? 'text' : 'password'"
+              required
+              placeholder="输入当前密码"
+              autocomplete="current-password"
+            />
+            <button
+              type="button"
+              class="password-eye icon-button quiet"
+              :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+              :aria-pressed="showPassword"
+              @click="showPassword = !showPassword"
+            >
+              <UiIcon :name="showPassword ? 'Hide' : 'View'" />
+            </button>
+          </div>
+        </div>
+        <label v-if="stage === 'change'" class="form-label"
+          >新密码
+          <span class="input-with-icon"
+            ><UiIcon name="Key" /><input
+              v-model="next"
+              type="password"
+              required
+              autocomplete="new-password"
+              placeholder="设置新密码"
+              aria-describedby="pw-rule"
+          /></span>
+          <small id="pw-rule">至少 8 个字符，包含英文字母和数字。</small>
+        </label>
+        <p v-if="message" role="alert">{{ message }}</p>
+        <button class="primary auth-submit" :disabled="busy" :aria-busy="busy">
+          {{ busy ? '正在处理…' : stage === 'login' ? '登录' : '保存新密码'
+          }}<UiIcon name="Right" />
+        </button>
+        <button v-if="stage === 'change'" type="button" :disabled="busy" @click="submit('logout')">
+          退出
+        </button>
+      </form>
+    </main>
+  </div>
 </template>
 <style scoped>
-.credentials {
-  max-width: 24rem;
-  margin: 2rem auto;
-  display: grid;
-  gap: 1rem;
+.auth-page {
+  min-height: 100vh;
+  border-top: 4px solid var(--brand);
 }
-label {
-  display: grid;
-  gap: 0.35rem;
-}
-input,
-button {
-  font: inherit;
-  border: 1px solid #a8b6cc;
-  border-radius: 6px;
-  padding: 0.55rem 0.8rem;
-}
-.credentials button {
-  background: #003399;
-  color: white;
-  cursor: pointer;
-}
-.identity {
+.auth-top {
+  min-height: 72px;
   display: flex;
-  justify-content: flex-end;
-  gap: 1rem;
   align-items: center;
-  padding: 0.75rem 1rem;
+  gap: 18px;
+  padding: 12px clamp(20px, 5vw, 80px);
+  border-bottom: 1px solid var(--line);
 }
-.identity button {
-  background: white;
-  cursor: pointer;
+.auth-top > span {
+  padding-left: 18px;
+  border-left: 1px solid var(--field-line);
+  color: var(--muted);
+  font-size: 14px;
 }
-[role='alert'] {
-  color: #963622;
+.auth-main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  max-width: 940px;
+  margin: clamp(52px, 11vh, 112px) auto;
+  padding: 0 28px;
+  column-gap: clamp(40px, 7vw, 96px);
+}
+.access-info {
+  border-top: 3px solid var(--brand);
+  padding: 28px;
+  background: var(--surface);
+}
+.access-info h2 {
+  font-size: 22px;
+  margin-bottom: 26px;
+}
+.access-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-top: 22px;
+}
+.access-row > .ui-icon {
+  margin-top: 3px;
+  color: var(--brand);
+}
+.access-row h3 {
+  font-size: 15px;
+  margin: 0;
+}
+.access-row p {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 3px 0 0;
+}
+.credentials {
+  min-width: 0;
+  display: grid;
+  gap: 18px;
+}
+.credentials h1 {
+  margin-bottom: 3px;
+}
+.form-label {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 550;
+}
+.form-label small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.input-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.input-with-icon > .ui-icon {
+  position: absolute;
+  left: 13px;
+  color: var(--muted);
+  width: 17px;
+}
+.input-with-icon input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 42px 10px 39px;
+  font-weight: 400;
+}
+.password-eye {
+  position: absolute;
+  right: 2px;
+  border: 0;
+  color: var(--muted);
+}
+.auth-submit {
+  min-height: 44px;
+  margin-top: 6px;
+}
+.auth-state {
+  margin: 12vh auto;
+  text-align: center;
+  max-width: 28rem;
+  padding: 20px;
+}
+.auth-state > .ui-icon {
+  width: 30px;
+  height: 30px;
+  color: var(--brand);
+}
+.auth-state h1 {
+  margin: 12px 0;
+}
+.account-error {
+  position: fixed;
+  top: 58px;
+  right: 16px;
+  z-index: 5;
+  max-width: min(400px, 90vw);
+}
+@media (max-width: 700px) {
+  .auth-top {
+    min-height: 58px;
+    gap: 10px;
+  }
+  .auth-top > span {
+    padding-left: 10px;
+    font-size: 12px;
+  }
+  .auth-main {
+    max-width: 480px;
+    margin: 30px auto;
+    padding: 0 20px;
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 32px;
+  }
+  .access-info {
+    padding: 16px 18px;
+    border-top-width: 2px;
+  }
+  .access-info h2 {
+    font-size: 16px;
+    margin-bottom: 12px;
+  }
+  .access-row {
+    margin-top: 12px;
+    gap: 10px;
+  }
+  .access-row h3 {
+    font-size: 14px;
+  }
 }
 </style>

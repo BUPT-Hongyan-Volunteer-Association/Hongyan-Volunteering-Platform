@@ -10,9 +10,19 @@
     "./pages.css": "./src/pages.css",
     "./PreviewRecords.vue": "./src/PreviewRecords.vue",
     "./preview": "./src/preview.ts",
-    "./SchedulePage.vue": "./src/timeline/SchedulePage.vue"
+    "./SchedulePage.vue": "./src/timeline/SchedulePage.vue",
+    "./UiIcon.vue": "./src/UiIcon.vue",
+    "./BrandName.vue": "./src/BrandName.vue",
+    "./AccountIdentity.vue": "./src/AccountIdentity.vue",
+    "./activityDisplay": "./src/activityDisplay.ts",
+    "./activityFields": "./src/activityFields.ts",
+    "./ActivitySnapshot.vue": "./src/ActivitySnapshot.vue",
+    "./timeWindow": "./src/timeline/window.ts",
+    "./UiSelect.vue": "./src/UiSelect.vue",
+    "./ServiceCalendar.vue": "./src/ServiceCalendar.vue"
   },
   "dependencies": {
+    "@element-plus/icons-vue": "2.3.2",
     "@hongyan/contracts": "workspace:*",
     "element-plus": "2.14.8",
     "vue": "3.5.45",

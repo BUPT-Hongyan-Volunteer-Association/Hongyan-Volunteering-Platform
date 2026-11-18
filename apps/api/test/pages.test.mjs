@@ -12,6 +12,23 @@ const link = (page, name) => page.getByRole('link', { name, exact: true });
 const button = (page, name) => page.getByRole('button', { name, exact: true });
 const visible = (locator) => locator.first().waitFor({ state: 'visible' });
 
+async function openOptions(page, label) {
+  const input = page.getByRole('combobox', { name: label, exact: true });
+  const trigger = page
+    .locator('.platform-select')
+    .filter({ has: input })
+    .locator('.el-select__wrapper');
+  await trigger.click();
+  const list = page.locator('#' + (await input.getAttribute('aria-controls')));
+  await list.waitFor({ state: 'visible' });
+  return { trigger, list };
+}
+async function pickOption(page, label, option) {
+  const { list } = await openOptions(page, label);
+  await list.getByRole('option', { name: option, exact: true }).click();
+  await list.waitFor({ state: 'hidden' });
+}
+
 async function signIn(browser, origin, username, password, width) {
   const context = await browser.newContext({ viewport: { width, height: 900 } });
   const page = await context.newPage();
@@ -58,6 +75,16 @@ async function settleRender(page) {
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
   );
+}
+
+async function capture(page, name) {
+  if (process.env.UI_CAPTURE_DIR) {
+    await page.evaluate(() => {
+      document.activeElement?.blur();
+      window.scrollTo(0, 0);
+    });
+    await page.screenshot({ path: resolve(process.env.UI_CAPTURE_DIR, name + '.png') });
+  }
 }
 
 async function fits(page) {
@@ -134,9 +161,35 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
         await link(student, '活动日程（示例）').click();
         await visible(student.locator(width === 390 ? '.schedule-list' : '.chart-scroll'));
         await fits(student);
+        assert.equal(await student.getByRole('navigation', { name: '活动管理' }).count(), 0);
+        assert.equal(await link(student, '管理').count(), 0);
         await owner.goto(web);
-        await link(owner, '我的').click();
-        await link(owner, '活动管理').click();
+        const studentMenu = owner.getByRole('navigation', { name: '学生导航' });
+        const management = owner.getByRole('navigation', { name: '活动管理' });
+        if (width === 390) {
+          await studentMenu.getByRole('link', { name: '管理', exact: true }).click();
+        } else {
+          await visible(management);
+          const top = await studentMenu.boundingBox(),
+            bottom = await management.boundingBox();
+          assert.ok(top.y + top.height <= bottom.y);
+          assert.equal(
+            await management.evaluate((el) => getComputedStyle(el).borderTopWidth),
+            '1px',
+          );
+          for (const [name, path] of [
+            ['新建活动', '/managed/new'],
+            ['管理日程', '/managed-schedule'],
+            ['我的管理活动', '/managed'],
+          ]) {
+            const entry = management.getByRole('link', { name, exact: true });
+            await entry.click();
+            await owner.waitForURL((u) => u.pathname === path);
+            assert.equal(await entry.getAttribute('aria-current'), 'page');
+            assert.equal(await management.locator('a.current').count(), 1);
+            assert.equal(await studentMenu.getByRole('link').count(), 4);
+          }
+        }
         await link(owner, '校园服务甲').click();
         for (const tab of [
           '退出与恢复',
@@ -147,6 +200,8 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
           '错账修复组',
           '异常上报',
         ]) {
+          if (!(await link(owner, tab).isVisible()))
+            await owner.getByText('更多', { exact: true }).click();
           await link(owner, tab).click();
           await owner.locator('.entry-list a').first().click();
           await visible(owner.locator('article dl'));
@@ -201,7 +256,8 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       await student.setViewportSize({ width: 390, height: 900 });
       await student.goto(web + '/schedule');
       await button(student, '时间轴').click();
-      await student.getByLabel('查看日期').fill('2026-11-21');
+      await student.getByRole('button', { name: /^查看日期/ }).click();
+      await student.getByRole('button', { name: '选择 2026-11-21', exact: true }).click();
       const bar = student.getByRole('button', { name: /校园服务甲.*09:30/ });
       await visible(bar);
       assert.equal(await student.locator('.now-line').count(), 0);
@@ -262,6 +318,7 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       };
       for (const p of [student, owner, tech]) p.on('request', collect);
       assert.equal(await button(student, '申请报名').isEnabled(), false);
+      await link(student, '返回活动列表').click();
       await link(student, '通知').click();
       await student.getByRole('link', { name: /集合地点调整/ }).click();
       await button(student, '预览确认回执').click();
@@ -272,7 +329,7 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       await teacher.goto(admin + '/manage/accounts/staff-002');
       await visible(teacher.getByText('未找到该示例记录。'));
       await tech.goto(admin + '/manage/accounts/staff-002');
-      await tech.getByLabel('操作', { exact: true }).selectOption('停用独立后台账号');
+      await pickOption(tech, '操作', '停用独立后台账号');
       await button(tech, '预览操作').click();
       await visible(tech.getByText(/停用独立后台账号尚未提交/));
       assert.deepEqual(writes, []);
@@ -428,6 +485,461 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       await teacher.goto(web + '/mine/feedback');
       await visible(teacher.getByText('当前账号无学生个人页面权限。'));
     });
+
+    await t.test('名单勾选与行底色一致，翻页保留并随筛选清空', async () => {
+      await owner.setViewportSize({ width: 1440, height: 900 });
+      await owner.goto(web + '/managed/' + first.id + '/roster');
+      const writes = [];
+      const collect = (r) => {
+        if (r.url().includes('/api/v1/') && r.method() !== 'GET') writes.push(r.method());
+      };
+      owner.on('request', collect);
+      try {
+        await owner.getByLabel('选择示例志愿者 1', { exact: true }).check();
+        await owner.getByLabel('选择示例志愿者 2', { exact: true }).check();
+        assert.equal(await owner.locator('tbody tr.selected').count(), 2);
+        assert.equal(await owner.locator('tbody tr').count(), 5);
+        await visible(owner.getByText('已选 2 人', { exact: true }));
+        await visible(owner.getByText('本页 5 人，共 9 人'));
+        await button(owner, '下一页').click();
+        await button(owner, '上一页').click();
+        assert.equal(await owner.locator('tbody tr.selected input:checked').count(), 2);
+        await button(owner, '查看示例志愿者 2').click();
+        await visible(owner.getByRole('heading', { name: '示例志愿者 2的报名记录' }));
+        await button(owner, '收起记录').click();
+        for (const label of ['录取所选（待接入）', '设为候补（待接入）', '导出名单（待接入）'])
+          assert.ok(await button(owner, label).isDisabled());
+        await capture(owner, 'roster');
+        await button(owner, '已录取 18').click();
+        await visible(owner.getByText('已选 0 人', { exact: true }));
+        assert.equal(await owner.locator('tbody tr.selected').count(), 0);
+        assert.deepEqual(writes, []);
+      } finally {
+        owner.off('request', collect);
+      }
+    });
+
+    await t.test('按原表行核实，筛选与分页保留意见，合计覆盖全批', async () => {
+      await teacher.setViewportSize({ width: 1440, height: 900 });
+      await teacher.goto(admin + '/hours');
+      await teacher.getByRole('link', { name: /H2026-001/ }).click();
+      const writes = [];
+      const collect = (r) => {
+        if (r.url().includes('/api/v1/') && r.method() !== 'GET') writes.push(r.method());
+      };
+      teacher.on('request', collect);
+      try {
+        await button(teacher, '预览通过整批').click();
+        await visible(teacher.getByText('请核实原表第 4、6 行并填写意见'));
+        await pickOption(teacher, '每页', '3 条');
+        await button(teacher, '核实原表第4行').click();
+        await teacher.getByLabel('属实', { exact: true }).check();
+        await teacher.getByLabel('第4行意见').fill('已核实，未按时签到。');
+        await button(teacher, '预览通过整批').click();
+        await visible(teacher.getByText('请核实原表第 6 行并填写意见'));
+        await teacher.getByLabel('不成立', { exact: true }).check();
+        await teacher.getByLabel('第6行意见').fill('已核实补签记录。');
+        await teacher.getByLabel('只看待核实行').check();
+        await teacher.getByLabel('只看待核实行').uncheck();
+        await pickOption(teacher, '每页', '5 条');
+        await button(teacher, '核实原表第4行').click();
+        assert.equal(await teacher.getByLabel('第4行意见').inputValue(), '已核实，未按时签到。');
+        await visible(teacher.locator('.verify').getByText('示例学生 3', { exact: true }));
+        assert.equal(await teacher.locator('tbody tr.selected th').innerText(), '4');
+        assert.equal(await teacher.getByLabel('整批意见').inputValue(), '');
+        await visible(teacher.getByText('全批 5 条 · 合计 10.0 小时'));
+        await capture(teacher, 'hours');
+        await button(teacher, '预览通过整批').click();
+        await visible(teacher.getByText('输入完整，可通过整批（预览）'));
+        assert.deepEqual(writes, []);
+      } finally {
+        teacher.off('request', collect);
+      }
+    });
+
+    await t.test('活动发现保留搜索、校区、服务日期和报名阶段', async () => {
+      const rev = await db.activityRevision.findFirstOrThrow({
+        where: { activity_id: first.id, revision: 1 },
+      });
+      const date = new Date(Date.parse(rev.content.schedule.starts_at) + 8 * 3600000)
+        .toISOString()
+        .slice(0, 10);
+      await student.setViewportSize({ width: 390, height: 844 });
+      await student.goto(web);
+      await student.getByLabel('查找活动').fill(rev.content.title);
+      await button(student, '搜索').click();
+      await button(student, '筛选').click();
+      await student.getByLabel('校区', { exact: true }).fill(rev.content.campus);
+      await student.getByLabel('校区', { exact: true }).press('Tab');
+      await pickOption(student, '报名阶段', '报名中');
+      await student.getByLabel('服务日期', { exact: true }).fill(date);
+      await link(student, rev.content.title).click();
+      await link(student, '返回活动列表').click();
+      await visible(link(student, rev.content.title));
+      const query = new URL(student.url()).searchParams;
+      assert.equal(query.get('date'), date);
+      assert.equal(query.get('q'), rev.content.title);
+      assert.equal(query.get('campus'), rev.content.campus);
+      assert.equal(query.get('phase'), 'open');
+      await student.setViewportSize({ width: 1440, height: 900 });
+      await button(student, '上个月').click();
+      await button(student, '下个月').click();
+      assert.equal(await button(student, '筛选 ' + date).getAttribute('aria-pressed'), 'true');
+      await button(student, '全部日期').click();
+      await student.waitForURL((u) => !u.searchParams.has('date'));
+      await visible(link(student, rev.content.title));
+      await fits(student);
+    });
+
+    await t.test('日程切换四种时间刻度，返回后保留所选时段', async () => {
+      await student.setViewportSize({ width: 1440, height: 900 });
+      await student.goto(web + '/schedule?date=2026-11-18&view=chart&unit=week');
+      const scale = student.getByRole('group', { name: '时间刻度' });
+      await visible(student.locator('.chart tbody tr'));
+      for (const [label, count] of [
+        ['小时', 24],
+        ['日', 6],
+        ['月', 30],
+        ['周', 7],
+      ]) {
+        await scale.getByRole('button', { name: label, exact: true }).click();
+        assert.equal(await student.locator('.chart thead svg text').count(), count);
+      }
+      const segment = student.getByRole('button', { name: /校园服务甲.*14:15/ });
+      await segment.focus();
+      await student.keyboard.press('Enter');
+      await visible(student.getByRole('complementary', { name: '时段详情' }));
+      await capture(student, 'schedule-week');
+      const week = student.url();
+      await link(student, '查看真实获批详情').click();
+      await link(student, '返回日程').click();
+      await student.waitForURL(week);
+      await visible(student.locator('.chart rect[aria-pressed=true]'));
+      await student.setViewportSize({ width: 390, height: 844 });
+      await student.goto(web + '/schedule?unit=hour&view=chart&date=2026-11-21');
+      const morning = student.getByRole('button', { name: /校园服务甲.*09:30/ });
+      await morning.focus();
+      await student.keyboard.press('Enter');
+      await button(student, '返回日程').click();
+      await visible(student.locator('.chart rect[aria-pressed=true]'));
+      await visible(button(student, '查看活动'));
+      await fits(student);
+      await capture(student, 'schedule-hour');
+      await button(student, '今天').click();
+      assert.equal(
+        await scale.getByRole('button', { name: '小时' }).getAttribute('aria-pressed'),
+        'true',
+      );
+      assert.equal(
+        new URL(student.url()).searchParams.get('date'),
+        new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10),
+      );
+    });
+
+    await t.test('三端菜单贴合触发框，报名阶段可以选回所有阶段', async () => {
+      async function assertAnchor(trigger, list, expectedPlacement) {
+        const box = list.locator('xpath=ancestor::*[contains(@class, "el-popper")][1]');
+        await box.evaluate(async (el) => {
+          await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+          await Promise.all(el.getAnimations().map((a) => a.finished.catch(() => {})));
+        });
+        const [anchor, menu] = await Promise.all([trigger.boundingBox(), box.boundingBox()]);
+        assert.ok(anchor && menu);
+        const placement = await box.getAttribute('data-popper-placement');
+        if (expectedPlacement) assert.equal(placement, expectedPlacement);
+        assert.ok(Math.abs(menu.x - anchor.x) < 2, JSON.stringify({ anchor, menu }));
+        const gap =
+          placement === 'top-start'
+            ? anchor.y - (menu.y + menu.height)
+            : menu.y - (anchor.y + anchor.height);
+        assert.ok(Math.abs(gap - 4) < 2, JSON.stringify({ placement, gap, anchor, menu }));
+        const view = trigger.page().viewportSize();
+        assert.ok(menu.y >= -1 && menu.y + menu.height <= view.height + 1);
+        assert.ok(menu.x >= -1 && menu.x + menu.width <= view.width + 1);
+      }
+      for (const width of [1440, 390]) {
+        for (const [page, url] of [
+          [student, web],
+          [owner, web + '/managed-schedule'],
+          [teacher, admin + '/schedule'],
+        ]) {
+          await page.setViewportSize({ width, height: 844 });
+          await page.goto(url);
+          if (width === 390) await button(page, '筛选').click();
+          const { trigger, list } = await openOptions(page, '报名阶段');
+          await assertAnchor(trigger, list);
+          assert.equal(await list.getByRole('option').first().innerText(), '所有阶段');
+          await list.getByRole('option', { name: '报名中', exact: true }).click();
+          await page.waitForURL((u) => u.searchParams.get('phase') === 'open');
+          await pickOption(page, '报名阶段', '所有阶段');
+          await page.waitForURL((u) => !u.searchParams.has('phase'));
+        }
+      }
+      for (const width of [1440, 390]) {
+        await teacher.setViewportSize({ width, height: 844 });
+        await teacher.goto(admin + '/schedule');
+        if (width === 390) await button(teacher, '筛选').click();
+        for (const [label, initial, choice, key, value] of [
+          ['校区', '所有校区', '沙河', 'campus', '沙河'],
+          ['活动状态', '所有状态', '已发布', 'status', 'published'],
+          ['展示版本', '工作版本', '获批版本', 'revision', 'published'],
+          ['负责人', '所有负责人', '甲负责人', 'owner', '甲负责人'],
+        ]) {
+          const { trigger, list } = await openOptions(teacher, label);
+          await assertAnchor(trigger, list);
+          assert.equal(await list.getByRole('option').first().innerText(), initial);
+          await list.getByRole('option', { name: choice, exact: true }).click();
+          await teacher.waitForURL((u) => u.searchParams.get(key) === value);
+          await pickOption(teacher, label, initial);
+          await teacher.waitForURL((u) =>
+            key === 'revision' ? u.searchParams.get(key) === 'working' : !u.searchParams.has(key),
+          );
+        }
+        for (const [label, key] of [
+          ['进行中', 'ongoing'],
+          ['待审核', 'pending'],
+        ]) {
+          const check = teacher.getByRole('checkbox', { name: label, exact: true });
+          await check.check();
+          await teacher.waitForURL((u) => u.searchParams.get(key) === '1');
+          await check.uncheck();
+          await teacher.waitForURL((u) => !u.searchParams.has(key));
+        }
+      }
+      await teacher.setViewportSize({ width: 1440, height: 900 });
+      await teacher.goto(admin + '/schedule');
+      let previousList;
+      for (const label of ['校区', '报名阶段', '活动状态', '展示版本', '负责人', '校区']) {
+        const { trigger, list } = await openOptions(teacher, label);
+        if (previousList) await previousList.waitFor({ state: 'hidden' });
+        await assertAnchor(trigger, list);
+        assert.equal(await list.getAttribute('aria-label'), label);
+        previousList = list;
+      }
+      await teacher.keyboard.press('Escape');
+      await teacher.setViewportSize({ width: 1280, height: 320 });
+      await teacher.goto(admin + '/schedule');
+      const { trigger, list } = await openOptions(teacher, '报名阶段');
+      await assertAnchor(trigger, list, 'top-start');
+      await teacher.evaluate(() => window.scrollTo(0, 140));
+      await assertAnchor(trigger, list);
+      await teacher.setViewportSize({ width: 1140, height: 600 });
+      await assertAnchor(trigger, list);
+      await teacher.keyboard.press('Escape');
+      await list.waitFor({ state: 'hidden' });
+      await teacher.setViewportSize({ width: 1440, height: 900 });
+    });
+
+    await t.test('审核日程左右日期箭头、日历和视图按钮按当前时间刻度切换', async () => {
+      for (const width of [390, 1440]) {
+        await teacher.setViewportSize({ width, height: 844 });
+        await teacher.goto(admin + '/schedule?date=2026-11-18&unit=day');
+        const trigger = teacher.getByRole('button', { name: /^查看日期/ });
+        await trigger.click();
+        const dateBox = teacher.locator('.schedule-date-menu:visible');
+        await dateBox.waitFor();
+        await dateBox.evaluate(async (el) => {
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+          await Promise.all(el.getAnimations().map((a) => a.finished.catch(() => {})));
+        });
+        const [box, anchor] = await Promise.all([dateBox.boundingBox(), trigger.boundingBox()]);
+        const expectedLeft = Math.max(6, Math.min(anchor.x, width - box.width - 6));
+        assert.ok(Math.abs(box.x - expectedLeft) <= 2);
+        assert.ok(
+          Math.min(
+            Math.abs(box.y - (anchor.y + anchor.height + 4)),
+            Math.abs(anchor.y - (box.y + box.height + 4)),
+          ) <= 2,
+        );
+        await dateBox.getByRole('button', { name: '下个月', exact: true }).click();
+        await dateBox.getByRole('button', { name: '选择 2026-12-31', exact: true }).click();
+        await teacher.waitForURL((u) => u.searchParams.get('date') === '2026-12-31');
+        await trigger.click();
+        const dateInput = dateBox.getByRole('textbox', { name: '输入日期' });
+        await dateInput.fill('2026-02-30');
+        await dateInput.press('Enter');
+        await visible(dateBox.getByRole('alert'));
+        await dateInput.fill('2026-12-31');
+        await dateInput.press('Enter');
+        await dateBox.waitFor({ state: 'hidden' });
+        const scale = teacher.getByRole('group', { name: '时间刻度' });
+        for (const [label, previous, next, nextDate, backDate] of [
+          ['小时', '前一天', '后一天', '2027-01-01', '2026-12-31'],
+          ['日', '前一天', '后一天', '2027-01-01', '2026-12-31'],
+          ['周', '上一周', '下一周', '2027-01-04', '2026-12-28'],
+          ['月', '上个月', '下个月', '2027-01-01', '2026-12-01'],
+        ]) {
+          await scale.getByRole('button', { name: label, exact: true }).click();
+          const [before, dateButton, after] = await Promise.all([
+            button(teacher, previous).boundingBox(),
+            trigger.boundingBox(),
+            button(teacher, next).boundingBox(),
+          ]);
+          assert.ok(
+            before.x + before.width <= dateButton.x + 1 &&
+              dateButton.x + dateButton.width <= after.x + 1,
+          );
+          assert.ok(Math.abs(before.y + before.height / 2 - (after.y + after.height / 2)) <= 1);
+          await button(teacher, next).click();
+          await teacher.waitForURL((u) => u.searchParams.get('date') === nextDate);
+          await button(teacher, previous).click();
+          await teacher.waitForURL((u) => u.searchParams.get('date') === backDate);
+        }
+        await button(teacher, '今天').click();
+        assert.equal(
+          new URL(teacher.url()).searchParams.get('date'),
+          new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10),
+        );
+        assert.equal(
+          await scale.getByRole('button', { name: '月', exact: true }).getAttribute('aria-pressed'),
+          'true',
+        );
+        for (const [label, view] of [
+          ['列表', 'list'],
+          ['时间轴', 'chart'],
+        ]) {
+          await button(teacher, label).click();
+          await teacher.waitForURL((u) => u.searchParams.get('view') === view);
+          assert.equal(await button(teacher, label).getAttribute('aria-pressed'), 'true');
+        }
+        await fits(teacher);
+      }
+    });
+
+    await t.test('审核日程移除时间指针，桌面点击及手机轻触相邻色条可查看具体时段', async () => {
+      await teacher.setViewportSize({ width: 890, height: 900 });
+      await teacher.goto(admin + '/schedule?date=2026-11-18&unit=week&view=chart');
+      const row = teacher.locator('.chart tbody tr').filter({ hasText: '校园服务甲' });
+      await visible(row);
+      assert.equal(await teacher.getByRole('slider').count(), 0);
+      assert.equal(await teacher.locator('.now-line').count(), 0);
+      const morning = row.getByRole('button', { name: /09:30 至/ });
+      const afternoon = row.getByRole('button', { name: /14:15 至/ });
+      const bars = await Promise.all([morning.boundingBox(), afternoon.boundingBox()]);
+      assert.ok(
+        Math.abs(bars[0].x + bars[0].width / 2 - (bars[1].x + bars[1].width / 2)) < 22,
+        '此宽度应复现两个扩展触控区重叠',
+      );
+      for (const [bar, time] of [
+        [morning, '09:30'],
+        [afternoon, '14:15'],
+      ]) {
+        await bar.click();
+        await teacher.waitForURL((u) => u.searchParams.get('slot')?.includes('T' + time));
+        assert.equal(await teacher.locator('.time-choices').count(), 0);
+        await visible(teacher.getByRole('complementary', { name: '时段详情' }));
+      }
+      await teacher.setViewportSize({ width: 390, height: 844 });
+      const cdp = await teacher.context().newCDPSession(teacher);
+      try {
+        await cdp.send('Emulation.setTouchEmulationEnabled', {
+          enabled: true,
+          maxTouchPoints: 1,
+        });
+        await teacher.goto(admin + '/schedule?date=2026-11-18&unit=week&view=chart');
+        const target = teacher.getByRole('button', { name: /校园服务甲.*14:15 至/ });
+        await target.scrollIntoViewIfNeeded();
+        const bar = await target.boundingBox();
+        await cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchStart',
+          touchPoints: [{ x: bar.x + bar.width / 2, y: bar.y + bar.height / 2 }],
+        });
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await teacher.waitForURL((u) => u.searchParams.get('slot')?.includes('T14:15'));
+        await visible(teacher.getByRole('complementary', { name: '时段详情' }));
+        assert.equal(await teacher.locator('.time-choices').count(), 0);
+      } finally {
+        await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+        await cdp.detach();
+      }
+      await teacher.setViewportSize({ width: 1440, height: 900 });
+    });
+
+    if (process.env.UI_CAPTURE_DIR) {
+      // Build an approved weekly revision inside this test's disposable database.
+      const approved = await db.activityRevision.findFirstOrThrow({
+        where: { activity_id: first.id, revision: 1 },
+      });
+      const day = 86400000;
+      const beijingToday = new Date(Date.now() + 8 * 3600000);
+      const offset = (6 - beijingToday.getUTCDay() + 7) % 7;
+      const firstSaturday = offset < 2 ? offset + 7 : offset;
+      const dateAt = (days) =>
+        new Date(beijingToday.getTime() + days * day).toISOString().slice(0, 10);
+      const content = {
+        ...approved.content,
+        title: '图书馆志愿服务',
+        campus: '沙河校区',
+        location: '图书馆',
+        description: '协助图书整理、书架归位与阅读区引导。',
+        beneficiaries: '在校师生',
+        meeting_point: '图书馆一层服务台',
+        transport_notes: '校内步行到达',
+        eligibility_text: '本学院学生，按要求参加培训',
+        selection_text: '负责人审核',
+        hours_rule_text: '以实际服务记录为准',
+        capacity: 30,
+        expected_hours: '2.0',
+        expected_hours_basis: 'per_occurrence',
+        registration_opens_at: dateAt(-1) + 'T09:00:00+08:00',
+        registration_closes_at: dateAt(firstSaturday - 1) + 'T18:00:00+08:00',
+        result_expected_at: dateAt(firstSaturday - 1) + 'T20:00:00+08:00',
+        schedule: {
+          schedule_type: 'weekly',
+          duration_start_date: dateAt(firstSaturday),
+          duration_end_date: dateAt(firstSaturday + 28),
+          weekly_slots: [{ weekday: 6, start_time: '14:00', end_time: '16:00', end_day_offset: 0 }],
+        },
+      };
+      const weekly = await db.activity.create({
+        data: {
+          activity_code: 'UI-0021',
+          status: 'published',
+          working_revision: 1,
+          published_revision: 1,
+          members: { create: { account_id: approved.created_by, member_role: 'owner' } },
+          revisions: {
+            create: {
+              revision: 1,
+              revision_state: 'approved',
+              approved_at: new Date(),
+              created_by: approved.created_by,
+              content,
+            },
+          },
+        },
+      });
+      await student.setViewportSize({ width: 1440, height: 900 });
+      await student.goto(web);
+      await visible(link(student, content.title));
+      await capture(student, 'discovery');
+      await student.setViewportSize({ width: 390, height: 844 });
+      await fits(student);
+      await capture(student, 'discovery-phone');
+      await student.goto(web + '/?page=1&q=' + encodeURIComponent(content.title));
+      const request = student.waitForResponse((r) =>
+        r.url().endsWith('/api/v1/activities/' + weekly.id),
+      );
+      await link(student, content.title).click();
+      assert.ok((await request).ok());
+      await visible(student.getByText('每周参加报名在活动群内完成。'));
+      await visible(student.getByText('报名中', { exact: true }));
+      await visible(student.getByText(/每次 2.0 小时/));
+      await fits(student);
+      const cutoff = await student.locator('.facts mark').boundingBox();
+      const action = await button(student, '申请报名').boundingBox();
+      assert.ok(
+        cutoff && action && cutoff.y + cutoff.height < action.y && action.y + action.height <= 844,
+      );
+      assert.ok(await button(student, '申请报名').isDisabled());
+      await capture(student, 'student');
+      await link(student, '返回活动列表').click();
+      assert.equal(new URL(student.url()).searchParams.get('q'), content.title);
+      assert.equal(new URL(student.url()).searchParams.get('page'), '1');
+      await student.goto(web + '/activities/' + first.id);
+      await visible(student.getByText('单次活动', { exact: true }));
+      assert.equal(await student.getByText('每周参加报名在活动群内完成。').count(), 0);
+    }
   } finally {
     try {
       await browser?.close();

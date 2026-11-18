@@ -3,6 +3,8 @@ import { computed, watch, ref } from 'vue';
 import { listManagedActivities, type Activity } from '@hongyan/contracts';
 
 import { useRoute, useRouter } from 'vue-router';
+import UiIcon from '@hongyan/ui/UiIcon.vue';
+import { statusLabels, serviceTime } from '@hongyan/ui/activityDisplay';
 import Pager from '@hongyan/ui/Pager.vue';
 const route = useRoute(),
   router = useRouter();
@@ -42,24 +44,56 @@ async function load() {
 }
 watch(page, load, { immediate: true });
 </script>
+
 <template>
-  <RouterLink to="/mine">返回我的</RouterLink>
-  <h1>我的管理活动</h1>
-  <RouterLink to="/managed-schedule">本人管理日程</RouterLink> ·
-  <RouterLink to="/managed/new">新建单次活动</RouterLink>
-  <p v-if="loading">正在读取活动…</p>
+  <RouterLink class="back-link" to="/mine"><UiIcon name="ArrowLeft" />返回我的</RouterLink>
+  <div class="page-heading">
+    <h1>我的管理活动</h1>
+    <div class="page-actions">
+      <RouterLink class="button" to="/managed-schedule"
+        ><UiIcon name="Calendar" />本人管理日程</RouterLink
+      >
+      <RouterLink class="button primary" to="/managed/new"
+        ><UiIcon name="Plus" />新建单次活动</RouterLink
+      >
+    </div>
+  </div>
+  <p v-if="loading" class="notice" role="status">正在读取活动…</p>
   <p v-else-if="error" role="alert">{{ error }} <button @click="load">刷新</button></p>
-  <p v-else-if="!activities.length">暂无可管理的活动</p>
-  <ul>
+  <div v-else-if="!activities.length" class="empty-state">
+    <UiIcon name="FolderOpened" />
+    <p>暂无可管理的活动</p>
+  </div>
+  <ul v-else class="managed-list">
     <li v-for="a in activities" :key="a.id">
-      <RouterLink :to="{ path: '/managed/' + a.id, query: sourceQuery }">{{ a.title }}</RouterLink>
-      <RouterLink :to="{ path: '/managed/' + a.id + '/edit', query: sourceQuery }"
-        >编辑与送审</RouterLink
-      >
-      ·
-      <RouterLink :to="{ path: '/managed/' + a.id + '/roster', query: sourceQuery }"
-        >报名名单</RouterLink
-      >
+      <div class="managed-info">
+        <div class="meta-line">{{ a.activity_code }}</div>
+        <div class="page-title">
+          <RouterLink class="row-title" :to="{ path: '/managed/' + a.id, query: sourceQuery }">{{
+            a.title
+          }}</RouterLink>
+          <span class="state-chip" :class="{ attention: a.has_pending_review }">{{
+            a.has_pending_review ? '待审核' : statusLabels[a.status]
+          }}</span>
+        </div>
+        <div class="meta-line">
+          <span v-if="a.location"
+            ><UiIcon name="Location" />{{
+              [a.campus, a.location].filter(Boolean).join(' · ')
+            }}</span
+          ><span><UiIcon name="Clock" />{{ serviceTime(a) }}</span>
+        </div>
+      </div>
+      <div class="page-actions">
+        <RouterLink class="button" :to="{ path: '/managed/' + a.id + '/edit', query: sourceQuery }"
+          ><UiIcon name="EditPen" />编辑与送审</RouterLink
+        >
+        <RouterLink
+          class="button"
+          :to="{ path: '/managed/' + a.id + '/roster', query: sourceQuery }"
+          ><UiIcon name="Tickets" />报名名单</RouterLink
+        >
+      </div>
     </li>
   </ul>
   <Pager
@@ -70,3 +104,36 @@ watch(page, load, { immediate: true });
     @change="(next) => router.push({ query: { page: next } })"
   />
 </template>
+<style scoped>
+.managed-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+.managed-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px 24px;
+  padding: 18px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.managed-info {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.row-title {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 650;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.row-title:hover {
+  color: var(--brand);
+  text-decoration: underline;
+}
+</style>

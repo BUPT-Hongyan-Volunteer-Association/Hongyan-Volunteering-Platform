@@ -1,0 +1,182 @@
+/* The three workspaces use the same rail, breadcrumb and content edges. */
+.app-shell {
+  --rail-width: 216px;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+}
+.app-shell.no-rail {
+  grid-template-columns: minmax(0, 1fr);
+}
+.app-rail {
+  align-self: start;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 30px 16px 18px;
+  background: #fafbfd;
+  border-right: 1px solid var(--line);
+}
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.app-rail .brand {
+  margin: 0 8px 34px;
+}
+.brand-name {
+  display: inline-block;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.06em;
+  white-space: nowrap;
+}
+.brand-name b {
+  color: var(--brand);
+  font-weight: 750;
+  margin-right: 2px;
+}
+.brand-area {
+  color: var(--muted);
+  font-size: 13px;
+}
+.rail-nav {
+  display: grid;
+  gap: 4px;
+}
+.rail-nav a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  padding: 9px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: var(--ink);
+}
+.rail-nav a:hover {
+  color: var(--brand);
+  background: #f0f4fa;
+}
+.rail-nav a.current,
+.rail-nav a[aria-current='page'] {
+  color: var(--brand);
+  background: #e7effb;
+  font-weight: 650;
+}
+.rail-nav a .ui-icon {
+  color: var(--muted);
+}
+.rail-nav a.current .ui-icon,
+.rail-nav a[aria-current='page'] .ui-icon {
+  color: var(--brand);
+}
+.shell-top {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px clamp(18px, 3vw, 48px);
+  border-bottom: 1px solid var(--line);
+  background: white;
+}
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 13px;
+  min-width: 0;
+}
+.crumbs strong {
+  font-weight: 550;
+  color: var(--ink);
+}
+.crumbs .ui-icon {
+  width: 12px;
+  height: 12px;
+  color: #8290a4;
+}
+.shell-content {
+  max-width: 1456px;
+  margin-inline: auto;
+  padding: 30px clamp(18px, 3vw, 48px) 48px;
+}
+.identity {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.identity-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.identity-name .ui-icon {
+  padding: 6px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+.identity .logout {
+  position: relative;
+  border: 0;
+  color: var(--muted);
+}
+.identity .logout::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  height: 16px;
+  border-left: 1px solid var(--line);
+}
+.mobile-brand {
+  display: none;
+}
+@media (max-width: 899px) {
+  .app-shell {
+    --rail-width: 186px;
+  }
+  .app-rail {
+    padding-inline: 12px;
+  }
+  .app-rail .brand {
+    margin-inline: 4px;
+  }
+  .brand-name {
+    font-size: 18px;
+  }
+}
+@media (max-width: 700px) {
+  .app-shell {
+    display: block;
+  }
+  .shell-top {
+    min-height: 56px;
+    gap: 8px;
+    padding: 5px 16px;
+  }
+  .shell-content {
+    padding: 20px 16px calc(82px + env(safe-area-inset-bottom));
+  }
+  .mobile-brand {
+    display: block;
+  }
+  .identity {
+    gap: 5px;
+  }
+}

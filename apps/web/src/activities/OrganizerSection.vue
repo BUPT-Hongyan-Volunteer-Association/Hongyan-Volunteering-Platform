@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import PreviewRecords from '@hongyan/ui/PreviewRecords.vue';
@@ -36,25 +37,22 @@ watch(
 );
 </script>
 <template>
-  <label v-if="section === 'attendance' && !route.params.item"
-    >服务日期 <input type="date" v-model="date"
-  /></label>
   <PreviewRecords
     :title="sections[section].title"
     :records="records"
     :base="'/managed/' + route.params.id + '/' + section"
     :selected="String(route.params.item || '')"
   >
+    <template #filters>
+      <label v-if="section === 'attendance'">服务日期 <input type="date" v-model="date" /></label>
+    </template>
     <template #detail="{ record }">
       <template v-if="section === 'notices'">
         <h3>接收人回执</h3>
         <label
           >回执名单
-          <select v-model="receiptFilter">
-            <option>待跟进</option>
-            <option>已确认</option>
-          </select></label
-        >
+          <UiSelect label="回执名单" v-model="receiptFilter" :options="['待跟进', '已确认']"
+        /></label>
         <ul>
           <li
             v-for="r in receipts.filter(
@@ -113,15 +111,10 @@ watch(
       <details v-if="section === 'incidents'">
         <summary>填写异常报告（预览）</summary>
         <form class="preview-form" @submit.prevent="feedback = '示例报告尚待接入。'">
-          <label
-            >人员<select>
-              <option>周同学</option>
-              <option>林同学</option>
-            </select></label
-          >
+          <label>人员<UiSelect label="人员" :options="['周同学', '林同学']" /></label>
           <label>服务日期<input required type="date" /></label
           ><label>事实及说明<textarea required /></label> <label>证据说明<input /></label
-          ><button>预览报告</button>
+          ><button class="primary">预览报告</button>
         </form>
       </details>
     </template>

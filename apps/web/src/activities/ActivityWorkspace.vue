@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import UiIcon from '@hongyan/ui/UiIcon.vue';
+import { serviceTime } from '@hongyan/ui/activityDisplay';
 import { useRoute } from 'vue-router';
 import {
   ApiError,
@@ -11,8 +14,20 @@ import {
 
 const props = defineProps<{ profile: Profile }>();
 const route = useRoute();
+const origin = window.history.state?.scheduleReturn;
+const scheduleReturn =
+  typeof origin === 'string' && /^\/managed-schedule(?:\?|$)/.test(origin) ? origin : undefined;
 const base = computed(() => '/managed/' + route.params.id);
 const title = ref('');
+const campus = ref('');
+const scheduleText = ref('');
+const more = ref<HTMLDetailsElement>();
+watch(
+  () => route.fullPath,
+  () => {
+    if (more.value) more.value.open = false;
+  },
+);
 const activityCode = ref('');
 const memberMessage = ref('');
 const sections = [
@@ -50,6 +65,8 @@ async function load(clear = true) {
     const detail = (await getManagedActivity({ path, throwOnError: true })).data.data;
     if (turn !== generation) return;
     title.value = detail.activity.title;
+    campus.value = detail.activity.campus ?? '';
+    scheduleText.value = serviceTime(detail.activity);
     activityCode.value = detail.activity.activity_code;
     members.value = team;
   } catch (e) {
@@ -69,25 +86,53 @@ onUnmounted(() => {
 });
 </script>
 <template>
-  <RouterLink :to="{ path: '/managed', query: sourceQuery }">返回我的管理活动</RouterLink>
+  <RouterLink class="back-link" :to="scheduleReturn || { path: '/managed', query: sourceQuery }"
+    ><UiIcon name="ArrowLeft" />{{ scheduleReturn ? '返回日程' : '返回我的管理活动' }}</RouterLink
+  >
   <p v-if="error" role="alert">{{ error }} <button @click="refresh">重试</button></p>
   <p v-if="!self && !error" role="status">正在核验活动成员…</p>
   <template v-if="self">
     <header class="section-heading">
       <h1>{{ title }}</h1>
-      <span>{{ self.member_role === 'owner' ? '主负责人' : '协作者' }}</span>
+      <span class="state-chip">{{ self.member_role === 'owner' ? '主负责人' : '协作者' }}</span>
+      <div class="workspace-tools">
+        <RouterLink class="button" :to="{ path: base, query: sourceQuery }"
+          ><UiIcon name="List" />活动概览</RouterLink
+        >
+        <RouterLink class="button" :to="{ path: base + '/edit', query: sourceQuery }"
+          ><UiIcon name="EditPen" />编辑与送审</RouterLink
+        >
+      </div>
     </header>
+    <p class="activity-meta meta-line">
+      <span>{{ activityCode }}</span
+      ><span v-if="campus"><UiIcon name="Location" />{{ campus }}</span
+      ><span><UiIcon name="Clock" />{{ scheduleText }}</span>
+    </p>
     <nav class="section-nav" aria-label="活动工作区">
-      <RouterLink :to="{ path: base, query: sourceQuery }">活动概览</RouterLink>
-      <RouterLink :to="{ path: base + '/edit', query: sourceQuery }">编辑与送审</RouterLink>
       <RouterLink :to="{ path: base + '/roster', query: sourceQuery }">报名名单</RouterLink>
       <RouterLink
-        v-for="[path, label] in sections"
+        v-for="[path, label] in sections.slice(0, 4)"
         :key="path"
         :class="{ current: route.params.area === path }"
         :to="{ path: base + '/' + path, query: sourceQuery }"
         >{{ label }}</RouterLink
       >
+      <details class="more" ref="more">
+        <summary
+          :class="{ current: sections.slice(4).some(([path]) => route.params.area === path) }"
+        >
+          更多
+        </summary>
+        <div class="more-menu">
+          <RouterLink
+            v-for="[path, label] in sections.slice(4)"
+            :key="path"
+            :to="{ path: base + '/' + path, query: sourceQuery }"
+            >{{ label }}</RouterLink
+          >
+        </div>
+      </details>
     </nav>
     <RouterView v-if="route.name !== 'managed-overview'" v-slot="{ Component }">
       <component
@@ -104,9 +149,12 @@ onUnmounted(() => {
     </RouterView>
     <section v-else>
       <h2>活动成员</h2>
-      <ul>
+      <ul class="member-list">
         <li v-for="m in members" :key="m.account_id">
-          {{ m.display_name }} · {{ m.member_role === 'owner' ? '主负责人' : '协作者' }}
+          <span class="item-icon"><UiIcon name="User" /></span><strong>{{ m.display_name }}</strong
+          ><span class="state-chip neutral">{{
+            m.member_role === 'owner' ? '主负责人' : '协作者'
+          }}</span>
         </li>
       </ul>
       <details v-if="self.member_role === 'owner'">
@@ -116,12 +164,12 @@ onUnmounted(() => {
           @submit.prevent="memberMessage = '示例操作尚待接入，活动成员未变更。'"
         >
           <label
-            >操作<select>
-              <option>添加协作者</option>
-              <option v-if="members.length > 1">移除协作者</option>
-              <option v-if="members.length > 1">转移主负责人</option>
-            </select></label
-          >
+            >操作<UiSelect
+              label="操作"
+              :options="
+                members.length > 1 ? ['添加协作者', '移除协作者', '转移主负责人'] : ['添加协作者']
+              "
+          /></label>
           <label>成员学号<input required pattern="[0-9]{10}" maxlength="10" /></label
           ><label>原因<input required /></label><button>预览成员变更</button>
         </form>
@@ -130,3 +178,76 @@ onUnmounted(() => {
     </section>
   </template>
 </template>
+
+<style scoped>
+.member-list {
+  display: grid;
+  list-style: none;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+.member-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.member-list .state-chip {
+  margin-left: auto;
+}
+@media (max-width: 700px) {
+  .workspace-tools {
+    width: 100%;
+  }
+}
+.activity-meta {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0 0 16px;
+}
+.workspace-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.workspace-tools a {
+  font-size: 14px;
+  padding: 5px 12px;
+  border: 1px solid #cad5e5;
+  border-radius: 6px;
+  text-decoration: none;
+}
+.more {
+  position: relative;
+  margin-left: auto;
+}
+.more summary {
+  padding: 10px;
+  cursor: pointer;
+  color: var(--brand);
+  min-height: 44px;
+}
+.more-menu {
+  position: absolute;
+  right: 0;
+  z-index: 4;
+  min-width: 140px;
+  border: 1px solid var(--line);
+  background: white;
+  border-radius: 6px;
+  padding: 4px 12px;
+  box-shadow: 0 6px 18px #17243a14;
+}
+.section-nav {
+  margin-bottom: 16px;
+}
+.more-menu a {
+  color: var(--ink);
+}
+.more summary.current {
+  box-shadow: inset 0 -2px var(--brand);
+  font-weight: 650;
+}
+</style>

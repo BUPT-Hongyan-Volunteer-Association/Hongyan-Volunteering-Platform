@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { ref, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -16,6 +17,11 @@ import {
   type ManagedActivityDetail,
   type ActivityRevision,
 } from '@hongyan/contracts';
+
+import UiIcon from '@hongyan/ui/UiIcon.vue';
+import ActivitySnapshot from '@hongyan/ui/ActivitySnapshot.vue';
+import { fieldGroups, activityFields as fields } from '@hongyan/ui/activityFields';
+import { revisionLabels } from '@hongyan/ui/activityDisplay';
 
 const props = defineProps<{ writesPaused?: boolean }>();
 const route = useRoute(),
@@ -42,30 +48,6 @@ const readonly = computed(
     (detail.value?.working_snapshot.content.schedule.schedule_type &&
       detail.value.working_snapshot.content.schedule.schedule_type !== 'continuous'),
 );
-const fields = [
-  ['title', '活动标题'],
-  ['description', '服务内容'],
-  ['beneficiaries', '服务对象'],
-  ['campus', '校区'],
-  ['location', '活动地点'],
-  ['meeting_point', '集合地点'],
-  ['transport_notes', '交通说明'],
-  ['capacity', '计划名额', 'number'],
-  ['starts_at', '开始时间', 'datetime-local'],
-  ['ends_at', '结束时间', 'datetime-local'],
-  ['registration_opens_at', '报名开放', 'datetime-local'],
-  ['registration_closes_at', '报名截止', 'datetime-local'],
-  ['result_expected_at', '预计结果公布', 'datetime-local'],
-  ['eligibility_text', '报名条件'],
-  ['selection_text', '录取说明'],
-  ['group_join_instructions', '入群方式'],
-  ['contact_text', '联系渠道'],
-  ['hours_rule_text', '时长认定说明'],
-  ['hours_import_expected_at', '预计时长导入时间', 'datetime-local'],
-  ['expected_hours', '预计时长'],
-  ['expected_hours_basis', '预计时长口径', 'select'],
-  ['safety_notes', '安全或培训说明'],
-];
 function formValues(item?: ActivityRevision['content']) {
   const props = {
     ...item,
@@ -229,7 +211,8 @@ async function run(action: 'save' | 'submit' | 'withdraw') {
     id: nextId,
     text: { save: '草稿已保存', submit: '已送审，内容已冻结', withdraw: '已撤回' }[action],
   };
-  if (nextId !== target) await router.replace({ path: '/managed/' + nextId + '/edit', state: { savedDraftId: nextId } });
+  if (nextId !== target)
+    await router.replace({ path: '/managed/' + nextId + '/edit', state: { savedDraftId: nextId } });
   else await load();
 }
 async function inspect(revision: number) {
@@ -258,86 +241,212 @@ watch(
 );
 const dirty = computed(() => fields.some(([k]) => form.value[k] !== base.value[k]));
 </script>
+
 <template>
-  <RouterLink v-if="!id" to="/managed">返回活动管理</RouterLink>
-  <h1>{{ id ? '活动编辑与送审' : '新建单次活动' }}</h1>
-  <p v-if="loading">正在读取…</p>
-  <p v-if="confirmation?.id === id" role="status">{{ confirmation.text }}</p>
+  <RouterLink v-if="!id" class="back-link" to="/managed"
+    ><UiIcon name="ArrowLeft" />返回活动管理</RouterLink
+  >
+  <div class="page-heading">
+    <component :is="id ? 'h2' : 'h1'">{{ id ? '活动编辑与送审' : '新建单次活动' }}</component>
+  </div>
+  <p v-if="loading" role="status">正在读取…</p>
+  <p v-if="confirmation?.id === id" role="status" class="notice">{{ confirmation.text }}</p>
   <p v-if="readError" role="alert">最新版本读取失败：{{ readError }}</p>
-  <p v-if="message" role="status">{{ message }}</p>
+  <p v-if="message" role="status" class="notice">{{ message }}</p>
   <button v-if="conflict || (id && !detail && !loading)" @click="load(confirmation?.id !== id)">
-    刷新版本并复核
+    <UiIcon name="Refresh" />刷新版本并复核
   </button>
   <template v-if="!loading && (!id || detail)">
-    <p v-if="detail">
-      工作版本 {{ detail.working_snapshot.revision }} ·
-      {{ detail.working_snapshot.content.location }} · {{ detail.working_snapshot.revision_state }}
-    </p>
-    <p v-if="detail?.published_snapshot">
-      公开版本 {{ detail.published_snapshot.revision }} ·
-      {{ detail.published_snapshot.content.location }}
-    </p>
-    <p v-if="detail?.current_review?.reason">处理意见：{{ detail.current_review.reason }}</p>
-    <form @submit.prevent="run('save')">
-      <fieldset :disabled="!!readonly || busy">
-        <legend>招募信息（北京时间）</legend>
-        <label v-for="[key, title, type] in fields" :key="key"
-          >{{ title }}
-          <select v-if="type === 'select'" v-model="form[key]">
-            <option value="">选填</option>
-            <option value="per_occurrence">单次</option>
-            <option value="whole_activity">整期</option>
-          </select>
-          <input
-            v-else
-            v-model="form[key]"
-            :type="type || 'text'"
-            :step="type === 'datetime-local' ? 1 : undefined"
-          /><small v-if="fieldErrors[key]">{{ fieldErrors[key] }}</small></label
-        >
-        <button type="submit" :disabled="writesPaused || conflict">保存草稿</button>
+    <div v-if="detail" class="version-strip">
+      <p>
+        <span class="state-chip">工作版本 {{ detail.working_snapshot.revision }}</span>
+        {{ detail.working_snapshot.content.location }} ·
+        {{ revisionLabels[detail.working_snapshot.revision_state] }}
+      </p>
+      <p v-if="detail.published_snapshot">
+        <span class="state-chip neutral">公开版本 {{ detail.published_snapshot.revision }}</span>
+        {{ detail.published_snapshot.content.location }}
+      </p>
+      <p v-if="detail.current_review?.reason">处理意见　{{ detail.current_review.reason }}</p>
+    </div>
+    <form id="activity-form" class="activity-form" @submit.prevent="run('save')">
+      <fieldset v-for="group in fieldGroups" :key="group.title" :disabled="!!readonly || busy">
+        <legend>
+          <UiIcon :name="group.icon" />{{ group.title }}
+          <small v-if="group.icon === 'Calendar'">北京时间</small>
+        </legend>
+        <div class="field-grid">
+          <label
+            v-for="[key, title, type] in group.fields"
+            :key="key"
+            :class="{ wide: type === 'textarea' }"
+          >
+            <span>{{ title }}</span>
+            <UiSelect
+              v-if="type === 'select'"
+              :label="title"
+              v-model="form[key]"
+              :disabled="!!readonly || busy"
+              :options="[
+                { value: '', label: '选填' },
+                { value: 'per_occurrence', label: '单次' },
+                { value: 'whole_activity', label: '整期' },
+              ]"
+            />
+            <textarea
+              v-else-if="type === 'textarea'"
+              v-model="form[key]"
+              rows="2"
+              :aria-invalid="!!fieldErrors[key]"
+            />
+            <input
+              v-else
+              v-model="form[key]"
+              :type="type || 'text'"
+              :step="type === 'datetime-local' ? 1 : undefined"
+              :aria-invalid="!!fieldErrors[key]"
+              :aria-describedby="fieldErrors[key] ? 'error-' + key : undefined"
+            />
+            <small v-if="fieldErrors[key]" :id="'error-' + key">{{ fieldErrors[key] }}</small>
+          </label>
+        </div>
       </fieldset>
     </form>
-    <button
-      v-if="detail && !readonly && detail.working_snapshot.revision_state === 'draft'"
-      :disabled="writesPaused || busy || dirty || conflict"
-      @click="run('submit')"
-    >
-      提交审核
-    </button>
-    <p v-if="dirty && id">请先保存修改，再提交审核。</p>
-    <template v-if="pending"
-      ><label>撤回原因 <input v-model="reason" /></label
-      ><button :disabled="writesPaused || busy || conflict || !reason.trim()" @click="run('withdraw')">
+    <div class="editor-actions">
+      <p v-if="dirty && id">请先保存修改，再提交审核。</p>
+      <div class="page-actions">
+        <button
+          type="submit"
+          form="activity-form"
+          :class="{ primary: !detail || dirty }"
+          :disabled="!!readonly || busy || writesPaused || conflict"
+        >
+          <UiIcon name="Document" />保存草稿
+        </button>
+        <button
+          v-if="detail && !readonly && detail.working_snapshot.revision_state === 'draft'"
+          class="primary"
+          :disabled="writesPaused || busy || dirty || conflict"
+          @click="run('submit')"
+        >
+          <UiIcon name="Position" />提交审核
+        </button>
+      </div>
+    </div>
+    <div v-if="pending" class="withdraw">
+      <label>撤回原因 <input v-model="reason" /></label
+      ><button
+        :disabled="writesPaused || busy || conflict || !reason.trim()"
+        @click="run('withdraw')"
+      >
         撤回送审
-      </button></template
-    >
-    <details v-if="history.length">
-      <summary>版本历史</summary>
-      <button v-for="v in history" @click="inspect(v.revision)">
-        版本 {{ v.revision }} · {{ v.revision_state }}
       </button>
-      <pre v-if="viewed">{{ viewed.content }}</pre>
+    </div>
+    <details v-if="history.length" class="history">
+      <summary>版本历史</summary>
+      <div class="page-actions">
+        <button
+          v-for="v in history"
+          :key="v.revision"
+          :aria-pressed="viewed?.revision === v.revision"
+          @click="inspect(v.revision)"
+        >
+          版本 {{ v.revision }} · {{ revisionLabels[v.revision_state] }}
+        </button>
+      </div>
+      <ActivitySnapshot v-if="viewed" :content="viewed.content" />
     </details>
   </template>
 </template>
 <style scoped>
-fieldset {
-  border: 1px solid #e4e9f0;
+.version-strip {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 20px;
+}
+.version-strip p {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 14px;
+}
+.activity-form fieldset {
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: 12px 0 22px;
+  margin: 0;
+  min-width: 0;
+}
+legend {
+  font-size: 16px;
+  font-weight: 650;
+  padding: 0 12px 0 0;
+}
+legend .ui-icon {
+  color: var(--brand);
+  margin-right: 7px;
+}
+legend small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 450;
+}
+.field-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 235px), 1fr));
-  gap: 12px;
-  padding: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
 }
-fieldset label {
+.field-grid label {
   display: grid;
-  gap: 4px;
+  gap: 5px;
+  font-size: 14px;
 }
-small {
-  color: #913722;
+.field-grid .wide {
+  grid-column: 1 / -1;
 }
-pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+.field-grid small {
+  color: var(--danger);
+}
+.field-grid [aria-invalid='true'] {
+  border-color: var(--danger);
+}
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 18px;
+  border-top: 1px solid var(--line);
+  padding-block: 16px;
+}
+.editor-actions p {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+.withdraw {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.history {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.history .page-actions {
+  margin-top: 10px;
+}
+.history button[aria-pressed='true'] {
+  background: var(--brand-tint);
+  border-color: var(--brand);
+}
+@media (max-width: 700px) {
+  .field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

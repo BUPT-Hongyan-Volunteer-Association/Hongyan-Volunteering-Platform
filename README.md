@@ -4,6 +4,12 @@
 
 接口定义与导入格式随工程维护。[OpenAPI v1.2.4](packages/contracts/openapi_v1.2.4.yaml) · [学生建档模板 v1.3](packages/contracts/templates/学生建档导入模板_v1.3.xlsx) · [志愿时长模板 v1.5](packages/contracts/templates/志愿时长录入模板_v1.5.xlsx)
 
+已完成首次配置的 Mac 可在 Finder 中双击 [一键启动.command](一键启动.command)，启动本地服务并打开身份选择页。重复打开会复用运行中的服务。
+
+## 界面设计入口
+
+修改跨页组件、角色导航或日程交互时，以三端界面规范为准。五个代表页面的 PRD 原图、浏览器截图、示例状态及复验命令集中在界面对照目录。[三端界面规范](DESIGN.md) · [界面对照与复验](docs/ui-samples/README.md) · [工程协作约定](AGENTS.md)
+
 ## 启动本地开发
 
 使用 Node.js 24（版本见 `.nvmrc`）、pnpm 10.32.1 和 PostgreSQL 18。在本机已配置的工作副本中，每个新终端先从工程根目录执行 `source .local/env.sh`。首次使用时克隆组织仓库，在仓库根目录运行下列命令。请先安装上述工具，并确保 `initdb`、`pg_ctl`、`createdb` 在 PATH 中。
@@ -51,7 +57,7 @@ cp apps/api/.env.example apps/api/.env
 
 学生初始密码为学号后六位，首登须改为至少八位且含英文字母和数字的新密码。后台使用初始化时设置的凭证。跨角色走查使用不同浏览器配置文件，避免共用 Cookie。
 
-从“我的 → 活动管理”送审，再从后台“活动审核”核对冻结版本。公开地点从 A 修订为 B 时，学生在待审和驳回后仍看到 A，批准后才看到 B。
+负责人从左侧“我的管理活动”（手机底栏“管理”）选择活动并送审，再从后台“活动审核”核对冻结版本。公开地点从 A 修订为 B 时，学生在待审和驳回后仍看到 A，批准后才看到 B。
 
 ```sh
 pnpm typecheck

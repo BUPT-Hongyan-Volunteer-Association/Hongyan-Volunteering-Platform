@@ -8,9 +8,9 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@hongyan/contracts": "workspace:*",
     "@hongyan/ui": "workspace:*",
     "vue": "3.5.45",
-    "@hongyan/contracts": "workspace:*",
     "vue-router": "4.6.4"
   }
 }

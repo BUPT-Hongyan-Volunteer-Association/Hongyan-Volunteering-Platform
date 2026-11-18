@@ -1,42 +1,97 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+import { useRoute } from 'vue-router';
 import type { Profile } from '@hongyan/contracts';
-defineProps<{ profile: Profile }>();
-import { sections, sectionKeys } from '../management/sections';
+import BrandName from '@hongyan/ui/BrandName.vue';
+import UiIcon, { type IconName } from '@hongyan/ui/UiIcon.vue';
+import AccountIdentity from '@hongyan/ui/AccountIdentity.vue';
+import { sections, type SectionKey } from '../management/sections';
 import VbenLayout from './vben/VbenLayout.vue';
-</script>
 
+defineProps<{ profile: Profile; busy: boolean }>();
+defineEmits<{ logout: [] }>();
+const route = useRoute();
+const managementIcons: Record<SectionKey, IconName> = {
+  corrections: 'CopyDocument',
+  incidents: 'Warning',
+  appeals: 'ChatLineSquare',
+  students: 'User',
+  imports: 'Upload',
+  accounts: 'Key',
+  failures: 'Message',
+  audit: 'Notebook',
+};
+const groups = [
+  [
+    { to: '/', label: '待办', icon: 'List' },
+    { to: '/schedule', label: '全院日程', icon: 'Calendar' },
+  ],
+  [
+    { to: '/reviews', label: '活动审核', icon: 'DocumentChecked' },
+    { to: '/hours', label: '时长审核', icon: 'Clock' },
+    ...managementLinks(['corrections', 'incidents', 'appeals']),
+  ],
+  managementLinks(['students', 'imports', 'accounts']),
+  [
+    ...managementLinks(['failures', 'audit']),
+    { to: '/connection', label: '连接状态', icon: 'Connection' },
+  ],
+] as const;
+function managementLinks(keys: SectionKey[]) {
+  return keys.map((key) => ({
+    to: '/manage/' + key,
+    label: sections[key].title,
+    icon: managementIcons[key],
+  }));
+}
+const current = (to: string) =>
+  route.path === to || (to !== '/' && route.path.startsWith(to + '/'));
+const crumb = computed(() =>
+  route.path.startsWith('/hours/')
+    ? '批次审核'
+    : groups.flat().find((item) => current(item.to))?.label,
+);
+</script>
 <template>
   <VbenLayout>
-    <template #logo><strong>鸿雁志愿服务平台</strong></template>
-    <template #menu
-      ><RouterLink to="/">待办</RouterLink><RouterLink to="/schedule">全院日程</RouterLink
-      ><RouterLink to="/reviews">活动审核</RouterLink><RouterLink to="/hours">时长审核</RouterLink
-      ><RouterLink v-for="key in sectionKeys" :key="key" :to="'/manage/' + key">{{
-        sections[key].title
-      }}</RouterLink
-      ><RouterLink :to="{ name: 'connection' }">连接状态</RouterLink></template
-    >
-    <template #header>审核后台</template>
+    <template #logo><BrandName area="审核后台" /></template>
+    <template #menu>
+      <div class="nav-group" v-for="group in groups" :key="group[0].to">
+        <RouterLink
+          v-for="item in group"
+          :key="item.to"
+          :to="item.to"
+          :class="{ current: current(item.to) }"
+          :aria-current="current(item.to) ? 'page' : undefined"
+          ><UiIcon :name="item.icon as IconName" />{{ item.label }}</RouterLink
+        >
+      </div>
+    </template>
+    <template #header>
+      <div class="crumbs">
+        <span>审核后台</span><UiIcon name="ArrowRight" /><strong>{{ crumb }}</strong>
+      </div>
+      <AccountIdentity :name="profile.display_name" :busy="busy" @logout="$emit('logout')" />
+    </template>
     <template #content>
       <h1 v-if="$route.name === 'connection'">服务连接</h1>
       <RouterView v-bind="$route.meta.profile ? { profile } : {}" />
     </template>
   </VbenLayout>
 </template>
-
 <style scoped>
-strong {
-  color: var(--brand);
+.nav-group {
+  display: grid;
+  gap: 2px;
 }
-a {
-  display: block;
-  padding: 10px 12px;
-  border-radius: 6px;
-  text-decoration: none;
+.nav-group + .nav-group {
+  padding-top: 10px;
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
 }
-a[aria-current='page'] {
-  background: #e4ebf8;
-  color: var(--brand);
-  font-weight: 600;
+@media (max-width: 700px) {
+  .nav-group {
+    display: contents;
+  }
 }
 </style>
