@@ -11,6 +11,7 @@ import { Database } from './database.js';
 import { AccountController } from './auth/account.controller.js';
 import { SessionGuard } from './auth/session.guard.js';
 import { BusinessError } from './http.js';
+import { ReviewController } from './activities/review.controller.js';
 import { DraftController } from './activities/draft.controller.js';
 import { Workflow } from './activities/workflow.js';
 import { PublicController } from './activities/public.controller.js';
@@ -38,7 +39,7 @@ class HttpErrorFilter implements ExceptionFilter {
   }
 }
 
-@Module({ controllers: [CsrfController, AccountController, ManagedController, PublicController, DraftController], providers: [SessionService, SessionGuard, Database, Workflow] })
+@Module({ controllers: [CsrfController, AccountController, ManagedController, PublicController, DraftController, ReviewController], providers: [SessionService, SessionGuard, Database, Workflow] })
 class AppModule {}
 
 const app = await NestFactory.create(AppModule);

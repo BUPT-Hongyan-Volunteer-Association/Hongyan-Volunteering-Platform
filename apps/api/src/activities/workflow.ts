@@ -33,7 +33,7 @@ export function reviewView(row:LoadedActivity,r:ActivityReview){
   ...(before&&{previous_published_snapshot:snapshot(before)}),changes:differences(before?.content,current.content)};
 }
 export function detail(row:LoadedActivity) {
- const current=row.reviews.find(r=>r.status==='pending');
+ const current=row.reviews.find(r=>r.revision===row.working_revision);
  const working=row.revisions.find(r=>r.revision===row.working_revision)!;
  const published=row.revisions.find(r=>r.revision===row.published_revision);
  return {activity:project(row,'working',new Date(),true)!,working_snapshot:snapshot(working),

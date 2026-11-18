@@ -167,3 +167,30 @@ model CommandReceipt {
   @@id([account_id, method, path, key])
   @@map("command_receipt")
 }
+
+model ReviewAudit {
+  review_id     String   @id @db.Uuid
+  activity_id   String   @db.Uuid
+  actor_id      String   @db.Uuid
+  revision      Int
+  before_status String
+  after_status  String
+  before_public Int?
+  after_public  Int?
+  reason        String?
+  created_at    DateTime @default(now()) @db.Timestamptz(3)
+
+  @@map("review_audit")
+}
+
+model ActivityChangeEvent {
+  review_id      String   @db.Uuid
+  activity_id    String   @db.Uuid
+  student_id     String   @db.Uuid
+  revision       Int
+  changed_fields String[]
+  created_at     DateTime @default(now()) @db.Timestamptz(3)
+
+  @@id([review_id, student_id])
+  @@map("activity_change_event")
+}
