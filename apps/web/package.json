@@ -9,7 +9,6 @@
   },
   "dependencies": {
     "@hongyan/ui": "workspace:*",
-    "element-plus": "2.14.8",
     "vue": "3.5.45",
     "@hongyan/contracts": "workspace:*",
     "vue-router": "4.6.4"

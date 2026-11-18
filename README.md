@@ -2,9 +2,11 @@
 
 学生查看获批活动，负责人创建、修改、送审或撤回单次活动，老师核对差异后批准或驳回。报名名单与时长审核页标有“示例数据”。
 
+接口定义与导入格式随工程维护。[OpenAPI v1.2.4](packages/contracts/openapi_v1.2.4.yaml) · [学生建档模板 v1.3](packages/contracts/templates/学生建档导入模板_v1.3.xlsx) · [志愿时长模板 v1.5](packages/contracts/templates/志愿时长录入模板_v1.5.xlsx)
+
 ## 启动本地开发
 
-使用 Node.js 24（版本见 `.nvmrc`）、pnpm 10.32.1 和 PostgreSQL 18。在本机已配置的工作副本中，每个新终端先从工程根目录执行 `source .local/env.sh`。首次克隆请先安装上述工具，并确保 `initdb`、`pg_ctl`、`createdb` 在 PATH 中。
+使用 Node.js 24（版本见 `.nvmrc`）、pnpm 10.32.1 和 PostgreSQL 18。在本机已配置的工作副本中，每个新终端先从工程根目录执行 `source .local/env.sh`。首次使用时克隆组织仓库，在仓库根目录运行下列命令。请先安装上述工具，并确保 `initdb`、`pg_ctl`、`createdb` 在 PATH 中。
 
 ```sh
 pnpm install --frozen-lockfile
@@ -50,6 +52,6 @@ pnpm typecheck
 pnpm --filter @hongyan/api test:flow
 ```
 
-回归命令需要有建库权限的本地数据库角色，会创建并清理独立测试库，验证发布、修订、越权、并发和幂等。目录及归档规则见 [AGENTS.md](AGENTS.md)，界面约定见 [DESIGN.md](DESIGN.md)。
+回归命令需要有建库权限的本地数据库角色，会创建并清理独立测试库，验证发布与修订、授权、幂等重试、并发冲突和审核历史分页。目录及归档规则见 [AGENTS.md](AGENTS.md)，界面约定见 [DESIGN.md](DESIGN.md)。
 
 后台布局取自 Vue Vben Admin v5.7.0 的 Element Plus 入口与布局组件，上游提交为 `63a38dce49ba109f61607994e21ba921d8e970e9`。[MIT 许可](apps/admin/src/layouts/vben/LICENSE)

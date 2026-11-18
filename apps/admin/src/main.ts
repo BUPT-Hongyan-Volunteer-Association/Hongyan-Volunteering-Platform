@@ -1,7 +1,5 @@
 import { createApp } from 'vue';
 import { createRouter, createWebHistory } from 'vue-router';
-import 'element-plus/es/components/base/style/css';
-import 'element-plus/es/components/button/style/css';
 import '@hongyan/ui/theme.css';
 import '@hongyan/ui/pages.css';
 import ReviewPage from './activities/ReviewPage.vue';

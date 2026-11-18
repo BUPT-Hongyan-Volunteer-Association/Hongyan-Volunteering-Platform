@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.frontend.json",
+  "extends": "../../config/tsconfig.frontend.json",
   "include": [
     "src/**/*.ts"
   ]

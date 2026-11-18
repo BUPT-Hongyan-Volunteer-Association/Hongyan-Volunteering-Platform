@@ -1,3 +1,6 @@
+@import 'element-plus/theme-chalk/base.css';
+@import 'element-plus/theme-chalk/el-button.css';
+
 :root {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif;
   color: #17243a;

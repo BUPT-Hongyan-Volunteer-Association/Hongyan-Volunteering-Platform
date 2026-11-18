@@ -99,9 +99,6 @@ importers:
       '@hongyan/ui':
         specifier: workspace:*
         version: link:../../packages/ui
-      element-plus:
-        specifier: 2.14.8
-        version: 2.14.8(vue@3.5.45(typescript@5.9.3))
       vue:
         specifier: 3.5.45
         version: 3.5.45(typescript@5.9.3)
