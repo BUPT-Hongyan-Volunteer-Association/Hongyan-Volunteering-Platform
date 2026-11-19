@@ -71,6 +71,20 @@ test('错误表头、未知非空列、公式和合计行拒绝并定位', async
   })), /合计/);
 });
 
+test('一次报告所有可继续扫描的单元格错误，保留实际行号和列', async () => {
+  const data = row(202, cell('H202','多余') + cell('I202','多余'))
+    + row(803, '<x:c r="E803"><x:f>1+1</x:f><x:v>2</x:v></x:c>')
+    + row(804, cell('H804','多余') + '<x:c r="I804" s="1"/>');
+  await assert.rejects(parse(workbook(data)), error => {
+    assert.equal(error.getStatus(), 422);
+    assert.deepEqual(error.getResponse().details.map(issue => [issue.row, issue.field, issue.message]), [
+      [202, 'H202', '未知列存在数据'], [202, 'I202', '未知列存在数据'],
+      [803, 'E803', '不接受公式'], [804, 'H804', '未知列存在数据'],
+    ]);
+    return true;
+  });
+});
+
 test('无效文件、宏、缺失目标页均拒收', async () => {
   await assert.rejects(parseHourWorkbook('伪装.xlsm', template), /xlsx/);
   await assert.rejects(parse(Buffer.from('不是工作簿')), /工作簿/);

@@ -74,6 +74,35 @@ test('全组判重：普通备注忽略，数值等价；不同上报事实/小�
   assert.equal(preview([reported(2,'甲乙'),reported(3,'甲 乙')]).error_count,2);
 });
 
+test('同键按首条合格行计时，姓名错误的行保留自己的错误', () => {
+  for (const invalidRow of [2, 202]) {
+    const rows = [2, 202, 804].map(n => input(n, {
+      student_name: text(n === invalidRow ? '姓名不符' : '合成学生'),
+      misconduct_reported: text('有'),
+    }));
+    const batch = preview(rows);
+    const [accepted, duplicate] = batch.rows.filter(row => row.row_number !== invalidRow);
+    assert.deepEqual(batch.rows.find(row => row.row_number === invalidRow).errors.map(e => e.field), ['student_name']);
+    assert.deepEqual([accepted.action, duplicate.action, batch.error_count, batch.projected_delta_hours],
+      ['add', 'skip_identical', 1, '4.0']);
+    assert.deepEqual(batch.rows.filter(row => row.misconduct_requires_review).map(row => row.row_number),
+      [accepted.row_number]);
+  }
+});
+
+test('同键冲突逐行保留新的违纪事实，已有有效核实结论可复用', () => {
+  const rows = [
+    input(2),
+    input(202, { credited_hours: number('5'), misconduct_reported: text('有'), remark: text('新事实') }),
+    input(804, { credited_hours: number('6'), misconduct_reported: text('有'), remark: text('旧事实') }),
+  ];
+  const batch = preview(rows, { history: [existing({ reusable_facts: ['旧事实'] })] });
+  assert.deepEqual(batch.rows.map(row => row.action), ['error', 'error', 'error']);
+  assert.deepEqual(batch.rows.filter(row => row.misconduct_requires_review).map(row => row.row_number), [202]);
+  assert.equal(batch.misconduct_review_required_count, 1);
+  assert.equal(batch.projected_delta_hours, '0.0');
+});
+
 test('跨活动 24 小时边界：更正替换旧值；警告缺说明不计有效差额', () => {
   const data = {history:[existing(),existing({id:'b1',activity_id:'b',hours:'18.0'}),
     existing({id:'c1',activity_id:'c',hours:'99.0',status:'voided'})]};

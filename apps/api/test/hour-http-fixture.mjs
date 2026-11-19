@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { strFromU8, unzipSync } from 'fflate';
 import { validate } from '../dist/activities/validation.js';
+import { cell, row, workbook } from './hour-workbook-fixture.mjs';
 
-export async function checkHourHttp(db,{activityId,bytes,fixed,ownerId,legacyWorkbook,combinedErrors},{owner,other,student,teacher}) {
+export async function checkHourHttp(db,{activityId,bytes,fixed,ownerId,legacyWorkbook,combinedErrors,mixedKeyErrors},{owner,other,student,teacher}) {
   const collection = '/organizer/activities/'+activityId+'/hour-imports';
   const before = await db.hourRecord.findMany();
   const upload = (client, data, key, fields = {}, headers = {}) => {
@@ -111,6 +112,26 @@ export async function checkHourHttp(db,{activityId,bytes,fixed,ownerId,legacyWor
   assert.deepEqual(awaiting.items.map(row => [row.row_number,row.raw_values.credited_hours,row.errors[0].field]),[[202,'1.25','credited_hours']]);
   const fields = await result(await owner.raw(combinedPath+'/rows?action=error'),200);
   assert.deepEqual(fields.items[1].errors.map(issue => [issue.row,issue.field]),[[804,'misconduct_reported'],[804,'remark']]);
+  const keyed = await result(await upload(owner, mixedKeyErrors(), randomUUID()), 202);
+  const keyedBatch = await settled(keyed.id, 'invalid');
+  assert.deepEqual([keyedBatch.valid_count, keyedBatch.skipped_count, keyedBatch.error_count,
+    keyedBatch.misconduct_review_required_count, keyedBatch.projected_delta_hours], [1, 0, 3, 1, '4.0']);
+  const keyedPath = '/hour-imports/' + keyed.id + '/rows';
+  const validPage = await result(await owner.raw(keyedPath + '?action=add'), 200);
+  assert.deepEqual(validPage.items.map(r => [r.row_number, r.delta_hours]), [[3, '4.0']]);
+  const reviewPage = await result(await owner.raw(keyedPath + '?action=error&misconduct_requires_review=true'), 200);
+  assert.deepEqual(reviewPage.items.map(r => [r.row_number, r.remark]), [[804, '新上报事实']]);
+
+  const extraCells = workbook(row(202, cell('H202', '多余')) + row(804, cell('H804', '多余')));
+  const extra = await result(await upload(owner, extraCells, randomUUID()), 202);
+  await settled(extra.id, 'invalid');
+  const extraReport = await result(await owner.raw('/hour-imports/' + extra.id + '/error-report'), 200);
+  const extraFile = await owner.raw('/files/' + extraReport.id + '/download');
+  assert.equal(extraFile.status, 200);
+  const extraXml = strFromU8(unzipSync(new Uint8Array(await extraFile.arrayBuffer()))['xl/worksheets/errors.xml']);
+  assert.deepEqual([...extraXml.matchAll(/<t>([^<>]*)<\/t>/g)].slice(3).map(match => match[1]),
+    ['202', 'H202', '未知列存在数据', '804', 'H804', '未知列存在数据']);
+
   const bad = await result(await upload(owner,Buffer.from('工作簿损坏'),randomUUID()),202);
   const invalid = await settled(bad.id,'invalid');
   assert.match(invalid.error_message,/修正后重新上传/);

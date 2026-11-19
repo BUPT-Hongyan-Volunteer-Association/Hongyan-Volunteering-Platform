@@ -16,11 +16,16 @@ export interface HourInputRow {
   misconduct_reported: Raw | 'not_provided';
 }
 
-function bad(at: string, message: string): never {
+function workbookIssue(at: string, message: string) {
   const match = /^(?:[A-Z]+(\d+)|R(\d+)C\d+|第 (\d+) 行)$/.exec(at);
   const row = match && Number(match[1] ?? match[2] ?? match[3]);
-  throw new BusinessError(422, 'validation_error', at + '：' + message,
-    [{ field: at, ...(row && { row }), code: 'validation_error', message }]);
+  return { field: at, ...(row && { row }), code: 'validation_error', message };
+}
+
+function rejectIssues(issues: ReturnType<typeof workbookIssue>[]): never {
+  const first = issues[0];
+  const count = issues.length > 1 ? `（共 ${issues.length} 处，详见错误报告）` : '';
+  throw new BusinessError(422, 'validation_error', first.field + '：' + first.message + count, issues);
 }
 
 function sharedStrings(xml: string | null) {
@@ -43,11 +48,12 @@ function sharedStrings(xml: string | null) {
   return strings;
 }
 
-function decode(type: string, value: string, strings: string[], ref: string): Raw {
+function decode(type: string, value: string, strings: string[], ref: string,
+  report: (at: string, message: string) => null): Raw {
   if (value === '') return null;
   switch (type) {
     case 's': {
-      if (!/^\d+$/.test(value) || strings[Number(value)] === undefined) return bad(ref, '共享字符串索引无效');
+      if (!/^\d+$/.test(value) || strings[Number(value)] === undefined) return report(ref, '共享字符串索引无效');
       return strings[Number(value)] === '' ? null : { type: 'text', value: strings[Number(value)] };
     }
     case 'inlineStr':
@@ -56,7 +62,7 @@ function decode(type: string, value: string, strings: string[], ref: string): Ra
     case 'b': return { type: 'boolean', value };
     case 'd': return { type: 'date', value };
     case 'e': return { type: 'error', value };
-    default: return bad(ref, '不支持的单元格类型');
+    default: return report(ref, '不支持的单元格类型');
   }
 }
 
@@ -66,6 +72,17 @@ export async function parseHourWorkbook(filename: string, bytes: Buffer) {
   const parts = await readHourParts(bytes);
   const strings = sharedStrings(parts.shared);
   const rows: HourInputRow[] = [];
+  const issues: ReturnType<typeof workbookIssue>[] = [];
+  let nonempty = false;
+  function report(at: string, message: string) {
+    issues.push(workbookIssue(at, message));
+    nonempty = true;
+    return null;
+  }
+  function bad(at: string, message: string): never {
+    report(at, message);
+    return rejectIssues(issues);
+  }
   let width = 0, rowNumber = 0, column = 0;
   let inData = false, inRow = false, reading = false;
   let cells: Raw[] = [];
@@ -82,6 +99,7 @@ export async function parseHourWorkbook(filename: string, bytes: Buffer) {
         rowNumber = next;
         column = 0;
         cells = [];
+        nonempty = false;
         inRow = true;
       }
       if (!inRow) return;
@@ -98,7 +116,7 @@ export async function parseHourWorkbook(filename: string, bytes: Buffer) {
         }
         cell = { ref: address ?? `R${rowNumber}C${column}`, type: attr(tag, 't') ?? 'n', value: '' };
       }
-      if (cell && tag.local === 'f') bad(cell.ref, '不接受公式');
+      if (cell && tag.local === 'f') report(cell.ref, '不接受公式');
       if (cell && (tag.local === 'v' && parent?.local === 'c' || tag.local === 't' && ['is', 'r'].includes(parent?.local ?? ''))) reading = true;
     },
     text(value) { if (reading && cell) cell.value += value; },
@@ -106,10 +124,11 @@ export async function parseHourWorkbook(filename: string, bytes: Buffer) {
       if (tag.uri !== spreadsheet) return;
       if (tag.local === 'v' || tag.local === 't') reading = false;
       if (tag.local === 'c' && cell) {
-        const value = decode(cell.type, cell.value, strings, cell.ref);
+        const value = decode(cell.type, cell.value, strings, cell.ref, report);
         if (value) {
-          if (column > (width || 7)) bad(cell.ref, '未知列存在数据');
-          cells[column - 1] = value;
+          nonempty = true;
+          if (column > (width || 7)) report(cell.ref, '未知列存在数据');
+          else cells[column - 1] = value;
         }
         cell = undefined;
       }
@@ -119,9 +138,9 @@ export async function parseHourWorkbook(filename: string, bytes: Buffer) {
           width = cells.length;
           if (![6, 7].includes(width) || headers.slice(0, width).some((name, index) =>
             cells[index]?.type !== 'text' || cells[index]?.value !== name)) bad('第 1 行', '不符合七列或旧六列表头');
-        } else if (cells.length) {
+        } else if (nonempty) {
           if (rows.length >= 5000) bad('第 ' + rowNumber + ' 行', '超过 5000 条非空记录');
-          if (['合计', '总计'].includes(cells[0]?.value.trim() ?? '')) bad('第 ' + rowNumber + ' 行', '不接受合计行');
+          if (['合计', '总计'].includes(cells[0]?.value.trim() ?? '')) report('第 ' + rowNumber + ' 行', '不接受合计行');
           rows.push({
             row_number: rowNumber, student_no: cells[0] ?? null, student_name: cells[1] ?? null,
             activity_code: cells[2] ?? null, service_date: cells[3] ?? null, credited_hours: cells[4] ?? null,
@@ -133,6 +152,7 @@ export async function parseHourWorkbook(filename: string, bytes: Buffer) {
     },
   });
   if (!width) bad('第 1 行', '缺少时长录入表头');
+  if (issues.length) rejectIssues(issues);
   const template_structure: Structure = width === 6 ? 'legacy_hours_6' : 'hours_misconduct_7';
   return { template_structure, date_system: parts.date_system, rows };
 }

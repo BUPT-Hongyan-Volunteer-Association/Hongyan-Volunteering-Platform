@@ -94,11 +94,13 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
   const { existing, daily } = indexHistory(snapshot);
   const inputs = book.rows.map((input) => inspect(input, book.date_system, today, snapshot.activity_code, students));
   type Compared = keyof typeof inputs[number]['comparison'];
-  const groups = new Map<string, { first: number; values: Record<Compared,string>; conflicts: Set<Compared> }>();
+  const groups = new Map<string, {
+    first: PreviewRow; accepted?: PreviewRow; values: Record<Compared,string>; conflicts: Set<Compared>;
+  }>();
   for (const { key, row, comparison } of inputs) {
     if (!key) continue;
     const group = groups.get(key);
-    if (!group) groups.set(key, { first: row.row_number, values: comparison, conflicts: new Set() });
+    if (!group) groups.set(key, { first: row, values: comparison, conflicts: new Set() });
     else for (const field of ['credited_hours','misconduct_reported','remark'] as const) {
       if (group.values[field] !== comparison[field]) group.conflicts.add(field);
     }
@@ -110,8 +112,6 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
     }
     if (!key || !student || !day) continue;
     const group = groups.get(key)!;
-    for (const field of group.conflicts) fail(row,field,'同学生、活动和服务日期的记录在此字段冲突');
-    if (group.conflicts.size) continue;
     const prior = existing.get(key), record = prior?.record, previous = prior?.effective ?? 0;
     const revision = record?.origin_schedule_revision ?? selected;
     const duration = coverage(revision, day);
@@ -125,8 +125,10 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
     row.previous_hours = hours(previous);
     row.misconduct_version = record?.misconduct_version ?? 0;
     const reported = row.misconduct_reported === 'reported';
-    row.misconduct_requires_review = group.first === row.row_number && reported
+    row.misconduct_requires_review = reported
       && !record?.reusable_facts?.some((old) => normalizeFact(old) === fact);
+    for (const field of group.conflicts) fail(row,field,'同学生、活动和服务日期的记录在此字段冲突');
+    if (group.conflicts.size) continue;
     if (!record && options.mode === 'correction') fail(row,'service_date','同键无原记录，无法更正');
     if (value === null) continue;
     if (record && (record.status === 'voided' || value !== previous) && options.mode !== 'correction') {
@@ -137,7 +139,6 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
     else if (row.misconduct_reported && row.misconduct_reported !== 'not_provided' && (record.misconduct_reported !== row.misconduct_reported ||
       (reported && (normalizeFact(record.misconduct_fact ?? '') !== fact || row.misconduct_requires_review)))) row.action = 'review_only';
     else row.action = 'skip_identical';
-    if (group.first !== row.row_number) row.action = 'skip_identical';
     const delta = row.action === 'skip_identical' ? 0 : value - previous;
     if (row.action !== 'skip_identical' && duration > 0) {
       const projected = (daily.get(key) ?? 0) + delta;
@@ -150,7 +151,21 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
       if (row.warnings.length && !fact && !row.errors.some((error) => error.field === 'remark')) fail(row,'remark','时长警告须填写说明');
     }
     if (row.errors.length) row.action = 'error';
-    else { total += delta; row.delta_hours = hours(delta); }
+    else if (group.accepted) {
+      row.action = 'skip_identical';
+      row.delta_hours = '0.0';
+      row.warnings = [];
+    } else {
+      group.accepted = row;
+      total += delta;
+      row.delta_hours = hours(delta);
+    }
+  }
+  // Identical reports belong to the counted row, or the first original row if all are invalid.
+  for (const { row, key } of inputs) {
+    if (!key || !row.misconduct_requires_review) continue;
+    const group = groups.get(key)!;
+    if (!group.conflicts.size) row.misconduct_requires_review = row === (group.accepted ?? group.first);
   }
   const rows = inputs.map(({ row }) => row);
   const error_count = rows.filter((row) => row.action === 'error').length;

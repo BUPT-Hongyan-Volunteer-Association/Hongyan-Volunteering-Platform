@@ -59,6 +59,11 @@ export async function checkHourPreview(db, sample) {
     return activity.id;
   },{isolationLevel:'RepeatableRead'});
   return { activityId, bytes, fixed:mixedWorkbook(students,true), ownerId:students[1].account_id,
+    mixedKeyErrors: () => workbook(
+      serviceRow(2, { ...students[0], account: { display_name: '姓名不符' } }, '4', '无') +
+      serviceRow(3, students[0], '4', '无') +
+      serviceRow(202, students[1], '4', '无') +
+      serviceRow(804, students[1], '5', '有', '新上报事实')),
     combinedErrors: () => workbook(serviceRow(202, students[1], '1.25', '有') + serviceRow(804, students[0], '9', '', '')),
     legacyWorkbook: count => legacyWorkbook(students, count),
     paginatedWorkbook: () => mixedWorkbook(students,false,17) };
