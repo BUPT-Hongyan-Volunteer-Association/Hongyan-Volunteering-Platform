@@ -2,13 +2,14 @@ import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type { Prisma, ActivityRevision, ActivityReview } from '../generated/prisma/client.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
-import { publishedRevision, workingRevision } from './revisions.js';
 import { Database } from '../database.js';
 import { BusinessError, denied, envelope, expired, invalid, invisible } from '../http.js';
 import {
   includeView,
   managedScope,
   project,
+  publishedRevision,
+  workingRevision,
   registrationScope,
   staff,
   type LoadedActivity,
@@ -95,7 +96,7 @@ export function detail(row: LoadedActivity) {
   const working = workingRevision(row)!;
   const published = publishedRevision(row);
   return {
-    activity: project(row, 'working', new Date(), true)!,
+    activity: project(row, 'working', new Date())!,
     working_snapshot: snapshot(working),
     ...(current && { current_review: reviewView(row, current) }),
     ...(published && { published_snapshot: snapshot(published) }),

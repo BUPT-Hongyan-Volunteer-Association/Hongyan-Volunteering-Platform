@@ -1,25 +1,10 @@
 import { Controller, Get, Param, ParseUUIDPipe, Query, Req } from '@nestjs/common';
-import type { Activity as View } from '@hongyan/contracts/types';
 import { Database } from '../database.js';
 import { denied, envelope, invalid, invisible } from '../http.js';
 import type { SessionRequest } from '../auth/session.guard.js';
-import { publishedRevision } from './revisions.js';
 import { activityPage } from './list.js';
-import { includeView, project, type LoadedActivity } from './read.js';
+import { includeView, project } from './read.js';
 
-function publicView(row: LoadedActivity & { registrations: { status: string }[] }, now: Date) {
-  const result = project(row, 'published', now, false);
-  if (!result) invisible();
-  const own = row.registrations[0];
-  if (own) result.my_registration_status = own.status as View['my_registration_status'];
-  if (own?.status === 'accepted') {
-    const approved = publishedRevision(row)!;
-    result.group_join_instructions = (
-      approved.content as { group_join_instructions?: string }
-    ).group_join_instructions;
-  }
-  return result;
-}
 @Controller('activities')
 export class PublicController {
   constructor(private db: Database) {}
@@ -59,7 +44,8 @@ export class PublicController {
         },
       },
     });
-    if (!row) invisible();
-    return envelope(publicView(row, new Date()));
+    const activity = row && project(row, 'public-detail', new Date());
+    if (!activity) invisible();
+    return envelope(activity);
   }
 }

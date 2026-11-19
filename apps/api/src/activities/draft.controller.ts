@@ -20,7 +20,7 @@ import type {
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import { envelope, invisible } from '../http.js';
-import { managedScope, includeView, project, pagination } from './read.js';
+import { managedScope, includeView, project, pagination, workingRevision } from './read.js';
 import {
   Workflow,
   checkVersion,
@@ -30,7 +30,6 @@ import {
   snapshot,
   json,
 } from './workflow.js';
-import { workingRevision } from './revisions.js';
 import { content, validate } from './validation.js';
 
 @Controller('organizer')
@@ -114,7 +113,7 @@ export class DraftController {
         },
         include: includeView,
       });
-      return project(row, 'working', new Date(), true);
+      return project(row, 'working', new Date());
     });
   }
   @Patch('activities/:id') patch(
@@ -161,7 +160,7 @@ export class DraftController {
         data: { version: { increment: 1 }, working_revision: revision },
         include: includeView,
       });
-      return project(updated, 'working', new Date(), true);
+      return project(updated, 'working', new Date());
     });
   }
   @Post('activities/:id/submit') submit(

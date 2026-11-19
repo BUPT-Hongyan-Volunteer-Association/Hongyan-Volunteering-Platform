@@ -95,18 +95,12 @@ async function fits(page) {
 }
 
 test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, async (t) => {
-  const source = new URL(process.env.DATABASE_URL);
-  const maintenance = new Database();
-  const name = 'hy_pages_' + randomUUID().replaceAll('-', '');
+  const password = 'T1' + randomUUID();
+  const adminPassword = 'A2' + randomUUID();
+  await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: password, DEMO_ADMIN_PASSWORD: adminPassword });
   const servers = [];
   let api, browser;
-  await maintenance.$executeRawUnsafe('CREATE DATABASE ' + name);
   try {
-    source.pathname = '/' + name;
-    process.env.DATABASE_URL = source.href;
-    const password = 'T1' + randomUUID();
-    const adminPassword = 'A2' + randomUUID();
-    prepareTestDatabase({ DEMO_STAFF_PASSWORD: password, DEMO_ADMIN_PASSWORD: adminPassword });
     api = await createApp();
     await api.listen(0, '127.0.0.1');
     const apiOrigin = await api.getUrl();
@@ -1088,13 +1082,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
   } finally {
     try {
       await browser?.close();
-      for (const server of servers) await server.close();
-      await api?.close();
     } finally {
       try {
-        await maintenance.$executeRawUnsafe('DROP DATABASE ' + name);
+        await Promise.all(servers.map((server) => server.close()));
       } finally {
-        await maintenance.$disconnect();
+        await api?.close();
       }
     }
   }

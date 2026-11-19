@@ -19,9 +19,10 @@ import { SessionGuard, type SessionRequest } from './auth/session.guard.js';
 import { BusinessError } from './http.js';
 import { ReviewController } from './activities/review.controller.js';
 import { DraftController } from './activities/draft.controller.js';
-import { WorkflowModule } from './activities/workflow.module.js';
+import { Workflow } from './activities/workflow.js';
+import { Database } from './database.js';
 import { PublicController } from './activities/public.controller.js';
-import { RegistrationModule } from './registrations/registration.module.js';
+import { RegistrationController } from './registrations/registration.controller.js';
 import { ManagedController } from './activities/managed.controller.js';
 
 @Catch()
@@ -50,7 +51,6 @@ class HttpErrorFilter implements ExceptionFilter {
 }
 
 @Module({
-  imports: [WorkflowModule, RegistrationModule],
   controllers: [
     CsrfController,
     AccountController,
@@ -58,8 +58,9 @@ class HttpErrorFilter implements ExceptionFilter {
     PublicController,
     DraftController,
     ReviewController,
+    RegistrationController,
   ],
-  providers: [SessionService, SessionGuard],
+  providers: [Database, Workflow, SessionService, SessionGuard],
 })
 class AppModule {}
 

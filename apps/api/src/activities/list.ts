@@ -2,8 +2,7 @@ import type { Activity as View } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Database } from '../database.js';
 import { invalid } from '../http.js';
-import { includeView, pagination, project } from './read.js';
-import { workingRevision } from './revisions.js';
+import { includeView, pagination, project, workingRevision } from './read.js';
 import { slots } from './schedule.js';
 
 type Query = Record<string, string>;
@@ -96,19 +95,12 @@ export async function activityPage(
           };
           if (q.review_status && workingRevision(data)?.revision_state !== q.review_status)
             continue;
-          const view = project(
-            data,
-            scope === 'working' ? 'working' : 'published',
-            now,
-            management,
-          );
+          const view = project(data, scope, now);
           if (!view || !matches(view)) continue;
           if (derived) {
             total++;
             if (total <= skip || items.length === page_size) continue;
           }
-          const own = row.registrations?.[0];
-          if (own) view.my_registration_status = own.status as View['my_registration_status'];
           items.push(view);
         }
         if (!derived || rows.length < take) break;

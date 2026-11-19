@@ -44,17 +44,10 @@ function browser(base) {
 }
 
 test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持一致', async (t) => {
-  // Generate the database identifier here. Only this test-owned database is dropped.
-  const name = 'hy_flow_' + randomUUID().replaceAll('-', '');
-  const source = new URL(process.env.DATABASE_URL);
-  const maintenance = new Database();
-  await maintenance.$executeRawUnsafe('CREATE DATABASE ' + name);
+  const staffPassword = randomUUID();
+  await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: staffPassword });
   let app;
   try {
-    source.pathname = '/' + name;
-    process.env.DATABASE_URL = source.href;
-    const staffPassword = randomUUID();
-    prepareTestDatabase({ DEMO_STAFF_PASSWORD: staffPassword });
     app = await createApp();
     await app.listen(0, '127.0.0.1');
     const db = app.get(Database);
@@ -223,6 +216,9 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       const member = browser(base),
         dual = browser(base);
       await member.signIn('0000000004', '000004', 't1' + randomUUID());
+      const mine = (await member.request('/activities?scope=mine')).data.items.find((a) => a.id === id);
+      assert.equal(mine.my_registration_status, 'accepted');
+      assert(!Object.hasOwn(mine, 'group_join_instructions'));
       assert.equal(
         (await member.request('/activities/' + id)).data.group_join_instructions,
         '录取后向负责人领取群号',
@@ -412,14 +408,6 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal(await db.registrationDecisionEvent.count({ where: { activity_id: id } }), 1);
     });
   } finally {
-    try {
-      await app?.close();
-    } finally {
-      try {
-        await maintenance.$executeRawUnsafe('DROP DATABASE ' + name);
-      } finally {
-        await maintenance.$disconnect();
-      }
-    }
+    await app?.close();
   }
 });

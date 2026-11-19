@@ -6,8 +6,7 @@ import type {
 } from '@hongyan/contracts/types';
 import type { Registration } from '../generated/prisma/client.js';
 import { slots } from '../activities/schedule.js';
-import { publishedRevision } from '../activities/revisions.js';
-import type { LoadedActivity } from '../activities/read.js';
+import { publishedRevision, type LoadedActivity } from '../activities/read.js';
 import { checkVersion, wrongState, type Tx } from '../activities/workflow.js';
 import { BusinessError, invalid, invisible } from '../http.js';
 
