@@ -17,7 +17,15 @@ export async function prepareTestDatabase(t, seedEnvironment) {
   t.after(async () => {
     process.env.DATABASE_URL = originalUrl;
     try {
-      if (created) await maintenance.$executeRawUnsafe('DROP DATABASE ' + name);
+      if (created) {
+        // 残留连接（例如被中断的客户端）会阻塞 DROP；先结束目标库后端再强制删除。
+        await maintenance
+          .$executeRawUnsafe(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '" + name + "' AND pid <> pg_backend_pid()",
+          )
+          .catch(() => {});
+        await maintenance.$executeRawUnsafe('DROP DATABASE IF EXISTS ' + name + ' WITH (FORCE)');
+      }
     } finally {
       await maintenance.$disconnect();
     }

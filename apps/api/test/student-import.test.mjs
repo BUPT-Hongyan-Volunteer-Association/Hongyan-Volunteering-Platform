@@ -1,0 +1,586 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { createApp } from '../dist/app.js';
+import { Database } from '../dist/database.js';
+import { prepareTestDatabase } from './prepare-test-database.mjs';
+import { buildWorkbook, importHeaders, rosterSheet } from './xlsx-fixture.mjs';
+
+const template = readFileSync(
+  new URL('../../../packages/contracts/templates/学生建档导入模板_v1.3.xlsx', import.meta.url),
+);
+
+function browser(base) {
+  let cookie = '',
+    csrf = '';
+  async function request(path, { method = 'GET', body, key, form } = {}) {
+    const headers = { Cookie: cookie, 'X-CSRF-Token': csrf };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (key) headers['Idempotency-Key'] = key;
+    const response = await fetch(base + path, {
+      method,
+      headers,
+      body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
+    });
+    const fresh = response.headers.get('set-cookie');
+    if (fresh) cookie = fresh.split(';')[0];
+    const payload = await response.json();
+    if (path === '/auth/csrf' && response.ok) csrf = payload.data.csrf_token;
+    return { status: response.status, ...payload };
+  }
+  async function signIn(username, password, newPassword) {
+    await request('/auth/csrf');
+    const login = await request('/auth/login', { method: 'POST', body: { username, password } });
+    assert.equal(login.status, 200, JSON.stringify(login));
+    await request('/auth/csrf');
+    if (newPassword) {
+      assert.equal((await request('/me')).code, 'password_change_required');
+      assert.equal(
+        (
+          await request('/auth/change-password', {
+            method: 'POST',
+            body: { current_password: password, new_password: newPassword },
+          })
+        ).status,
+        200,
+      );
+      await request('/auth/csrf');
+    }
+    return login;
+  }
+  async function upload(path, bytes, filename = '学生建档导入模板.xlsx', key = randomUUID()) {
+    const form = new FormData();
+    form.append(
+      'file',
+      new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      filename,
+    );
+    return request(path, { method: 'POST', key, form });
+  }
+  const write = (method, path, body, key = randomUUID()) => request(path, { method, body, key });
+  return { request, signIn, upload, write };
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitImport(client, id) {
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const response = await client.request('/admin/student-imports/' + id);
+    assert.equal(response.status, 200, JSON.stringify(response));
+    if (response.data.status !== 'validating') return response.data;
+    await sleep(25);
+  }
+  throw new Error('批次校验超时');
+}
+
+async function uploadImport(client, workbook, filename = '名单.xlsx') {
+  const response = await client.upload('/admin/student-imports', workbook, filename);
+  assert.equal(response.status, 202, JSON.stringify(response));
+  return waitImport(client, response.data.id);
+}
+
+const workbook = (rows, options = {}) =>
+  buildWorkbook({ sheets: [rosterSheet(rows, options)], prefix: true, sharedStrings: true });
+const num = (value) => ({ n: String(value) });
+const formula = (value, result) => ({ f: value, v: result });
+
+const commitBody = (batch) => ({
+  expected_version: batch.version,
+  source_hash: batch.source_hash,
+});
+
+test('学生名单导入校验、预览、确认与首次登录在真实 PostgreSQL 上保持一致', async (t) => {
+  const staffPassword = randomUUID();
+  await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: staffPassword });
+  let app;
+  try {
+    app = await createApp();
+    await app.listen(0, '127.0.0.1');
+    const db = app.get(Database);
+    const base = (await app.getUrl()) + '/api/v1';
+    const teacher = browser(base);
+    const student = browser(base);
+    await teacher.signIn('demo.teacher', staffPassword);
+    await student.signIn('0000000001', '000001', 'student-new-pass1');
+    const upload = (bytes, filename) => teacher.upload('/admin/student-imports', bytes, filename);
+
+    await t.test('上传限 5 MB，只接受 v1.3 模板的工作表与五列表头', async () => {
+      const oversized = Buffer.alloc(5_242_881);
+      oversized[0] = 0x50;
+      oversized[1] = 0x4b;
+      let response = await upload(oversized);
+      assert.equal(response.status, 422);
+      assert.equal(response.code, 'validation_error');
+      assert.equal(response.details[0].field, 'file');
+
+      response = await teacher.upload('/admin/student-imports', workbook([]), '名单.csv');
+      assert.equal(response.status, 422);
+
+      response = await teacher.upload('/admin/student-imports', Buffer.from('not a workbook'), '名单.xlsx');
+      assert.equal(response.status, 422);
+
+      const huge = Buffer.alloc(6_500_000);
+      huge[0] = 0x50;
+      huge[1] = 0x4b;
+      response = await teacher.upload('/admin/student-imports', huge, '名单.xlsx');
+      assert.equal(response.status, 422);
+      assert.equal(response.code, 'validation_error');
+
+      response = await teacher.write('POST', '/admin/student-imports', undefined);
+      assert.equal(response.status, 422);
+
+      const blank = await uploadImport(teacher, template, '学生建档导入模板_v1.3.xlsx');
+      assert.equal(blank.status, 'invalid');
+      assert.match(blank.error_message, /未找到可导入的数据行/);
+
+      const wrongSheet = await uploadImport(
+        teacher,
+        buildWorkbook({
+          sheets: [rosterSheet([{ number: 2, values: ['0000000901', '测试', '', '', ''] }], { name: '填写说明' })],
+        }),
+      );
+      assert.equal(wrongSheet.status, 'invalid');
+      assert.match(wrongSheet.error_message, /学生建档/);
+
+      const wrongHeader = await uploadImport(
+        teacher,
+        buildWorkbook({
+          sheets: [
+            {
+              name: '学生建档',
+              rows: [
+                {
+                  number: 1,
+                  cells: Object.fromEntries(
+                    ['学号', '姓名', '级部', '年级', '编号'].map((value, index) => [
+                      String.fromCharCode(65 + index),
+                      value,
+                    ]),
+                  ),
+                },
+                { number: 2, cells: { A: '0000000902', B: '测试' } },
+              ],
+            },
+          ],
+        }),
+      );
+      assert.equal(wrongHeader.status, 'invalid');
+      assert.match(wrongHeader.error_message, /表头/);
+
+      const tooMany = await uploadImport(
+        teacher,
+        workbook(
+          Array.from({ length: 5_001 }, (_, index) => ({
+            number: index + 2,
+            values: [String(8100000000 + index), '超限学生' + index, '', '', ''],
+          })),
+        ),
+      );
+      assert.equal(tooMany.status, 'invalid');
+      assert.match(tooMany.error_message, /5,000/);
+    });
+
+    await t.test('上传幂等键只受理一次，内容变化时冲突', async () => {
+      const bytes = workbook([{ number: 2, values: ['0000000903', '幂等甲', '', '', ''] }]);
+      const key = randomUUID();
+      const first = await teacher.upload('/admin/student-imports', bytes, '幂等.xlsx', key);
+      assert.equal(first.status, 202);
+      const repeated = await teacher.upload('/admin/student-imports', bytes, '幂等.xlsx', key);
+      assert.deepEqual(repeated, first);
+      assert.equal((await waitImport(teacher, first.data.id)).status, 'ready');
+      const changed = await teacher.upload(
+        '/admin/student-imports',
+        workbook([{ number: 2, values: ['0000000904', '幂等乙', '', '', ''] }]),
+        '幂等.xlsx',
+        key,
+      );
+      assert.equal(changed.status, 409);
+      assert.equal(changed.code, 'conflict');
+    });
+
+    await t.test('预览按原表行号定位格式、公式、数值、未知列与资料冲突', async () => {
+      const rows = [
+        { number: 2, values: ['0000000101', '张三', '本科生', '2026', '0000000201'] },
+        { number: 3, values: ['0000000001', '体验学生', '', '', ''] },
+        { number: 4, values: ['0000000002', '甲负责人改名', '', '', ''] },
+        { number: 5, values: ['0000000101', '张三', '本科生', '2026', '0000000201'] },
+        { number: 6, values: ['0000000102', '李四', '', '', '123'] },
+        { number: 7, values: [num(1234567890), '数值学号', '', '', ''] },
+        { number: 8, values: [formula('A2', '0000000101'), '公式学号', '', '', ''] },
+        {
+          number: 9,
+          values: [],
+          extra: { A: { blank: true }, B: { blank: true }, C: { blank: true }, D: { blank: true }, E: { blank: true } },
+        },
+        { number: 10, values: ['0000000103', { inline: '王五' }, '', '', ''] },
+        { number: 11, values: ['0000000104', '未知列', '', '', ''], extra: { F: '多余' } },
+        { number: 250, values: ['0000000105', '赵六', '', '', ''] },
+      ];
+      const sheet = rosterSheet(rows, { dimension: 'A1:E201', tableRef: 'A1:E201' });
+      const batch = await uploadImport(
+        teacher,
+        buildWorkbook({ sheets: [sheet], prefix: true, sharedStrings: true }),
+      );
+      assert.equal(batch.status, 'invalid');
+      assert.equal(batch.row_count, 10);
+      assert.equal(batch.created_count, 3);
+      assert.equal(batch.skipped_count, 2);
+      assert.equal(batch.error_count, 5);
+      assert.equal(batch.source_hash.length, 64);
+
+      const preview = (await teacher.request('/admin/student-imports/' + batch.id + '/rows?page_size=100'))
+        .data;
+      assert.equal(preview.total, 10);
+      assert.deepEqual(
+        preview.items.map((row) => row.row_number),
+        [2, 3, 4, 5, 6, 7, 8, 10, 11, 250],
+      );
+      const byNumber = new Map(preview.items.map((row) => [row.row_number, row]));
+      assert.equal(byNumber.get(2).action, 'create');
+      assert.equal(byNumber.get(2).student_no, '0000000101');
+      assert.equal(byNumber.get(2).class_name, '0000000201');
+      assert.equal(byNumber.get(3).action, 'skip_identical');
+      assert.equal(byNumber.get(3).student_no, '0000000001');
+      assert.equal(byNumber.get(4).action, 'error');
+      assert(byNumber.get(4).errors.some((error) => error.code === 'profile_conflict'));
+      assert.equal(byNumber.get(5).action, 'skip_identical');
+      assert(byNumber.get(6).errors.some((error) => error.field === 'class_name'));
+      assert.equal(byNumber.get(7).raw_values.student_no, '1234567890');
+      assert(!Object.hasOwn(byNumber.get(7), 'student_no'));
+      assert(byNumber.get(7).errors.some((error) => error.code === 'not_text'));
+      assert.equal(byNumber.get(8).raw_values.student_no, '=A2');
+      assert(byNumber.get(8).errors.some((error) => error.code === 'formula_not_allowed'));
+      assert(byNumber.get(10).action, 'create');
+      assert(byNumber.get(11).errors.some((error) => error.code === 'unknown_column'));
+      assert.equal(byNumber.get(250).action, 'create');
+      assert(!byNumber.has(9));
+
+      const paged = (await teacher.request('/admin/student-imports/' + batch.id + '/rows?page_size=4&page=2'))
+        .data;
+      assert.equal(paged.total, 10);
+      assert.deepEqual(
+        paged.items.map((row) => row.row_number),
+        [6, 7, 8, 10],
+      );
+      assert.equal((await teacher.request('/admin/student-imports/' + batch.id + '/rows?page=0')).status, 422);
+
+      const denied = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        commitBody(batch),
+      );
+      assert.equal(denied.status, 409);
+      assert.equal(denied.code, 'invalid_state');
+      assert.equal((await student.request('/admin/student-imports/' + batch.id)).status, 403);
+      assert.equal((await student.request('/admin/student-imports/' + batch.id + '/rows')).status, 403);
+      assert.equal((await student.upload('/admin/student-imports', template)).status, 403);
+      assert.equal(
+        (await student.write('POST', '/admin/student-imports/' + batch.id + '/commit', commitBody(batch)))
+          .status,
+        403,
+      );
+    });
+
+    await t.test('确认后新账号启用、以学号后六位首次登录并强制改密', async () => {
+      const batch = await uploadImport(
+        teacher,
+        workbook([
+          { number: 2, values: ['0000000201', '陈一', '本科生', '2026', '0000000301'] },
+          { number: 3, values: ['0000000202', '陈二', '', '', ''] },
+        ]),
+      );
+      assert.equal(batch.status, 'ready');
+      assert.equal(batch.error_count, 0);
+      assert.equal(batch.created_count, 2);
+      const key = randomUUID();
+      const committed = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        commitBody(batch),
+        key,
+      );
+      assert.equal(committed.status, 200);
+      assert.equal(committed.data.status, 'committed');
+      assert.equal(committed.data.created_count, 2);
+      assert.equal(committed.data.skipped_count, 0);
+      assert.equal(committed.data.version, batch.version + 1);
+
+      const stored = await db.account.findUniqueOrThrow({
+        where: { username: '0000000201' },
+        include: { roles: true, student: true },
+      });
+      assert.equal(stored.active, true);
+      assert.equal(stored.must_change_password, true);
+      assert.deepEqual(stored.roles.map((role) => role.role), ['student']);
+      assert.equal(stored.student.student_no, '0000000201');
+      assert.equal(stored.student.cohort, '本科生');
+      assert.equal(stored.student.grade, '2026');
+      assert.equal(stored.student.class_name, '0000000301');
+
+      const newcomer = browser(base);
+      const login = await newcomer.signIn('0000000201', '000201', 'fresh-password9');
+      assert.equal(login.data.auth_state, 'password_change_required');
+      assert.deepEqual(login.data.roles, ['student']);
+      const me = await newcomer.request('/me');
+      assert.equal(me.status, 200);
+      assert.equal(me.data.student.student_no, '0000000201');
+      assert.equal(me.data.display_name, '陈一');
+      assert.equal((await newcomer.request('/admin/students')).status, 403);
+      assert.equal((await newcomer.request('/admin/student-imports/' + batch.id)).status, 403);
+
+      assert.deepEqual(
+        await teacher.write('POST', '/admin/student-imports/' + batch.id + '/commit', commitBody(batch), key),
+        committed,
+      );
+      const again = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        commitBody(batch),
+      );
+      assert.equal(again.status, 409);
+      assert.equal(again.code, 'invalid_state');
+    });
+
+    await t.test('确认事务复核版本与源摘要，冲突整批回滚', async () => {
+      const batch = await uploadImport(
+        teacher,
+        workbook([{ number: 2, values: ['0000000203', '顾三', '', '', ''] }]),
+      );
+      assert.equal(batch.status, 'ready');
+      const stale = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        { expected_version: batch.version + 1, source_hash: batch.source_hash },
+      );
+      assert.equal(stale.status, 409);
+      assert.equal(stale.code, 'version_conflict');
+      const tampered = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        { expected_version: batch.version, source_hash: '0'.repeat(64) },
+      );
+      assert.equal(tampered.status, 409);
+      assert.equal(tampered.code, 'conflict');
+      assert.equal(await db.student.count({ where: { student_no: '0000000203' } }), 0);
+      const ok = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        commitBody(batch),
+      );
+      assert.equal(ok.status, 200);
+      assert.equal(ok.data.status, 'committed');
+    });
+
+    await t.test('重复导入不重置密码、不恢复停用账号、不新增角色', async () => {
+      const before = await db.account.findUniqueOrThrow({
+        where: { username: '0000000201' },
+        include: { roles: true },
+      });
+      await db.account.update({ where: { id: before.id }, data: { active: false } });
+      const batch = await uploadImport(
+        teacher,
+        workbook([
+          { number: 2, values: ['0000000201', '陈一', '本科生', '2026', '0000000301'] },
+          { number: 3, values: ['0000000202', '陈二', '', '', ''] },
+        ]),
+      );
+      assert.equal(batch.status, 'ready');
+      assert.equal(batch.created_count, 0);
+      assert.equal(batch.skipped_count, 2);
+      const preview = (await teacher.request('/admin/student-imports/' + batch.id + '/rows')).data;
+      assert.equal(preview.items[0].action, 'skip_identical');
+      assert.equal(preview.items[0].resulting_account_status, 'inactive');
+      const committed = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        commitBody(batch),
+      );
+      assert.equal(committed.status, 200);
+      assert.equal(committed.data.created_count, 0);
+      assert.equal(committed.data.skipped_count, 2);
+      const after = await db.account.findUniqueOrThrow({
+        where: { id: before.id },
+        include: { roles: true },
+      });
+      assert.equal(after.password_hash, before.password_hash);
+      assert.equal(after.active, false);
+      assert.equal(after.must_change_password, false);
+      assert.deepEqual(after.roles.map((role) => role.role), ['student']);
+      const other = await db.account.findUniqueOrThrow({ where: { username: '0000000202' } });
+      assert.equal(other.must_change_password, true);
+      assert.equal(other.active, true);
+    });
+
+    await t.test('另一批先写入相同资料则跳过，资料冲突整批回滚', async () => {
+      const firstBytes = workbook([
+        { number: 2, values: ['0000000301', '甲同学', '本科生', '2026', ''] },
+        { number: 3, values: ['0000000302', '乙同学', '', '', ''] },
+      ]);
+      const first = await uploadImport(teacher, firstBytes);
+      const duplicate = await uploadImport(teacher, firstBytes);
+      const conflict = await uploadImport(
+        teacher,
+        workbook([
+          { number: 2, values: ['0000000301', '甲同学改名', '本科生', '2026', ''] },
+          { number: 3, values: ['0000000303', '丙同学', '', '', ''] },
+        ]),
+      );
+      assert.equal(first.status, 'ready');
+      assert.equal(duplicate.status, 'ready');
+      assert.equal(conflict.status, 'ready');
+
+      assert.equal(
+        (await teacher.write('POST', '/admin/student-imports/' + first.id + '/commit', commitBody(first)))
+          .data.created_count,
+        2,
+      );
+      const replay = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + duplicate.id + '/commit',
+        commitBody(duplicate),
+      );
+      assert.equal(replay.status, 200);
+      assert.equal(replay.data.created_count, 0);
+      assert.equal(replay.data.skipped_count, 2);
+      assert.equal(await db.student.count({ where: { student_no: '0000000301' } }), 1);
+
+      const rejected = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + conflict.id + '/commit',
+        commitBody(conflict),
+      );
+      assert.equal(rejected.status, 409);
+      assert.equal(rejected.code, 'conflict');
+      assert(rejected.details.some((detail) => detail.row === 2));
+      assert.equal(await db.student.count({ where: { student_no: '0000000303' } }), 0);
+      assert.equal(await db.account.count({ where: { username: '0000000303' } }), 0);
+    });
+
+    await t.test('系统失败可按契约重试，invalid 与 committed 不允许重试', async () => {
+      const batch = await uploadImport(
+        teacher,
+        workbook([{ number: 2, values: ['0000000401', '丁同学', '', '', ''] }]),
+      );
+      assert.equal(batch.status, 'ready');
+      await db.studentImportBatch.update({
+        where: { id: batch.id },
+        data: { status: 'failed', error_message: '系统处理失败', version: { increment: 1 } },
+      });
+      const failed = (await teacher.request('/admin/student-imports/' + batch.id)).data;
+      assert.equal(failed.status, 'failed');
+      assert.equal(failed.error_message, '系统处理失败');
+      const key = randomUUID();
+      const retried = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/retry',
+        { expected_version: failed.version },
+        key,
+      );
+      assert.equal(retried.status, 202);
+      assert.equal(retried.data.status, 'validating');
+      const replay = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/retry',
+        { expected_version: failed.version },
+        key,
+      );
+      assert.deepEqual(replay, retried);
+      const ready = await waitImport(teacher, batch.id);
+      assert.equal(ready.status, 'ready');
+      assert.equal(ready.error_count, 0);
+
+      const committed = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        commitBody(ready),
+      );
+      assert.equal(committed.status, 200);
+      const invalidRetry = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/retry',
+        { expected_version: committed.data.version },
+      );
+      assert.equal(invalidRetry.status, 409);
+      assert.equal(invalidRetry.code, 'invalid_state');
+
+      const invalidBatch = await uploadImport(
+        teacher,
+        workbook([{ number: 2, values: [num(1234567890), '错误学号', '', '', ''] }]),
+      );
+      assert.equal(invalidBatch.status, 'invalid');
+      const invalidState = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + invalidBatch.id + '/retry',
+        { expected_version: invalidBatch.version },
+      );
+      assert.equal(invalidState.status, 409);
+      assert.equal(invalidState.code, 'invalid_state');
+
+      await db.studentImportBatch.update({
+        where: { id: batch.id },
+        data: { status: 'failed', version: { increment: 1 } },
+      });
+      const current = (await teacher.request('/admin/student-imports/' + batch.id)).data;
+      const stale = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/retry',
+        { expected_version: current.version + 1 },
+      );
+      assert.equal(stale.status, 409);
+      assert.equal(stale.code, 'version_conflict');
+      assert.equal(
+        (await teacher.write('POST', '/admin/student-imports/' + batch.id + '/retry', {
+          expected_version: current.version,
+        })).status,
+        202,
+      );
+      assert.equal((await waitImport(teacher, batch.id)).status, 'ready');
+    });
+
+    await t.test('学生档案列表支持筛选、分页且仅老师可读', async () => {
+      const all = (await teacher.request('/admin/students')).data;
+      assert(all.total >= 5);
+      assert.equal(all.page, 1);
+      assert.equal(all.page_size, 20);
+      const byNo = (await teacher.request('/admin/students?q=0000000201')).data;
+      assert.equal(byNo.total, 1);
+      assert.equal(byNo.items[0].name, '陈一');
+      assert.equal(byNo.items[0].status, 'inactive');
+      const byName = (await teacher.request('/admin/students?q=' + encodeURIComponent('陈二'))).data;
+      assert.equal(byName.total, 1);
+      assert.equal(byName.items[0].student_no, '0000000202');
+      const cohort = (await teacher.request('/admin/students?cohort=' + encodeURIComponent('本科生'))).data;
+      assert(cohort.items.some((item) => item.student_no === '0000000201'));
+      assert(cohort.items.every((item) => item.cohort === '本科生'));
+      const active = (await teacher.request('/admin/students?status=active&page_size=100')).data;
+      assert(active.items.every((item) => item.status === 'active'));
+      const inactive = (await teacher.request('/admin/students?status=inactive')).data;
+      assert(inactive.items.some((item) => item.student_no === '0000000201'));
+      const paged = (await teacher.request('/admin/students?page_size=2&page=2')).data;
+      assert.equal(paged.items.length, 2);
+      const ordered = all.items.map((item) => item.student_no);
+      assert.deepEqual([...ordered].sort(), ordered);
+      for (const query of ['?page=0', '?page_size=101', '?status=unknown', '?q=' + 'x'.repeat(101)])
+        assert.equal((await teacher.request('/admin/students' + query)).status, 422);
+      assert.equal((await student.request('/admin/students')).status, 403);
+    });
+
+    await t.test('5,000 条非空数据行可校验，表格范围外与空行按规则处理', async () => {
+      const rows = Array.from({ length: 5_000 }, (_, index) => ({
+        number: index + 2,
+        values: [String(8200000000 + index), '批量学生' + index, '', '', ''],
+      }));
+      const batch = await uploadImport(
+        teacher,
+        workbook(rows, { dimension: 'A1:E201', tableRef: 'A1:E201' }),
+      );
+      assert.equal(batch.status, 'ready');
+      assert.equal(batch.row_count, 5_000);
+      assert.equal(batch.created_count, 5_000);
+      assert.equal(batch.error_count, 0);
+    });
+  } finally {
+    await app?.close();
+  }
+});

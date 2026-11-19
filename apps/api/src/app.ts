@@ -24,6 +24,8 @@ import { Database } from './database.js';
 import { PublicController } from './activities/public.controller.js';
 import { RegistrationController } from './registrations/registration.controller.js';
 import { ManagedController } from './activities/managed.controller.js';
+import { StudentController } from './students/student.controller.js';
+import { StudentImportService } from './students/import.service.js';
 
 @Catch()
 class HttpErrorFilter implements ExceptionFilter {
@@ -31,6 +33,22 @@ class HttpErrorFilter implements ExceptionFilter {
     const response = host.switchToHttp().getResponse<Response>();
     const status = error instanceof HttpException ? error.getStatus() : 500;
     const request_id = randomUUID();
+    if (status === 413) {
+      // 契约未定义 413：统一按字段校验失败返回，便于上传页展示。
+      response.status(422).set('Cache-Control', 'no-store').json({
+        code: 'validation_error',
+        message: '文件不得超过 5 MB（5,242,880 字节）',
+        details: [
+          {
+            field: 'file',
+            code: 'validation_error',
+            message: '文件不得超过 5 MB（5,242,880 字节）',
+          },
+        ],
+        request_id,
+      });
+      return;
+    }
     if (error instanceof BusinessError) {
       response
         .status(status)
@@ -59,8 +77,9 @@ class HttpErrorFilter implements ExceptionFilter {
     DraftController,
     ReviewController,
     RegistrationController,
+    StudentController,
   ],
-  providers: [Database, Workflow, SessionService, SessionGuard],
+  providers: [Database, Workflow, SessionService, SessionGuard, StudentImportService],
 })
 class AppModule {}
 
