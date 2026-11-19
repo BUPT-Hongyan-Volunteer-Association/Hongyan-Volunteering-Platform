@@ -4,6 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { createApp } from '../dist/app.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { Database } from '../dist/database.js';
+import { readFile } from 'node:fs/promises';
+import { readHourUpload } from '../dist/hours/upload-input.js';
+import { checkHourPreview } from './hour-preview-fixture.mjs';
+import { checkHourHttp } from './hour-http-fixture.mjs';
 
 function browser(base) {
   let cookie = '',
@@ -40,7 +44,10 @@ function browser(base) {
     }
   }
   const write = (method, path, body, key = randomUUID()) => request(path, { method, body, key });
-  return { request, signIn, write };
+  const raw = (path, options = {}) => fetch(base + path, { ...options, headers: {
+    Cookie:cookie, 'X-CSRF-Token':csrf, ...options.headers,
+  } });
+  return { request, signIn, write, raw };
 }
 
 test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持一致', async (t) => {
@@ -62,6 +69,20 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     const sample = await db.activity.findUniqueOrThrow({
       where: { activity_code: 'P2026-0001' },
       include: { revisions: true },
+    });
+    await t.test('时长上传先按当前活动授权，再解析文件', async () => {
+      const template = await readFile(new URL('../../../packages/contracts/templates/志愿时长录入模板_v1.5.xlsx', import.meta.url));
+      const upload = async (username, bytes) => {
+        const account = await db.account.findUniqueOrThrow({ where: { username }, include: { roles: true } });
+        return readHourUpload(db, { account_id: account.id, roles: account.roles.map((grant) => grant.role) },
+          sample.id, '合成.xlsx', bytes);
+      };
+      assert.equal((await upload('0000000002', template)).template_structure, 'hours_misconduct_7');
+      for (const [username, status] of [['0000000001', 403], ['0000000003', 404]]) {
+        for (const file of [template, Buffer.alloc(0)]) {
+          await assert.rejects(upload(username, file), (error) => error.getStatus() === status);
+        }
+      }
     });
     const created = await owner.write('POST', '/organizer/activities', {
       ...sample.revisions[0].content,
@@ -406,6 +427,11 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.deepEqual(await commands[winner](), decisions[winner]);
       assert.equal(await db.registration.count({ where: { activity_id: id, status: 'accepted' } }), 2);
       assert.equal(await db.registrationDecisionEvent.count({ where: { activity_id: id } }), 1);
+    });
+
+    await t.test('独立库混合工作簿：HTTP 上传、报告、权限回收和失败重试均不入账', async () => {
+      const fixture = await checkHourPreview(db, sample);
+      await checkHourHttp(db, fixture, { owner, other, student, teacher });
     });
   } finally {
     await app?.close();

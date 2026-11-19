@@ -7,7 +7,7 @@
 | 位置 | 职责 |
 | --- | --- |
 | `apps/web/src/`、`apps/admin/src/` | 前者服务学生与负责人，后者服务审核后台。页面按业务归档，Vue 组件使用 PascalCase。 |
-| `apps/api/` | NestJS 模块化单体。`src/auth/` 管账号与会话，`src/activities/` 管活动与审批，`src/registrations/` 管报名与录取。迁移在 `prisma/migrations/`，集成回归在 `test/`。 |
+| `apps/api/` | NestJS 模块化单体。`src/auth/` 管账号与会话，`src/activities/` 管活动与审批，`src/registrations/` 管报名与录取，`src/hours/` 管时长上传、预览和错误报告。迁移在 `prisma/migrations/`，集成回归在 `test/`。 |
 | `packages/contracts/`、`packages/ui/` | 前者维护 OpenAPI、请求客户端和空白导入模板，后者维护跨端组件与样式。共享构建配置在 `config/`。 |
 
 ## 接口与数据库

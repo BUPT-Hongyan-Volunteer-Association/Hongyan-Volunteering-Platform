@@ -70,10 +70,14 @@ pnpm build
 | --- | --- |
 | 类型检查 | `pnpm typecheck` |
 | 体验账号配置 | `pnpm --filter @hongyan/api test:accounts` |
-| 服务端版本回退、日程边界与列表分页 | `pnpm --filter @hongyan/api test:flow` |
-| 三端页面与学生报名 → 负责人录取 → 学生查看结果 | `pnpm test:pages` |
+| 时长工作簿解析（无需数据库服务） | `pnpm --filter @hongyan/api test:hour-workbook` |
+| 时长逐行校验与全批预计影响（无需数据库服务） | `pnpm --filter @hongyan/api test:hour-preview` |
+| 服务端版本回退、日程边界、列表分页、录取并发与时长预览重试 | `pnpm --filter @hongyan/api test:flow` |
+| 三端页面、学生报名与录取、负责人时长上传、逐行核对和报告下载 | `pnpm test:pages` |
 
 服务端与页面回归需要运行中的 PostgreSQL 和有建库权限的角色，测试会自行启动服务并清理测试库。页面回归和身份选择页会自动选择可用浏览器，已有 Edge 或 Chrome 即可运行，也可用 `pnpm exec playwright-core install firefox` 安装配套的 Firefox。
+
+负责人从“我的管理活动 → 选择活动 → 时长批次”进入上传和预览。页面回归使用合成工作簿。运行前将 `HOUR_EVIDENCE_DIR` 设为本地输出目录，可保存两份工作簿、浏览器下载的错误报告及桌面和手机截图。
 
 <details>
 <summary>指定测试浏览器或使用 Safari 登录</summary>

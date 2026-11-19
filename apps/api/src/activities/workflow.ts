@@ -133,6 +133,7 @@ export class Workflow {
     access: 'create' | 'manage' | 'review' | 'apply' | 'admit',
     execute: (tx: Tx, row: LoadedActivity | null) => Promise<unknown>,
     scope?: string,
+    commandInput: unknown = req.body ?? {},
   ) {
     const key = req.get('Idempotency-Key');
     if (!key || key.length < 8 || key.length > 100)
@@ -142,7 +143,7 @@ export class Workflow {
       path = req.path;
     const identity = { account_id, method, path, key };
     const digest = createHash('sha256')
-      .update(stable(req.body ?? {}))
+      .update(stable(commandInput))
       .digest('hex');
     return this.db.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${stable(identity)},0))`;

@@ -6,7 +6,7 @@ export class BusinessError extends HttpException {
     status: number,
     code: string,
     message: string,
-    details?: { field: string; code: string; message: string }[],
+    details?: { field: string; row?: number; code: string; message: string }[],
   ) {
     super({ code, message, ...(details && { details }) }, status);
   }

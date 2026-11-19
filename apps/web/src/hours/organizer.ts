@@ -1,16 +1,4 @@
 import type { PreviewRecord } from '@hongyan/ui/preview';
-export const batches: PreviewRecord[] = [
-  {
-    id: 'batch-01',
-    title: 'H2026-021 · 时长录入',
-    status: '待提交',
-    fields: [
-      ['文件', '服务时长.xlsx'],
-      ['服务日期', '2026-11-14'],
-      ['预览结果', '1 条有效行，新增 2.0 小时'],
-    ],
-  },
-];
 export const appeals: PreviewRecord[] = [
   {
     id: 'missing-01',

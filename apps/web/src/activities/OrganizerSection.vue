@@ -5,16 +5,14 @@ import { useRoute } from 'vue-router';
 import PreviewRecords from '@hongyan/ui/PreviewRecords.vue';
 import { requests } from '../registrations/requests';
 import { notices, receipts, attendance } from '../notices/organizer';
-import { batches, appeals, corrections } from '../hours/organizer';
+import { appeals, corrections } from '../hours/organizer';
 import { incidents } from '../incidents/organizer';
 
-defineProps<{ activityCode: string }>();
 const route = useRoute();
 const sections = {
   requests: { title: '退出与恢复', records: requests },
   notices: { title: '通知与回执', records: notices },
   attendance: { title: '现场人员记录', records: attendance },
-  batches: { title: '时长批次', records: batches },
   appeals: { title: '漏记反馈', records: appeals },
   corrections: { title: '错账修复组', records: corrections },
   incidents: { title: '异常上报', records: incidents },
@@ -64,42 +62,6 @@ watch(
           </li>
         </ul>
       </template>
-      <div v-if="section === 'batches'" class="scroll-table">
-        <table>
-          <caption>
-            导入预览
-          </caption>
-          <thead>
-            <tr>
-              <th
-                v-for="h in [
-                  '学号',
-                  '姓名',
-                  '活动编号',
-                  '服务日期',
-                  '认证时长（小时）',
-                  '备注',
-                  '是否有违纪情况',
-                ]"
-                :key="h"
-              >
-                {{ h }}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <th>0000000123</th>
-              <td>林同学</td>
-              <td>{{ activityCode }}</td>
-              <td>2026-11-14</td>
-              <td>2.0</td>
-              <td>整理资料</td>
-              <td>无</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
       <button
         v-if="section === 'requests' && record.status === '待处理'"
         @click="feedback = '示例申请尚待接入，处理决定未提交。'"
