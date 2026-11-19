@@ -11,6 +11,7 @@ import {
   type ActivityRosterPage,
 } from '@hongyan/contracts';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
+import { registrationLabels } from './labels';
 import Pager from '@hongyan/ui/Pager.vue';
 const props = defineProps<{ writesPaused: boolean }>();
 const route = useRoute(),
@@ -30,14 +31,7 @@ const time = new Intl.DateTimeFormat('zh-CN', {
 });
 const filters = ['submitted', 'accepted', 'waitlisted', ''] as const;
 const lessCommon = ['rejected', 'withdrawn', 'exited'] as const;
-const labels = {
-  submitted: '待处理',
-  accepted: '已录取',
-  waitlisted: '候补',
-  rejected: '未录取',
-  withdrawn: '已撤回',
-  exited: '已退出',
-};
+const labels = { ...registrationLabels, submitted: '待处理', waitlisted: '候补' };
 const result = ref<ActivityRosterPage>();
 const readError = ref('');
 const writeError = ref('');

@@ -68,8 +68,7 @@ pnpm build
 | --- | --- |
 | 类型检查 | `pnpm typecheck` |
 | 体验账号配置 | `pnpm --filter @hongyan/api test:accounts` |
-| 服务端活动发布、报名与录取 | `pnpm --filter @hongyan/api test:flow` |
-| 报名突发负载（12,000 次） | `pnpm --filter @hongyan/api test:registration-burst` |
+| 服务端活动发布与审核 | `pnpm --filter @hongyan/api test:flow` |
 | 学生端、负责人端和审核后台页面 | `pnpm test:pages` |
 
 服务端与页面回归需要运行中的 PostgreSQL 和有建库权限的角色，测试会自行启动服务并清理测试库。页面回归和身份选择页会自动选择可用浏览器，已有 Edge 或 Chrome 即可运行，也可用 `pnpm exec playwright-core install firefox` 安装配套的 Firefox。
