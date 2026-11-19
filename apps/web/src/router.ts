@@ -4,6 +4,7 @@ import ManagedActivities from './activities/ManagedActivities.vue';
 import ActivityEditor from './activities/ActivityEditor.vue';
 import OrganizerSection from './activities/OrganizerSection.vue';
 import ActivityWorkspace from './activities/ActivityWorkspace.vue';
+import MyRegistrations from './registrations/MyRegistrations.vue';
 import Roster from './registrations/Roster.vue';
 import PersonalPage from './PersonalPage.vue';
 import StudentRecords from './personal/StudentRecords.vue';
@@ -52,13 +53,12 @@ export const router = createRouter({
     { path: '/mine/settings', component: PersonalPage, meta: { profile: true, personal: true } },
     {
       path: '/mine/example-activity',
-      component: PersonalPage,
-      meta: { profile: true, personal: true },
+      redirect: '/registrations',
     },
     {
       path: '/registrations/:item?',
       name: 'registrations',
-      component: StudentRecords,
+      component: MyRegistrations,
       meta: { personal: true },
     },
     {

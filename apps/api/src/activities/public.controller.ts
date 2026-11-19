@@ -5,12 +5,16 @@ import { denied, envelope, invalid, invisible } from '../http.js';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { filterViews, includeView, paginate, project, type LoadedActivity } from './read.js';
 
-function publicView(row: LoadedActivity & { registrations: { status: string }[] }, now: Date) {
+function publicView(
+  row: LoadedActivity & { registrations: { status: string }[] },
+  now: Date,
+  detail = false,
+) {
   const result = project(row, 'published', now, false);
   if (!result) invisible();
   const own = row.registrations[0];
   if (own) result.my_registration_status = own.status as View['my_registration_status'];
-  if (own?.status === 'accepted') {
+  if (detail && own?.status === 'accepted') {
     const approved = row.revisions.find((r) => r.revision === row.published_revision)!;
     result.group_join_instructions = (
       approved.content as { group_join_instructions?: string }
@@ -74,6 +78,6 @@ export class PublicController {
       },
     });
     if (!row) invisible();
-    return envelope(publicView(row, new Date()));
+    return envelope(publicView(row, new Date(), true));
   }
 }

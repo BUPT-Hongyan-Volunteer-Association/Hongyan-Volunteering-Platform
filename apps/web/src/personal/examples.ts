@@ -1,45 +1,10 @@
-import type {
-  Appeal,
-  ExitRequest,
-  HourRecord,
-  Incident,
-  Notice,
-  Registration,
-  RestorationRequest,
-} from '@hongyan/contracts';
+import type { Appeal, HourRecord, Incident, Notice } from '@hongyan/contracts';
 import type { PreviewRecord } from '@hongyan/ui/preview';
 
 export const title = '图书馆志愿服务';
 export const activityId = '71000000-0000-4000-8000-000000000001';
 const student = '71000000-0000-4000-8000-000000000002';
 const common = { version: 1, student_id: student, activity_id: activityId };
-const registration: Registration = {
-  ...common,
-  id: '71000000-0000-4000-8000-000000000003',
-  status: 'exited',
-  submitted_at: '2026-11-10T10:00:00+08:00',
-};
-const exit: ExitRequest = {
-  ...common,
-  id: '71000000-0000-4000-8000-000000000004',
-  registration_id: registration.id,
-  reason: '后续服务时间冲突',
-  status: 'approved',
-};
-const restore: RestorationRequest = {
-  ...common,
-  id: '71000000-0000-4000-8000-000000000005',
-  registration_id: registration.id,
-  reason: '可参加后续服务',
-  status: 'pending',
-};
-const requestStates = {
-  approved: '已批准',
-  pending: '待审核',
-  rejected: '已驳回',
-  withdrawn: '已撤回',
-  cancelled: '已取消',
-};
 const notices: Notice[] = [
   { title: '集合地点调整', notice_kind: 'change', body: '11 月 21 日请到一层服务台集合。' },
   {
@@ -103,23 +68,7 @@ const incidentAppeal: Appeal = {
   status: 'pending',
 };
 export const totalHours = hour.credited_hours;
-export const personalRecords: Record<
-  'registrations' | 'notices' | 'hours' | 'feedback',
-  PreviewRecord[]
-> = {
-  registrations: [
-    {
-      id: registration.id,
-      title,
-      status: '已退出',
-      fields: [
-        ['活动编号', hour.activity_code],
-        ['报名日期', registration.submitted_at.slice(0, 10)],
-        ['退出申请', requestStates[exit.status] + ' · ' + exit.reason],
-        ['恢复申请', requestStates[restore.status] + ' · ' + restore.reason],
-      ],
-    },
-  ],
+export const personalRecords: Record<'notices' | 'hours' | 'feedback', PreviewRecord[]> = {
   notices: notices.map((n) => ({
     id: n.id,
     title: n.title,

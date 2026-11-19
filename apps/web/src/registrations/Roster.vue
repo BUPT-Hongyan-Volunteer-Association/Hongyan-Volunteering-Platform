@@ -1,13 +1,21 @@
 <script setup lang="ts">
 import UiSelect from '@hongyan/ui/UiSelect.vue';
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { type Registration, type ActivityRosterPage } from '@hongyan/contracts';
+import {
+  ApiError,
+  createCommand,
+  decideRegistration,
+  listActivityRegistrations,
+  type Registration,
+  type ActivityRosterPage,
+} from '@hongyan/contracts';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import Pager from '@hongyan/ui/Pager.vue';
+const props = defineProps<{ writesPaused: boolean }>();
 const route = useRoute(),
   q = ref(''),
-  state = ref('submitted'),
+  state = ref<Registration['status'] | ''>('submitted'),
   page = ref(1),
   selected = ref(new Set<string>()),
   notice = ref(''),
@@ -30,64 +38,106 @@ const labels = {
   withdrawn: '已撤回',
   exited: '已退出',
 };
-const samples = computed(() =>
-  Array.from(
-    { length: 36 },
-    (_, i) =>
-      ({
-        id: '10000000-0000-4000-8000-' + String(i + 1).padStart(12, '0'),
-        version: 1,
-        activity_id: String(route.params.id),
-        student_id: '20000000-0000-4000-8000-' + String(i + 1).padStart(12, '0'),
-        student_no: String(i + 1).padStart(10, '0'),
-        student_name: '示例志愿者 ' + (i + 1),
-        submitted_at: '2026-11-18T09:00:00+08:00',
-        status:
-          i < 9
-            ? 'submitted'
-            : i < 27
-              ? 'accepted'
-              : i < 30
-                ? 'waitlisted'
-                : i < 33
-                  ? 'rejected'
-                  : i < 35
-                    ? 'withdrawn'
-                    : 'exited',
-      }) satisfies Registration,
-  ),
-);
-const result = computed<ActivityRosterPage>(() => {
-  const found = samples.value.filter((r) => (r.student_name + r.student_no).includes(q.value));
-  const counts = { submitted: 0, accepted: 0, waitlisted: 0, rejected: 0, withdrawn: 0, exited: 0 };
-  for (const row of found) counts[row.status]++;
-  const matches = found.filter((r) => !state.value || r.status === state.value);
-  return {
-    items: matches.slice((page.value - 1) * 5, page.value * 5),
-    page: page.value,
-    page_size: 5,
-    total: matches.length,
-    status_counts: counts,
-    capacity: 30,
-    accepted_count: 18,
-  };
-});
+const result = ref<ActivityRosterPage>();
+const readError = ref('');
+const writeError = ref('');
+const saving = ref(false);
+const refreshRequired = ref(false);
+const command = createCommand();
+let serial = 0;
+let mounted = true;
+async function load() {
+  const turn = ++serial;
+  readError.value = '';
+  result.value = undefined;
+  inspected.value = undefined;
+  try {
+    const { data } = await listActivityRegistrations({
+      path: { id: String(route.params.id) },
+      query: {
+        scope: 'managed',
+        q: q.value.trim() || undefined,
+        status: state.value || undefined,
+        page: page.value,
+        page_size: 5,
+      },
+      throwOnError: true,
+    });
+    if (turn !== serial) return;
+    const lastPage = Math.max(1, Math.ceil(data.data.total / data.data.page_size));
+    if (page.value > lastPage) {
+      page.value = lastPage;
+      return;
+    }
+    result.value = data.data;
+    refreshRequired.value = false;
+  } catch (e) {
+    if (turn !== serial) return;
+    readError.value = e instanceof Error ? e.message : '名单读取失败';
+    if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) {
+      selected.value.clear();
+      notice.value = '';
+      writeError.value = '';
+    }
+  }
+}
+async function accept(row: Registration) {
+  if (saving.value || refreshRequired.value || props.writesPaused) return;
+  saving.value = true;
+  writeError.value = '';
+  const body = { decision: 'accepted' as const, expected_version: row.version };
+  try {
+    await decideRegistration({
+      path: { id: row.id },
+      query: { scope: 'managed' },
+      body,
+      headers: command.headers('decide_registration', row.id, body),
+      throwOnError: true,
+    });
+    command.confirmed();
+    if (!mounted) return;
+    notice.value = '已录取' + row.student_name + '。';
+    selected.value.delete(row.id);
+    await load();
+  } catch (e) {
+    if (!mounted) return;
+    if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) {
+      selected.value.clear();
+      notice.value = '';
+      inspected.value = undefined;
+      result.value = undefined;
+      readError.value = e.message;
+      return;
+    }
+    writeError.value =
+      row.student_name + '：' + (e instanceof Error ? e.message : '录取失败，请重试');
+    refreshRequired.value = e instanceof ApiError && e.status === 409;
+  } finally {
+    saving.value = false;
+  }
+}
 const otherStates = computed(() => [
   { value: '', label: '其他状态', disabled: true },
   ...lessCommon.map((value) => ({
     value,
-    label: labels[value] + ' ' + result.value.status_counts[value],
+    label: labels[value] + ' ' + (result.value?.status_counts[value] ?? 0),
   })),
 ]);
 function clear() {
   notice.value = selected.value.size ? '筛选或活动已变更，已清空选择。' : '';
   inspected.value = undefined;
+  writeError.value = '';
   selected.value.clear();
   page.value = 1;
 }
-watch([q, state], clear);
+watch([q, state], clear, { flush: 'sync' });
+watch([() => route.params.id, q, state, page], load, { immediate: true });
+onUnmounted(() => {
+  mounted = false;
+  serial++;
+});
 function toggleAll(checked: boolean) {
-  for (const r of result.value.items)
+  for (const r of result.value?.items ?? [])
     if (checked) selected.value.add(r.id);
     else selected.value.delete(r.id);
 }
@@ -96,14 +146,13 @@ function toggleAll(checked: boolean) {
   <div class="roster-heading">
     <div class="page-title">
       <h2>报名名单</h2>
-      <span class="sample-label">示例数据</span>
     </div>
-    <p class="capacity">
+    <p v-if="result" class="capacity">
       <UiIcon name="User" /> 已占
       <strong>{{ result.accepted_count }} / {{ result.capacity }}</strong> 人
     </p>
   </div>
-  <div class="status-filters" aria-label="报名状态">
+  <div v-if="result" class="status-filters" aria-label="报名状态">
     <button v-for="key in filters" :key="key" :aria-pressed="state === key" @click="state = key">
       {{ key ? labels[key] : '全部' }}
       <b>{{
@@ -116,7 +165,7 @@ function toggleAll(checked: boolean) {
       label="其他报名状态"
       :model-value="lessCommon.some((k) => k === state) ? state : ''"
       :options="otherStates"
-      @update:model-value="state = $event"
+      @update:model-value="state = $event as Registration['status']"
     />
   </div>
   <div class="page-actions roster-tools">
@@ -137,74 +186,92 @@ function toggleAll(checked: boolean) {
     </button>
   </div>
   <p v-if="notice" role="status">{{ notice }}</p>
-  <div class="scroll-table data-grid">
-    <table>
-      <thead>
-        <tr>
-          <th>
-            <label class="check-cell">
-              <input
-                type="checkbox"
-                aria-label="选择本页"
-                :indeterminate="
-                  result.items.some((r) => selected.has(r.id)) &&
-                  !result.items.every((r) => selected.has(r.id))
-                "
-                :checked="result.items.length > 0 && result.items.every((r) => selected.has(r.id))"
-                @change="toggleAll(($event.target as HTMLInputElement).checked)"
-            /></label>
-          </th>
-          <th>姓名</th>
-          <th>学号</th>
-          <th>申请时间</th>
-          <th>状态</th>
-          <th>操作</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="r in result.items" :key="r.id" :class="{ selected: selected.has(r.id) }">
-          <td>
-            <label class="check-cell">
-              <input
-                type="checkbox"
-                :aria-label="'选择' + r.student_name"
-                :value="r.id"
-                v-model="selected"
-            /></label>
-          </td>
-          <td>{{ r.student_name }}</td>
-          <td>{{ r.student_no }}</td>
-          <td>{{ time.format(new Date(r.submitted_at)) }}</td>
-          <td>
-            <span class="icon-label"><UiIcon name="Document" />{{ labels[r.status] }}</span>
-          </td>
-          <td>
-            <button class="view-row" :aria-label="'查看' + r.student_name" @click="inspected = r">
-              查看
-            </button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-  <p v-if="!result.total">暂无匹配的报名</p>
-  <div class="roster-pager">
-    <div>
-      <small>本页 {{ result.items.length }} 人，共 {{ result.total }} 人</small
-      ><small id="roster-note">录取、候补及导出待接入</small>
-    </div>
-    <Pager
-      :page="page"
-      :size="5"
-      :total="result.total"
-      @change="
-        (p) => {
-          page = p;
-          inspected = undefined;
-        }
+  <p v-if="writeError" role="alert">
+    {{ writeError }}
+    <button
+      v-if="refreshRequired"
+      @click="
+        writeError = '';
+        load();
       "
-    />
-  </div>
+    >
+      刷新名单复核
+    </button>
+  </p>
+  <p v-if="readError" role="alert">{{ readError }} <button @click="load">重新读取名单</button></p>
+  <p v-else-if="!result" role="status">正在读取名单…</p>
+  <template v-if="result">
+    <div class="scroll-table data-grid">
+      <table>
+        <thead>
+          <tr>
+            <th>
+              <label class="check-cell">
+                <input
+                  type="checkbox"
+                  aria-label="选择本页"
+                  :indeterminate="
+                    result.items.some((r) => selected.has(r.id)) &&
+                    !result.items.every((r) => selected.has(r.id))
+                  "
+                  :checked="
+                    result.items.length > 0 && result.items.every((r) => selected.has(r.id))
+                  "
+                  @change="toggleAll(($event.target as HTMLInputElement).checked)"
+              /></label>
+            </th>
+            <th>姓名</th>
+            <th>学号</th>
+            <th>申请时间</th>
+            <th>状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="r in result.items" :key="r.id" :class="{ selected: selected.has(r.id) }">
+            <td>
+              <label class="check-cell">
+                <input
+                  type="checkbox"
+                  :aria-label="'选择' + r.student_name"
+                  :value="r.id"
+                  v-model="selected"
+              /></label>
+            </td>
+            <td>{{ r.student_name }}</td>
+            <td>{{ r.student_no }}</td>
+            <td>{{ time.format(new Date(r.submitted_at)) }}</td>
+            <td>
+              <span class="icon-label"><UiIcon name="Document" />{{ labels[r.status] }}</span>
+            </td>
+            <td>
+              <button class="view-row" :aria-label="'查看' + r.student_name" @click="inspected = r">
+                查看
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p v-if="!result.total">暂无匹配的报名</p>
+    <div class="roster-pager">
+      <div>
+        <small>本页 {{ result.items.length }} 人，共 {{ result.total }} 人</small
+        ><small id="roster-note">批量录取、候补及导出待接入</small>
+      </div>
+      <Pager
+        :page="page"
+        :size="5"
+        :total="result.total"
+        @change="
+          (p) => {
+            page = p;
+            inspected = undefined;
+          }
+        "
+      />
+    </div>
+  </template>
   <section v-if="inspected" class="record">
     <div class="page-title">
       <h3>{{ inspected.student_name }}的报名记录</h3>
@@ -217,7 +284,33 @@ function toggleAll(checked: boolean) {
       <dd>{{ time.format(new Date(inspected.submitted_at)) }}</dd>
       <dt>状态</dt>
       <dd>{{ labels[inspected.status] }}</dd>
+      <template v-if="inspected.statement"
+        ><dt>申请说明</dt>
+        <dd>{{ inspected.statement }}</dd></template
+      >
+      <template v-if="inspected.decision_reason"
+        ><dt>处理说明</dt>
+        <dd>{{ inspected.decision_reason }}</dd></template
+      >
     </dl>
+    <button
+      v-if="['submitted', 'waitlisted', 'rejected'].includes(inspected.status)"
+      class="primary"
+      :disabled="
+        saving ||
+        writesPaused ||
+        refreshRequired ||
+        !result ||
+        result.accepted_count >= result.capacity
+      "
+      @click="accept(inspected)"
+    >
+      {{ saving ? '正在录取…' : '录取此人' }}
+    </button>
+    <small
+      v-if="result && result.accepted_count >= result.capacity && inspected.status !== 'accepted'"
+      >名额已满</small
+    >
   </section>
 </template>
 <style scoped>
@@ -271,10 +364,6 @@ function toggleAll(checked: boolean) {
 }
 .page-title h2 {
   font-size: 20px;
-}
-.sample-label {
-  margin: 0;
-  font-size: 12px;
 }
 .capacity {
   margin: 14px 0 4px;

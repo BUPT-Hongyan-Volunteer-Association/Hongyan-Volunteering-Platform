@@ -1,6 +1,6 @@
 # 工程协作约定
 
-批次 01 和批次 02 已完成。登录改密、活动授权、草稿送审、审核和公开读取已接入真实服务。本地体验入口及验证命令见 [README.md](README.md)。
+登录改密、活动授权、草稿送审、审核、公开读取、学生报名和单人录取已接入真实服务。本地体验入口及验证命令见 [README.md](README.md)。
 
 ## 目录与归档
 
@@ -8,9 +8,9 @@
 | --- | --- |
 | 根目录 | README 负责启动和验证，DESIGN 负责三端视觉与交互。工作区依赖、脚本和锁文件统一维护。 |
 | `config/` | 共享 TypeScript 和 Vite 设置。各应用保留自己的配置入口。 |
-| `apps/web/src/` | 学生与负责人共用的 Vue 应用。`router.ts` 定义路由，`activities/` 放活动列表、详情与编辑，`registrations/` 放名单与退出恢复。personal/ 放学生记录与反馈。notices/、hours/、incidents/ 放负责人各业务样例。 |
+| `apps/web/src/` | 学生与负责人共用的 Vue 应用。`router.ts` 定义路由，`activities/` 放活动列表、详情与编辑，`registrations/` 放本人报名、负责人名单及退出恢复。personal/ 放学生记录与反馈。notices/、hours/、incidents/ 放负责人各业务样例。 |
 | `apps/admin/src/` | 独立审核后台。`layouts/` 放 Vben 布局及上游许可，`activities/` 放活动审核，`hours/` 放时长样板。management/ 放分角色管理页与样例，TaskInbox.vue 读取真实待审队列。 |
-| `apps/api/` | NestJS 模块化单体。`src/auth/` 负责账号和会话，`src/activities/` 负责活动读写与审批，`prisma/` 保存模型和迁移，`scripts/` 放种子，`test/` 放集成回归。 |
+| `apps/api/` | NestJS 模块化单体。`src/auth/` 负责账号和会话，`src/activities/` 负责活动读写与审批，`src/registrations/` 负责报名查询、申请、录取及决定事件，`prisma/` 保存模型和迁移，`scripts/` 放种子，`test/` 放集成回归。 |
 | `packages/contracts/` | OpenAPI、`templates/` 中的两份空白导入表、`src/index.ts` 共享请求入口及生成的客户端。 |
 | `packages/ui/src/` | 两个前端共用的身份入口、导航标识、图标、选择框、日历、分页、示例列表详情、样式及 timeline/ 中的 Vue/SVG 日程。 |
 

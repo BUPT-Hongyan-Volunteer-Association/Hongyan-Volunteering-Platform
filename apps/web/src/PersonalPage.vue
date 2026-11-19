@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { Profile } from '@hongyan/contracts';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
-import { personalRecords, title } from './personal/examples';
 defineProps<{ profile: Profile }>();
 const entries = [
   { to: '/mine/schedule', label: '我的日程', icon: 'Calendar' },
@@ -23,25 +22,6 @@ const entries = [
         ><dt>学号</dt>
         <dd>{{ profile.student.student_no }}</dd></template
       >
-    </dl>
-  </template>
-  <template v-else-if="$route.path === '/mine/example-activity'">
-    <RouterLink class="back-link" :to="'/registrations/' + personalRecords.registrations[0].id"
-      ><UiIcon name="ArrowLeft" />返回报名详情</RouterLink
-    >
-    <div class="page-heading">
-      <div class="page-title">
-        <h1>{{ title }}</h1>
-        <span class="sample-label">示例数据 · 获批活动</span>
-      </div>
-    </div>
-    <dl class="detail-fields">
-      <dt>服务地点</dt>
-      <dd>沙河校区图书馆</dd>
-      <dt>服务安排</dt>
-      <dd>11 月 14、15、21 日整理归还书籍</dd>
-      <dt>参与方式</dt>
-      <dd>整项活动统一报名</dd>
     </dl>
   </template>
   <template v-else>

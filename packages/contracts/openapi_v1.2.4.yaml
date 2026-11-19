@@ -2235,6 +2235,12 @@ paths:
       - student
       - organizer
       parameters:
+      - name: id
+        in: query
+        description: 从本人记录中定位一条报名详情。
+        schema:
+          type: string
+          format: uuid
       - name: status
         in: query
         required: false
@@ -2415,6 +2421,12 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - name: scope
+        in: query
+        description: 负责人工作区显式使用managed，仅限当前活动成员。all须有有效后台授权。省略时兼任负责人默认使用managed。
+        schema:
+          type: string
+          enum: [managed, all]
       - name: id
         in: path
         required: true
@@ -2581,6 +2593,12 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - name: scope
+        in: query
+        description: 负责人工作区显式使用managed，仅限当前活动成员。all须有有效后台授权。省略时兼任负责人默认使用managed。
+        schema:
+          type: string
+          enum: [managed, all]
       - name: id
         in: path
         required: true
@@ -11308,6 +11326,9 @@ components:
           type: string
           description: ''
           format: uuid
+        activity_title:
+          type: string
+          description: 本人报名列表展示的获批活动名称。
         student_id:
           type: string
           description: ''

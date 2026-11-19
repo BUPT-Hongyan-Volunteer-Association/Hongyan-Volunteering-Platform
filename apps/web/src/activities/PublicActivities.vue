@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import UiSelect from '@hongyan/ui/UiSelect.vue';
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router';
-import { listActivities, getActivity, type Activity, type Profile } from '@hongyan/contracts';
+import {
+  ApiError,
+  listActivities,
+  getActivity,
+  type Activity,
+  type Profile,
+  type Registration,
+} from '@hongyan/contracts';
 import { dateWindow, validDate, validUnit, windowLabel } from '@hongyan/ui/timeWindow';
 import {
   activityTypes,
@@ -81,11 +88,11 @@ function filter(changes: LocationQueryRaw) {
   scrollPosition = 0;
   return router.push({ path: '/', query: { ...listQuery.value, ...changes, page: undefined } });
 }
-async function load() {
+async function load(keepDetail = false) {
   const index = ++serial;
   busy.value = true;
   error.value = '';
-  detail.value = undefined;
+  if (!keepDetail) detail.value = undefined;
   rows.value = [];
   search.value = String(route.query.q ?? '');
   try {
@@ -116,24 +123,68 @@ async function load() {
       }
     }
   } catch (e) {
-    if (index === serial) error.value = e instanceof Error ? e.message : '读取失败';
+    if (index === serial) {
+      if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0))
+        detail.value = undefined;
+      error.value = e instanceof Error ? e.message : '读取失败';
+    }
   } finally {
     if (index === serial) {
       busy.value = false;
       await nextTick();
-      if (index === serial) window.scrollTo(0, route.params.id ? 0 : scrollPosition);
+      if (index === serial && !keepDetail) window.scrollTo(0, route.params.id ? 0 : scrollPosition);
     }
   }
 }
-watch(() => route.fullPath, load, { immediate: true });
+function applied(record: Registration) {
+  if (detail.value?.id !== record.activity_id) return;
+  detail.value = { ...detail.value, my_registration_status: record.status };
+  void load(true);
+}
+function refreshDetail() {
+  if (route.params.id) void load(true);
+}
+watch(
+  () => route.fullPath,
+  () => load(),
+  { immediate: true },
+);
+// Re-read at the next server-evaluated boundary even if the student keeps this tab open.
+watch(detail, (activity, _, cleanup) => {
+  if (!activity) return;
+  const boundary =
+    activity.registration_phase === 'not_open'
+      ? activity.registration_opens_at
+      : activity.registration_phase === 'open'
+        ? activity.registration_closes_at
+        : undefined;
+  if (!boundary || !activity.state_evaluated_at) return;
+  const delay = Date.parse(boundary) - Date.parse(activity.state_evaluated_at);
+  if (!Number.isFinite(delay)) return;
+  const timer = window.setTimeout(refreshDetail, Math.min(2147483647, Math.max(1, delay)));
+  cleanup(() => window.clearTimeout(timer));
+});
+onMounted(() => window.addEventListener('focus', refreshDetail));
+onUnmounted(() => {
+  serial++;
+  window.removeEventListener('focus', refreshDetail);
+});
 const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
 </script>
 <template>
   <template v-if="route.params.id">
+    <p v-if="detail && error" role="alert">
+      {{ error }} <button @click="refreshDetail">重新读取详情</button>
+    </p>
     <ActivityDetail
       v-if="detail"
       :activity="detail"
-      :show-registrations="profile.roles.some((r) => r === 'student' || r === 'organizer')"
+      :key="detail.id"
+      :refreshing="busy"
+      @applied="applied"
+      :show-registrations="
+        !!profile.student && profile.roles.some((r) => r === 'student' || r === 'organizer')
+      "
     />
     <template v-else>
       <RouterLink class="back-link" :to="{ path: '/', query: listQuery }"
@@ -141,7 +192,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
       >
       <h1>活动详情</h1>
       <p v-if="busy" role="status">正在读取…</p>
-      <p v-else-if="error" role="alert">{{ error }} <button @click="load">重试</button></p>
+      <p v-else-if="error" role="alert">{{ error }} <button @click="load()">重试</button></p>
     </template>
   </template>
   <template v-else>
@@ -250,7 +301,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
           </button>
         </p>
         <p v-if="busy" class="notice" role="status">正在读取活动…</p>
-        <p v-else-if="error" role="alert">{{ error }} <button @click="load">重试</button></p>
+        <p v-else-if="error" role="alert">{{ error }} <button @click="load()">重试</button></p>
         <div v-else-if="!rows.length" class="empty-state">
           <UiIcon name="Search" />
           <p>暂无匹配的公开活动</p>

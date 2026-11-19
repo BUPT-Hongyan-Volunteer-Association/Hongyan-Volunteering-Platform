@@ -1,12 +1,70 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import UiIcon, { type IconName } from '@hongyan/ui/UiIcon.vue';
 import { activityTypes as types, localDateTime as date } from '@hongyan/ui/activityDisplay';
-import type { Activity } from '@hongyan/contracts';
-defineProps<{ activity: Activity; showRegistrations: boolean }>();
+import {
+  applyForActivity,
+  createCommand,
+  type Activity,
+  type Registration,
+} from '@hongyan/contracts';
+import { registrationLabels } from '../registrations/labels';
+const props = defineProps<{
+  activity: Activity;
+  showRegistrations: boolean;
+  refreshing: boolean;
+}>();
+const emit = defineEmits<{ applied: [registration: Registration] }>();
+const saving = ref(false);
+const applyError = ref('');
+const statement = ref('');
+const command = createCommand();
+const canApply = computed(
+  () =>
+    props.showRegistrations &&
+    props.activity.registration_phase === 'open' &&
+    (!props.activity.my_registration_status ||
+      props.activity.my_registration_status === 'withdrawn'),
+);
+const buttonLabel = computed(() => {
+  if (saving.value) return '正在提交…';
+  const status = props.activity.my_registration_status;
+  return status === 'withdrawn' && canApply.value
+    ? '重新申请报名'
+    : status
+      ? registrationLabels[status]
+      : '申请报名';
+});
+async function submit() {
+  if (!canApply.value || saving.value || props.refreshing) return;
+  saving.value = true;
+  applyError.value = '';
+  const id = props.activity.id;
+  const body = statement.value.trim() ? { statement: statement.value.trim() } : {};
+  try {
+    const { data } = await applyForActivity({
+      path: { id },
+      body,
+      headers: command.headers('apply_for_activity', id, body),
+      throwOnError: true,
+    });
+    command.confirmed();
+    emit('applied', data.data);
+  } catch (e) {
+    applyError.value = e instanceof Error ? e.message : '报名提交失败，请重试';
+  } finally {
+    saving.value = false;
+  }
+}
 const origin = window.history.state?.scheduleReturn;
 const scheduleReturn =
   typeof origin === 'string' && /^\/(?:mine\/)?schedule(?:\?|$)/.test(origin) ? origin : undefined;
+const registrationPath = window.history.state?.registrationReturn;
+const registrationReturn =
+  typeof registrationPath === 'string' &&
+  /^\/registrations\/[a-f0-9-]+(?:\?|$)/i.test(registrationPath)
+    ? registrationPath
+    : undefined;
 const contact = ref<HTMLDialogElement>();
 const phases = {
   open: '报名中',
@@ -21,21 +79,15 @@ const conditions: [keyof Activity, string, IconName][] = [
   ['safety_notes', '安全说明', 'Warning'],
   ['group_join_instructions', '入群方式', 'Message'],
 ];
-const statuses = {
-  accepted: '已录取',
-  submitted: '已提交，待审核',
-  waitlisted: '候补中',
-  rejected: '未录取',
-  withdrawn: '已撤回',
-  exited: '已退出',
-};
 </script>
 <template>
   <article class="activity-detail">
     <div class="detail-top">
       <RouterLink
-        :to="scheduleReturn || { path: '/', query: $route.query }"
-        :aria-label="scheduleReturn ? '返回日程' : '返回活动列表'"
+        :to="registrationReturn || scheduleReturn || { path: '/', query: $route.query }"
+        :aria-label="
+          registrationReturn ? '返回报名详情' : scheduleReturn ? '返回日程' : '返回活动列表'
+        "
         ><UiIcon name="ArrowLeft" />活动详情</RouterLink
       ><RouterLink v-if="showRegistrations" to="/registrations">我的报名</RouterLink>
     </div>
@@ -120,6 +172,12 @@ const statuses = {
           <p>本活动统一报名，录取后查看入群方式。</p>
           <p v-if="activity.schedule.schedule_type === 'weekly'">每周参加报名在活动群内完成。</p>
         </aside>
+        <details v-if="canApply" class="apply-statement">
+          <summary>报名说明（选填）</summary>
+          <label
+            >申请说明<textarea v-model="statement" maxlength="1000" :disabled="saving" />
+          </label>
+        </details>
         <details
           v-if="
             activity.registration_opens_at ||
@@ -151,11 +209,15 @@ const statuses = {
       </div>
     </div>
     <footer class="detail-footer">
-      <button class="primary" disabled aria-describedby="apply-reason">
-        {{
-          activity.my_registration_status ? statuses[activity.my_registration_status] : '申请报名'
-        }}</button
-      ><small id="apply-reason">报名功能待接入</small>
+      <button class="primary" :disabled="!canApply || saving || refreshing" @click="submit">
+        {{ buttonLabel }}
+      </button>
+      <small v-if="applyError" role="alert">{{ applyError }}</small>
+      <small v-else-if="!showRegistrations">需要学生身份才能报名</small>
+      <small
+        v-else-if="!activity.my_registration_status && !canApply && activity.registration_phase"
+        >{{ phases[activity.registration_phase] }}</small
+      >
       <button v-if="activity.contact_text" class="contact-btn" @click="contact?.showModal()">
         <UiIcon name="Message" />联系负责人
       </button>

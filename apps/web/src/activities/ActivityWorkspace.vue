@@ -140,7 +140,7 @@ onUnmounted(() => {
         v-bind="
           route.name === 'organizer-section'
             ? { activityCode }
-            : route.name === 'activity-edit'
+            : route.name === 'activity-edit' || route.name === 'roster'
               ? { writesPaused: verifying || !!error }
               : {}
         "

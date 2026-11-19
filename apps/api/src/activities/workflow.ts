@@ -1,10 +1,17 @@
 import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type { Prisma, ActivityRevision, ActivityReview } from '../generated/prisma/client.js';
-import type { SessionRequest } from '../auth/session.guard.js';
+import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import { BusinessError, denied, envelope, expired, invalid, invisible } from '../http.js';
-import { includeView, managedScope, project, staff, type LoadedActivity } from './read.js';
+import {
+  includeView,
+  managedScope,
+  project,
+  registrationScope,
+  staff,
+  type LoadedActivity,
+} from './read.js';
 
 export function stable(value: unknown): string {
   return JSON.stringify(value, (_k, v) =>
@@ -95,15 +102,35 @@ export function detail(row: LoadedActivity) {
 }
 
 export type Tx = Prisma.TransactionClient;
-export type Target = { activityId: string } | { reviewId: string } | null;
+export type Target =
+  | { activityId: string }
+  | { reviewId: string }
+  | { registrationId: string }
+  | null;
+async function targetActivityId(tx: Tx, target: NonNullable<Target>) {
+  if ('activityId' in target) return target.activityId;
+  const reference =
+    'reviewId' in target
+      ? await tx.activityReview.findUnique({
+          where: { id: target.reviewId },
+          select: { activity_id: true },
+        })
+      : await tx.registration.findUnique({
+          where: { id: target.registrationId },
+          select: { activity_id: true },
+        });
+  if (!reference) invisible();
+  return reference.activity_id;
+}
 @Injectable()
 export class Workflow {
   constructor(private db: Database) {}
   async run(
     req: SessionRequest,
     target: Target,
-    access: 'create' | 'manage' | 'review',
+    access: 'create' | 'manage' | 'review' | 'apply' | 'admit',
     execute: (tx: Tx, row: LoadedActivity | null) => Promise<unknown>,
+    scope?: string,
   ) {
     const key = req.get('Idempotency-Key');
     if (!key || key.length < 8 || key.length > 100)
@@ -119,12 +146,14 @@ export class Workflow {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${stable(identity)},0))`;
       let row: LoadedActivity | null = null;
       if (target) {
-        const id =
-          'activityId' in target
-            ? target.activityId
-            : (await tx.activityReview.findUnique({ where: { id: target.reviewId } }))?.activity_id;
-        if (!id) invisible();
-        await tx.$queryRaw`SELECT id FROM activity WHERE id=${id}::uuid FOR UPDATE`;
+        const id = await targetActivityId(tx, target);
+        if (access === 'apply') {
+          await tx.$queryRaw`SELECT id FROM activity WHERE id=${id}::uuid FOR SHARE`;
+          // Distinct command keys for the same applicant still serialize on the unique relation.
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${id + '/' + account_id},0))`;
+        } else {
+          await tx.$queryRaw`SELECT id FROM activity WHERE id=${id}::uuid FOR UPDATE`;
+        }
         row = await tx.activity.findUnique({ where: { id }, include: includeView });
         if (!row) invisible();
       }
@@ -136,18 +165,27 @@ export class Workflow {
           sessions: { some: { id_hash: req.sessionHash, expires_at: { gt: new Date() } } },
         },
         include: {
+          student: { select: { id: true } },
           roles: { where: { OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }] } },
         },
       });
       if (!account) expired();
       const actor = { ...req.actor, roles: account.roles.map((r) => r.role) };
+      if (
+        access === 'apply' &&
+        (studentId(actor) !== account.student?.id || !row?.published_revision)
+      )
+        invisible();
       if (access === 'create' && !actor.roles.includes('organizer')) denied();
       if (access === 'review' && !staff(actor)) denied();
       if (
-        access === 'manage' &&
+        (access === 'manage' || access === 'admit') &&
         row &&
         !(await tx.activity.findFirst({
-          where: { id: row.id, ...managedScope(actor) },
+          where: {
+            id: row.id,
+            ...(access === 'admit' ? registrationScope(actor, scope) : managedScope(actor)),
+          },
           select: { id: true },
         }))
       )

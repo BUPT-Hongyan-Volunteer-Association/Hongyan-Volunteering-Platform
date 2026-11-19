@@ -1,6 +1,6 @@
 # 鸿雁志愿服务平台
 
-负责人创建活动并送审，老师核对修改后批准或驳回，学生可查看已发布的活动。活动发布与审核已接入真实服务，部分报名、时长和通知页面仍使用示例数据。
+负责人创建活动并提交审核，老师核对后批准或驳回。学生可从已发布的活动详情申请报名，负责人在「报名名单 → 查看 → 录取此人」处理。学生从「我的报名」查看结果，录取后打开活动详情即可查看入群方式。
 
 ## 首次配置
 
@@ -68,8 +68,9 @@ pnpm build
 | --- | --- |
 | 类型检查 | `pnpm typecheck` |
 | 体验账号配置 | `pnpm --filter @hongyan/api test:accounts` |
-| 服务端发布与审核流程 | `pnpm --filter @hongyan/api test:flow` |
-| 三端页面回归（含构建） | `pnpm test:pages` |
+| 服务端活动发布、报名与录取 | `pnpm --filter @hongyan/api test:flow` |
+| 报名突发负载（12,000 次） | `pnpm --filter @hongyan/api test:registration-burst` |
+| 学生端、负责人端和审核后台页面 | `pnpm test:pages` |
 
 服务端与页面回归需要运行中的 PostgreSQL 和有建库权限的角色，测试会自行启动服务并清理测试库。页面回归和身份选择页会自动选择可用浏览器，已有 Edge 或 Chrome 即可运行，也可用 `pnpm exec playwright-core install firefox` 安装配套的 Firefox。
 

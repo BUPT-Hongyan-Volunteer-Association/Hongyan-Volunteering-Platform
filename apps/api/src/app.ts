@@ -10,18 +10,18 @@ import {
   type ExceptionFilter,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import type { Response } from 'express';
+import type { NextFunction, Response } from 'express';
 import { CsrfController } from './auth/csrf.controller.js';
 import { SessionService } from './auth/session.service.js';
-import { Database } from './database.js';
 
 import { AccountController } from './auth/account.controller.js';
-import { SessionGuard } from './auth/session.guard.js';
+import { SessionGuard, type SessionRequest } from './auth/session.guard.js';
 import { BusinessError } from './http.js';
 import { ReviewController } from './activities/review.controller.js';
 import { DraftController } from './activities/draft.controller.js';
-import { Workflow } from './activities/workflow.js';
+import { WorkflowModule } from './activities/workflow.module.js';
 import { PublicController } from './activities/public.controller.js';
+import { RegistrationModule } from './registrations/registration.module.js';
 import { ManagedController } from './activities/managed.controller.js';
 
 @Catch()
@@ -50,6 +50,7 @@ class HttpErrorFilter implements ExceptionFilter {
 }
 
 @Module({
+  imports: [WorkflowModule, RegistrationModule],
   controllers: [
     CsrfController,
     AccountController,
@@ -58,12 +59,16 @@ class HttpErrorFilter implements ExceptionFilter {
     DraftController,
     ReviewController,
   ],
-  providers: [SessionService, SessionGuard, Database, Workflow],
+  providers: [SessionService, SessionGuard],
 })
 class AppModule {}
 
 export async function createApp() {
   const app = await NestFactory.create(AppModule);
+  app.use((req: SessionRequest, _res: Response, next: NextFunction) => {
+    req.receivedAt = new Date();
+    next();
+  });
   app.useGlobalGuards(app.get(SessionGuard));
   app.setGlobalPrefix('api/v1');
   app.useGlobalFilters(new HttpErrorFilter());

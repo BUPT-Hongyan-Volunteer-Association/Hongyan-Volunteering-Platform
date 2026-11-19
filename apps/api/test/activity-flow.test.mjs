@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createApp } from '../dist/app.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
+import { registrationCases } from './registrations.mjs';
 import { Database } from '../dist/database.js';
 
 function browser(base) {
   let cookie = '',
     csrf = '';
-  async function request(path, { method = 'GET', body, key } = {}) {
-    const headers = { Cookie: cookie, 'Content-Type': 'application/json', 'X-CSRF-Token': csrf };
+  async function request(path, { method = 'GET', body, key, csrfToken = csrf } = {}) {
+    const headers = { Cookie: cookie, 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken };
     if (key) headers['Idempotency-Key'] = key;
     const response = await fetch(base + path, { method, headers, body: JSON.stringify(body) });
     const fresh = response.headers.get('set-cookie');
@@ -252,6 +253,9 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.deepEqual(saves.map((s) => s.status).sort(), [200, 409]);
       assert.equal(saves.find((s) => s.status === 409).code, 'version_conflict');
     });
+    const dual = browser(base);
+    await dual.signIn('demo.dual', staffPassword);
+    await registrationCases(t, { db, student, owner, other, teacher, dual, sample });
   } finally {
     try {
       await app?.close();

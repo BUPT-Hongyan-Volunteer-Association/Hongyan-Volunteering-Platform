@@ -94,7 +94,7 @@ async function fits(page) {
   );
 }
 
-test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (t) => {
+test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, async (t) => {
   const source = new URL(process.env.DATABASE_URL);
   const maintenance = new Database();
   const name = 'hy_pages_' + randomUUID().replaceAll('-', '');
@@ -310,14 +310,77 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       assert.equal(await location.innerText(), '沙河 · 活动室 B');
     });
 
-    await t.test('学生活动、名单、回执和账号的示例不会发送业务写请求', async () => {
+    await t.test('独立学生和负责人会话完成报名、单人录取和入群查看', async () => {
+      await student.goto(web);
+      await link(student, '校园服务甲').click();
+      assert.equal(await student.getByText('入群方式', { exact: true }).count(), 0);
+      await student.getByText('报名说明（选填）', { exact: true }).click();
+      await student.getByLabel('申请说明').fill('可以参加本次服务');
+      // A failed read after a successful write must offer a read-only retry.
+      await student.route('**/api/v1/activities/' + first.id, r => r.abort(), { times: 1 });
+      await button(student, '申请报名').click();
+      await visible(button(student, '已提交，待审核'));
+      await button(student, '重新读取详情').click();
+      await student.reload();
+      await visible(button(student, '已提交，待审核'));
+      await student.locator('article').getByRole('link', { name: '我的报名' }).click();
+      const record = student.locator('.entry-list a').filter({ hasText: '校园服务甲' });
+      await visible(record.getByText('已提交，待审核'));
+
+      await owner.goto(web + '/managed');
+      await link(owner, '校园服务甲').click();
+      await link(owner, '报名名单').click();
+      await owner.getByLabel('姓名或学号').fill('0000000001');
+      await button(owner, '查看体验学生').click();
+      await visible(owner.getByText('可以参加本次服务'));
+      const applicant = await db.student.findUniqueOrThrow({ where: { student_no: '0000000001' } });
+      const relation = { activity_id: first.id, student_id: applicant.id };
+      // Another manager changes this record between opening and deciding.
+      await db.registration.update({ where: { activity_id_student_id: relation }, data: { version: { increment: 1 } } });
+      await button(owner, '录取此人').click();
+      await visible(owner.getByText(/体验学生：版本已更新/));
+      assert.ok(await button(owner, '录取此人').isDisabled());
+      await button(owner, '刷新名单复核').click();
+      await button(owner, '查看体验学生').click();
+      await owner.route('**/organizer/activities/*/registrations?**', r => r.abort(), { times: 1 });
+      await button(owner, '录取此人').click();
+      await visible(owner.getByText('已录取体验学生。', { exact: true }));
+      await button(owner, '重新读取名单').click();
+      await visible(owner.getByText('暂无匹配的报名'));
+      await button(owner, '已录取 1').click();
+      await visible(owner.getByRole('cell', { name: '体验学生' }));
+      await student.reload();
+      await visible(record.getByText('已录取'));
+      await record.click();
+      await visible(student.getByText('可以参加本次服务'));
+      await link(student, '查看活动详情').click();
+      await visible(student.getByText('录取后向负责人领取群号', { exact: true }));
+      assert.ok(await button(student, '已录取').isDisabled());
+      await link(student, '返回报名详情').click();
+      await visible(student.getByRole('heading', { name: '报名详情', exact: true }));
+      assert.equal(await db.registrationDecisionEvent.count({ where: relation }), 1);
+    });
+
+    // Persist the roster fixture in this disposable DB. The browser uses the normal API.
+    const fixtureStatuses = [
+      ...Array(9).fill('submitted'), ...Array(16).fill('accepted'),
+      ...Array(6).fill('waitlisted'), 'rejected', 'rejected', 'withdrawn',
+    ];
+    for (const [index, status] of fixtureStatuses.entries()) {
+      const username = String(1000 + index).padStart(10, '0');
+      await db.account.create({ data: {
+        username, display_name: '名单测试' + (index + 1), password_hash: 'fixture',
+        student: { create: { student_no: username, registrations: { create: {
+          activity_id: first.id, status, submitted_at: new Date(Date.UTC(2026, 10, 10, index)),
+        } } } },
+      } });
+    }
+    await t.test('名单批量预览、回执和账号示例不会发送业务写请求', async () => {
       const writes = [];
       const collect = (r) => {
         if (r.url().includes('/api/v1/') && r.method() !== 'GET') writes.push(r.method());
       };
       for (const p of [student, owner, tech]) p.on('request', collect);
-      assert.equal(await button(student, '申请报名').isEnabled(), false);
-      await link(student, '返回活动列表').click();
       await link(student, '通知').click();
       await student.getByRole('link', { name: /集合地点调整/ }).click();
       await button(student, '预览确认回执').click();
@@ -496,17 +559,19 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       };
       owner.on('request', collect);
       try {
-        await owner.getByLabel('选择示例志愿者 1', { exact: true }).check();
-        await owner.getByLabel('选择示例志愿者 2', { exact: true }).check();
+        await owner.getByLabel('选择名单测试1', { exact: true }).check();
+        await owner.getByLabel('选择名单测试2', { exact: true }).check();
         assert.equal(await owner.locator('tbody tr.selected').count(), 2);
         assert.equal(await owner.locator('tbody tr').count(), 5);
         await visible(owner.getByText('已选 2 人', { exact: true }));
         await visible(owner.getByText('本页 5 人，共 9 人'));
         await button(owner, '下一页').click();
+        await visible(owner.getByText('本页 4 人，共 9 人'));
         await button(owner, '上一页').click();
+        await visible(owner.getByLabel('选择名单测试1', { exact: true }));
         assert.equal(await owner.locator('tbody tr.selected input:checked').count(), 2);
-        await button(owner, '查看示例志愿者 2').click();
-        await visible(owner.getByRole('heading', { name: '示例志愿者 2的报名记录' }));
+        await button(owner, '查看名单测试2').click();
+        await visible(owner.getByRole('heading', { name: '名单测试2的报名记录' }));
         await button(owner, '收起记录').click();
         for (const label of ['录取所选（待接入）', '设为候补（待接入）', '导出名单（待接入）'])
           assert.ok(await button(owner, label).isDisabled());
@@ -925,7 +990,7 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       assert.ok(
         cutoff && action && cutoff.y + cutoff.height < action.y && action.y + action.height <= 844,
       );
-      assert.ok(await button(student, '申请报名').isDisabled());
+      assert.ok(await button(student, '申请报名').isEnabled());
       await capture(student, 'student');
       await link(student, '返回活动列表').click();
       assert.equal(new URL(student.url()).searchParams.get('q'), content.title);
@@ -934,6 +999,36 @@ test('批次 02 三端页面与真实发布流程', { timeout: 180000 }, async (
       await visible(student.getByText('单次活动', { exact: true }));
       assert.equal(await student.getByText('每周参加报名在活动群内完成。').count(), 0);
     }
+    await t.test('学生停留在详情页，报名按钮随服务器窗口开放和关闭', async () => {
+      const snapshot = await db.activityRevision.findUniqueOrThrow({
+        where: { activity_id_revision: { activity_id: first.id, revision: first.published_revision } },
+      });
+      const a = await db.activity.create({ data: {
+        activity_code: 'UI-WINDOW', status: 'published', working_revision: 1, published_revision: 1,
+        members: { create: { account_id: snapshot.created_by, member_role: 'owner' } },
+        revisions: { create: { revision: 1, revision_state: 'approved', content: { ...snapshot.content, title: '窗口边界测试' }, created_by: snapshot.created_by } },
+      } });
+      // Start the short window on the first detail request, after navigation and login.
+      await student.route('**/api/v1/activities/' + a.id, async route => {
+        const now = Date.now();
+        await db.activityRevision.update({
+          where: { activity_id_revision: { activity_id: a.id, revision: 1 } },
+          data: { content: { ...snapshot.content, title: '窗口边界测试',
+            registration_opens_at: new Date(now + 1500).toISOString(),
+            registration_closes_at: new Date(now + 4000).toISOString() } },
+        });
+        await route.continue();
+      }, { times: 1 });
+      await student.goto(web + '/activities/' + a.id);
+      const phase = student.locator('.phase');
+      await visible(phase.filter({ hasText: '尚未开放' }));
+      assert.ok(await button(student, '申请报名').isDisabled());
+      await visible(phase.filter({ hasText: '报名中' }));
+      assert.ok(await button(student, '申请报名').isEnabled());
+      await visible(phase.filter({ hasText: '报名已截止' }));
+      assert.ok(await button(student, '申请报名').isDisabled());
+      await student.goto(web + '/registrations');
+    });
   } finally {
     try {
       await browser?.close();

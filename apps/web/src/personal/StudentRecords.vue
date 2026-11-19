@@ -9,13 +9,11 @@ const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).fo
 const route = useRoute();
 const section = computed(() => route.name as keyof typeof personalRecords);
 const titles = {
-  registrations: '我的报名',
   notices: '通知',
   hours: '我的时长',
   feedback: '本人记录与反馈',
 };
 const paths = {
-  registrations: '/registrations',
   notices: '/notices',
   hours: '/mine/hours',
   feedback: '/mine/feedback',
@@ -49,12 +47,6 @@ function preview() {
       </p></template
     >
     <template #detail="{ record }">
-      <RouterLink
-        v-if="section === 'registrations'"
-        class="button"
-        :to="{ path: '/mine/example-activity' }"
-        >查看活动详情</RouterLink
-      >
       <button v-if="section === 'notices' && record.status === '未读'" @click="preview">
         预览确认回执
       </button>

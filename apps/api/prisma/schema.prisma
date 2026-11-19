@@ -122,18 +122,50 @@ model ActivityMember {
 }
 
 model Registration {
-  id           String   @id @default(uuid()) @db.Uuid
-  student_id   String   @db.Uuid
-  activity_id  String   @db.Uuid
-  status       String
-  version      Int      @default(1)
-  submitted_at DateTime @default(now()) @db.Timestamptz(3)
-  student      Student  @relation(fields: [student_id], references: [id])
-  activity     Activity @relation(fields: [activity_id], references: [id])
+  id              String                @id @default(uuid()) @db.Uuid
+  student_id      String                @db.Uuid
+  activity_id     String                @db.Uuid
+  status          String
+  version         Int                   @default(1)
+  statement       String?
+  decision_reason String?
+  history         RegistrationHistory[]
+  submitted_at    DateTime              @default(now()) @db.Timestamptz(3)
+  student         Student               @relation(fields: [student_id], references: [id])
+  activity        Activity              @relation(fields: [activity_id], references: [id])
 
   @@unique([activity_id, student_id])
   @@index([student_id])
   @@map("registration")
+}
+
+model RegistrationHistory {
+  registration_id String       @db.Uuid
+  version         Int
+  status          String
+  submitted_at    DateTime     @db.Timestamptz(3)
+  statement       String?
+  decision_reason String?
+  changed_at      DateTime?    @db.Timestamptz(3)
+  actor_id        String?      @db.Uuid
+  registration    Registration @relation(fields: [registration_id], references: [id])
+
+  @@id([registration_id, version])
+  @@map("registration_history")
+}
+
+model RegistrationDecisionEvent {
+  event_id             String   @id @default(uuid()) @db.Uuid
+  event_type           String   @default("registration_decided")
+  activity_id          String   @db.Uuid
+  registration_id      String   @db.Uuid
+  student_id           String   @db.Uuid
+  registration_version Int
+  status               String
+  created_at           DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([registration_id, registration_version], map: "registration_decision_version_key")
+  @@map("registration_decision_event")
 }
 
 model ActivityReview {

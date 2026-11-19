@@ -3,7 +3,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import type { Role } from '../generated/prisma/client.js';
 import { Database } from '../database.js';
-import { BusinessError, expired } from '../http.js';
+import { BusinessError, denied, expired } from '../http.js';
 import { cookieHash } from './session.service.js';
 
 export const SessionAccess = (mode: 'anonymous' | 'limited' | 'login') =>
@@ -23,9 +23,16 @@ export interface Actor {
     status: 'active';
   };
 }
+export function studentId(actor: Actor) {
+  if (!actor.student || !actor.roles.some((role) => role === 'student' || role === 'organizer'))
+    denied();
+  return actor.student.id;
+}
+
 export interface SessionRequest extends Request {
   actor: Actor;
   sessionHash: string;
+  receivedAt: Date;
 }
 
 @Injectable()
