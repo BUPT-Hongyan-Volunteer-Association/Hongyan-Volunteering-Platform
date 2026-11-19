@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hasStudentAccess } from '../identity';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router';
@@ -182,9 +183,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
       :key="detail.id"
       :refreshing="busy"
       @applied="applied"
-      :show-registrations="
-        !!profile.student && profile.roles.some((r) => r === 'student' || r === 'organizer')
-      "
+      :show-registrations="hasStudentAccess(profile)"
     />
     <template v-else>
       <RouterLink class="back-link" :to="{ path: '/', query: listQuery }"

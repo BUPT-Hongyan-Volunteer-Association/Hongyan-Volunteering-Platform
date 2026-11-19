@@ -4,21 +4,21 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { TimelineActivity, TimelineActivityPage, TimelineItem } from '@hongyan/contracts';
 import UiIcon from '../UiIcon.vue';
-import { activityTypes, localDateTime, phaseOptions } from '../activityDisplay';
+import {
+  activityTypes,
+  localDate,
+  localDateTime,
+  localTime,
+  phaseLabels,
+  phaseOptions,
+  statusLabels,
+  timelineColors,
+} from '../activityDisplay';
 import { units, validDate, validUnit, dateWindow, shiftDate, windowLabel } from './window';
 import ScheduleDatePicker from './ScheduleDatePicker.vue';
 import TimelineChart from './TimelineChart.vue';
-import {
-  beijingDate,
-  evaluatedAt,
-  examplePage,
-  localTime,
-  palette,
-  phaseLabels,
-  standalone,
-  statusLabels,
-  type Scope,
-} from './examples';
+import { evaluatedAt, standalone } from './examples';
+import { loadExamplePage, type Scope } from './loadExamplePage';
 
 const props = defineProps<{ scope: Scope; showPersonalScope?: boolean }>();
 const scopes = { public: '活动日程', mine: '活动日程', managed: '本人管理日程', all: '全院日程' };
@@ -140,7 +140,7 @@ async function load() {
   error.value = '';
   page.value = undefined;
   try {
-    const data = await examplePage(props.scope, revision.value);
+    const data = await loadExamplePage(props.scope, revision.value);
     if (n === request) page.value = data;
   } catch (e) {
     if (n === request) error.value = e instanceof Error ? e.message : '读取活动范围失败';
@@ -358,7 +358,7 @@ onUnmounted(() => {
           <button class="icon-button" :aria-label="arrows[1]" :title="arrows[1]" @click="shift(1)">
             <UiIcon name="ArrowRight" />
           </button>
-          <button @click="set('date', beijingDate(Date.now()))">今天</button>
+          <button @click="set('date', localDate(Date.now()))">今天</button>
         </div>
         <div class="scale-control">
           <span id="time-scale-label">时间刻度</span>
@@ -409,7 +409,7 @@ onUnmounted(() => {
               :class="{ picked: r.activity_id === selected?.activity_id }"
             >
               <button class="row-button" @click="choose(r, r.segments[0])">
-                <i :style="{ background: palette[r.color_index] }" />{{ r.title }}
+                <i :style="{ background: timelineColors[r.color_index] }" />{{ r.title }}
               </button>
               <p class="meta-line">
                 {{ statusLabels[r.status] }} · {{ phaseLabels[r.registration_phase]

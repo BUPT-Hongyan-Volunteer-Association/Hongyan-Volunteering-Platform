@@ -4,7 +4,7 @@ import formats from 'ajv-formats';
 import { parse } from 'yaml';
 import type { ActivityInput } from '@hongyan/contracts/types';
 import { BusinessError, invalid } from '../http.js';
-import { slots } from './read.js';
+import { validateSchedule } from './schedule.js';
 
 const source = parse(
   readFileSync(
@@ -37,21 +37,11 @@ export function content(value: unknown, publication = false) {
     publication ? 'activity_publication_content' : 'activity_input',
     value,
   );
-  const segments = slots(a.schedule).sort(
-    (x, y) => Date.parse(x.starts_at) - Date.parse(y.starts_at),
-  );
-  if (!segments.length) invalid('schedule', '至少需要一个有效时段');
-  let previous = -Infinity;
-  for (const s of segments) {
-    const start = Date.parse(s.starts_at),
-      end = Date.parse(s.ends_at);
-    if (!(start < end && previous <= start)) invalid('schedule', '时段必须有效且互不重叠');
-    previous = end;
-  }
+  const firstStart = validateSchedule(a.schedule);
   if (
     !(
       Date.parse(a.registration_opens_at) < Date.parse(a.registration_closes_at) &&
-      Date.parse(a.registration_closes_at) <= Date.parse(segments[0].starts_at)
+      Date.parse(a.registration_closes_at) <= firstStart
     )
   )
     invalid('registration_closes_at', '开放须早于截止，截止不能晚于首段开始');

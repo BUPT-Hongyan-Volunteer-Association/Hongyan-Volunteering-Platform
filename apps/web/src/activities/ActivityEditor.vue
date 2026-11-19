@@ -6,8 +6,6 @@ import {
   ApiError,
   createActivity,
   getManagedActivity,
-  listActivityRevisions,
-  getActivityRevision,
   updateActivityDraft,
   submitActivity,
   withdrawActivityReview,
@@ -19,17 +17,16 @@ import {
 } from '@hongyan/contracts';
 
 import UiIcon from '@hongyan/ui/UiIcon.vue';
-import ActivitySnapshot from '@hongyan/ui/ActivitySnapshot.vue';
+import ActivityHistory from './ActivityHistory.vue';
 import { fieldGroups, activityFields as fields } from '@hongyan/ui/activityFields';
 import { revisionLabels } from '@hongyan/ui/activityDisplay';
 
-const props = defineProps<{ writesPaused?: boolean }>();
+const props = defineProps<{ writesPaused?: boolean; snapshot?: ManagedActivityDetail }>();
+const emit = defineEmits<{ loaded: [detail: ManagedActivityDetail] }>();
 const route = useRoute(),
   router = useRouter(),
   id = computed(() => String(route.params.id ?? ''));
 const detail = ref<ManagedActivityDetail>(),
-  history = ref<ActivityRevision[]>([]),
-  viewed = ref<ActivityRevision>(),
   form = ref<Record<string, string>>({}),
   base = ref<Record<string, string>>({});
 const reason = ref(''),
@@ -66,7 +63,7 @@ function formValues(item?: ActivityRevision['content']) {
   );
 }
 let serial = 0;
-async function load(preserve = false) {
+async function load(preserve = false, snapshot?: ManagedActivityDetail) {
   const n = ++serial,
     local = Object.entries(form.value).filter(([k, v]) => v !== base.value[k]);
   loading.value = true;
@@ -74,28 +71,20 @@ async function load(preserve = false) {
   message.value = '';
   fieldErrors.value = {};
   conflict.value = false;
-  viewed.value = undefined;
   try {
-    let data: ManagedActivityDetail | undefined,
-      versions: ActivityRevision[] = [];
-    if (id.value) {
-      const path = { id: id.value };
-      const [d, h] = await Promise.all([
-        getManagedActivity({ path, throwOnError: true }),
-        listActivityRevisions({ path, throwOnError: true }),
-      ]);
-      data = d.data.data;
-      versions = h.data.data.items;
-    }
+    const data =
+      snapshot ??
+      (id.value
+        ? (await getManagedActivity({ path: { id: id.value }, throwOnError: true })).data.data
+        : undefined);
     if (n !== serial) return;
     detail.value = data;
-    history.value = versions;
+    if (data && !snapshot) emit('loaded', data);
     base.value = formValues(data?.working_snapshot.content);
     form.value = { ...base.value, ...(preserve ? Object.fromEntries(local) : {}) };
   } catch (e) {
     if (n === serial) {
       detail.value = undefined;
-      history.value = [];
       readError.value = e instanceof Error ? e.message : '读取失败';
     }
   } finally {
@@ -215,15 +204,6 @@ async function run(action: 'save' | 'submit' | 'withdraw') {
     await router.replace({ path: '/managed/' + nextId + '/edit', state: { savedDraftId: nextId } });
   else await load();
 }
-async function inspect(revision: number) {
-  try {
-    viewed.value = (
-      await getActivityRevision({ path: { id: id.value, revision }, throwOnError: true })
-    ).data.data;
-  } catch (e) {
-    report(e);
-  }
-}
 watch(
   id,
   () => {
@@ -235,11 +215,27 @@ watch(
     base.value = {};
     form.value = {};
     reason.value = '';
-    return load();
+    return load(false, props.snapshot);
   },
   { immediate: true },
 );
 const dirty = computed(() => fields.some(([k]) => form.value[k] !== base.value[k]));
+watch([() => props.snapshot, busy, loading], ([snapshot]) => {
+  if (
+    !snapshot ||
+    !detail.value ||
+    busy.value ||
+    loading.value ||
+    snapshot.activity.version <= detail.value.activity.version
+  )
+    return;
+  if (dirty.value) {
+    conflict.value = true;
+    message.value = '活动已更新，请刷新版本并复核修改。';
+  } else {
+    void load(false, snapshot);
+  }
+});
 </script>
 
 <template>
@@ -267,7 +263,22 @@ const dirty = computed(() => fields.some(([k]) => form.value[k] !== base.value[k
         <span class="state-chip neutral">公开版本 {{ detail.published_snapshot.revision }}</span>
         {{ detail.published_snapshot.content.location }}
       </p>
-      <p v-if="detail.current_review?.reason">处理意见　{{ detail.current_review.reason }}</p>
+      <p v-if="detail.current_review?.reason">
+        版本 {{ detail.current_review.revision }} 处理意见　{{ detail.current_review.reason }}
+      </p>
+      <button
+        v-if="
+          detail.current_review &&
+          ['rejected', 'withdrawn'].includes(detail.current_review.status) &&
+          detail.current_review.revision !== detail.working_snapshot.revision &&
+          detail.current_review.snapshot.content.schedule.schedule_type === 'continuous' &&
+          !readonly
+        "
+        :disabled="dirty || busy || writesPaused || conflict"
+        @click="form = formValues(detail.current_review.snapshot.content)"
+      >
+        使用版本 {{ detail.current_review.revision }} 的内容重新编辑
+      </button>
     </div>
     <form id="activity-form" class="activity-form" @submit.prevent="run('save')">
       <fieldset v-for="group in fieldGroups" :key="group.title" :disabled="!!readonly || busy">
@@ -342,20 +353,7 @@ const dirty = computed(() => fields.some(([k]) => form.value[k] !== base.value[k
         撤回送审
       </button>
     </div>
-    <details v-if="history.length" class="history">
-      <summary>版本历史</summary>
-      <div class="page-actions">
-        <button
-          v-for="v in history"
-          :key="v.revision"
-          :aria-pressed="viewed?.revision === v.revision"
-          @click="inspect(v.revision)"
-        >
-          版本 {{ v.revision }} · {{ revisionLabels[v.revision_state] }}
-        </button>
-      </div>
-      <ActivitySnapshot v-if="viewed" :content="viewed.content" />
-    </details>
+    <ActivityHistory v-if="detail" :id="detail.activity.id" :key="detail.activity.id" />
   </template>
 </template>
 <style scoped>
@@ -432,17 +430,6 @@ legend small {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-}
-.history {
-  padding: 12px 0;
-  border-top: 1px solid var(--line);
-}
-.history .page-actions {
-  margin-top: 10px;
-}
-.history button[aria-pressed='true'] {
-  background: var(--brand-tint);
-  border-color: var(--brand);
 }
 @media (max-width: 700px) {
   .field-grid {

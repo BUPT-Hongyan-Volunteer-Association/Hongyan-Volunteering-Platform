@@ -66,8 +66,13 @@ async function submit(action: 'login' | 'change' | 'logout') {
     next.value = '';
     await restore();
   } catch (e) {
-    if (e instanceof ApiError && e.status === 401 && action !== 'login') await restore();
-    message.value = e instanceof Error ? e.message : '请求失败';
+    if (action === 'login' && e instanceof ApiError && e.body?.code === 'unauthorized') {
+      await restore();
+      if (stage.value === 'login') message.value = '登录页面已过期，会话已更新，请再次登录。';
+    } else {
+      if (e instanceof ApiError && e.status === 401 && action !== 'login') await restore();
+      message.value = e instanceof Error ? e.message : '请求失败';
+    }
   } finally {
     busy.value = false;
   }

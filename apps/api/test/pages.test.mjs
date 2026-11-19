@@ -864,6 +864,142 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await teacher.setViewportSize({ width: 1440, height: 900 });
     });
 
+    await t.test('撤回或驳回后工作区和表单回到获批版本，原内容可再次选用', async () => {
+      await owner.goto(web + '/managed/' + first.id + '/edit');
+      const title = owner.getByLabel('活动标题', { exact: true });
+      await title.fill('准备撤回的标题');
+      await button(owner, '保存草稿').click();
+      await visible(owner.getByRole('heading', { name: '准备撤回的标题', exact: true }));
+      await button(owner, '提交审核').click();
+      await owner.getByLabel('撤回原因').fill('调整后重送');
+      await button(owner, '撤回送审').click();
+      await visible(owner.getByRole('heading', { name: '校园服务甲', exact: true }));
+      assert.equal(await title.inputValue(), '校园服务甲');
+      await owner.getByRole('button', { name: /使用版本 .* 的内容重新编辑/ }).click();
+      assert.equal(await title.inputValue(), '准备撤回的标题');
+      assert.equal(await button(owner, '提交审核').count(), 0);
+      await button(owner, '保存草稿').click();
+      await button(owner, '提交审核').click();
+      await visible(button(owner, '撤回送审'));
+      await teacher.goto(admin + '/reviews');
+      await teacher.getByRole('link', { name: /准备撤回的标题/ }).click();
+      await teacher.getByLabel('审核意见（驳回必填）').fill('沿用原安排');
+      await button(teacher, '驳回').click();
+      await visible(teacher.getByText('已驳回', { exact: true }).first());
+      await owner.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await visible(owner.getByText(/处理意见.*沿用原安排/));
+      assert.equal(await title.inputValue(), '校园服务甲');
+    });
+
+    await t.test('学生申请、负责人单人录取，学生查看结果与入群方式', async () => {
+      await student.goto(web);
+      await link(student, '校园服务甲').click();
+      const instructions = '录取后向负责人领取群号';
+      assert.equal(await student.getByText(instructions, { exact: true }).count(), 0);
+      await student.getByText('报名说明（选填）', { exact: true }).click();
+      await student.getByLabel('申请说明').fill('可准时到场');
+      await button(student, '申请报名').click();
+      await visible(button(student, '已提交，待审核'));
+
+      await owner.goto(web + '/managed');
+      await link(owner, '校园服务甲').click();
+      await link(owner, '报名名单').click();
+      await owner.getByLabel('姓名或学号').fill('0000000001');
+      await button(owner, '查看体验学生').click();
+      await visible(owner.getByText('可准时到场', { exact: true }));
+      await button(owner, '录取此人').click();
+      await visible(owner.getByText('已录取体验学生。', { exact: true }));
+
+      await student.goto(web);
+      await link(student, '我的报名').click();
+      await student.getByRole('link', { name: /校园服务甲.*已录取/ }).click();
+      await visible(student.getByText('已录取', { exact: true }));
+      await link(student, '查看活动详情').click();
+      await visible(student.getByText(instructions, { exact: true }));
+      const row = await db.registration.findFirstOrThrow({
+        where: { activity_id: first.id, student: { student_no: '0000000001' } },
+      });
+      assert.equal(row.status, 'accepted');
+      assert.equal(
+        await db.registrationDecisionEvent.count({ where: { registration_id: row.id } }),
+        1,
+      );
+    });
+
+    await t.test('会话到期后在原表单重试，兼任负责人保留管理入口', async () => {
+      const ctx = await browser.newContext({
+        ignoreHTTPSErrors: true,
+        viewport: { width: 1440, height: 900 },
+      });
+      try {
+        const page = await ctx.newPage();
+        page.setDefaultTimeout(8000);
+        await page.goto(web);
+        await page.getByLabel('账号', { exact: true }).fill('demo.dual');
+        await page.getByLabel('当前密码').fill(password);
+        await ctx.clearCookies();
+        await button(page, '登录').click();
+        await visible(page.getByText('登录页面已过期，会话已更新，请再次登录。'));
+        await page.getByLabel('当前密码').fill('wrong-password');
+        await button(page, '登录').click();
+        await visible(page.getByText('账号或密码不正确'));
+        await page.getByLabel('当前密码').fill(password);
+        await button(page, '登录').click();
+        await visible(button(page, '退出登录'));
+        for (const width of [1440, 390]) {
+          await page.setViewportSize({ width, height: 900 });
+          await visible(link(page, width === 390 ? '管理' : '我的管理活动'));
+          for (const label of ['我的报名', '通知', '我的'])
+            assert.equal(await link(page, label).count(), 0);
+        }
+        await link(page, '管理').click();
+        await visible(link(page, '返回活动列表'));
+        await link(page, '返回活动列表').click();
+        await link(page, '校园服务甲').click();
+        assert.equal(await link(page, '我的报名').count(), 0);
+        assert.equal(await button(page, '申请报名').isEnabled(), false);
+        await page.goto(web + '/registrations');
+        await visible(page.getByRole('alert').filter({ hasText: '当前账号无学生个人页面权限' }));
+      } finally {
+        await ctx.close();
+      }
+    });
+
+    await t.test('跨页查看最早版本时保留当前草稿输入', async () => {
+      const activity = await db.activity.findUniqueOrThrow({
+        where: { activity_code: 'TEST-20' },
+        include: { revisions: true },
+      });
+      const original = activity.revisions[0];
+      await db.activityRevision.update({
+        where: { activity_id_revision: { activity_id: activity.id, revision: 1 } },
+        data: { revision_state: 'rejected' },
+      });
+      await db.activityRevision.createMany({
+        data: Array.from({ length: 20 }, (_, i) => ({
+          activity_id: activity.id,
+          revision: i + 2,
+          revision_state: i === 19 ? 'draft' : 'withdrawn',
+          created_by: original.created_by,
+          content: { ...original.content, title: '历史标题' + (i + 2) },
+        })),
+      });
+      await db.activity.update({ where: { id: activity.id }, data: { working_revision: 21 } });
+      await owner.goto(web + '/managed/' + activity.id + '/edit');
+      const title = owner.getByLabel('活动标题', { exact: true });
+      await title.fill('正在编辑中');
+      const history = owner.locator('details.history');
+      await history.getByText('版本历史', { exact: true }).click();
+      await visible(button(history, '版本 21 · 草稿'));
+      await button(history, '下一页').click();
+      await button(history, '版本 1 · 已驳回').click();
+      await visible(history.getByText(original.content.title, { exact: true }));
+      assert.equal(await button(history, '下一页').isDisabled(), true);
+      await button(history, '上一页').click();
+      await visible(button(history, '版本 21 · 草稿'));
+      assert.equal(await title.inputValue(), '正在编辑中');
+    });
+
     if (process.env.UI_CAPTURE_DIR) {
       // Build an approved weekly revision inside this test's disposable database.
       const approved = await db.activityRevision.findFirstOrThrow({

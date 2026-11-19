@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { TimelineActivity, TimelineItem } from '@hongyan/contracts';
-import { activityTypes } from '../activityDisplay';
-import { localTime, palette } from './examples';
+import { activityTypes, localTime, timelineColors } from '../activityDisplay';
 
 const props = defineProps<{
   rows: TimelineActivity[];
@@ -180,7 +179,7 @@ onUnmounted(() => resize.disconnect());
               :aria-label="row.title"
               @click="choose(row, row.segments[0])"
             >
-              <i :style="{ background: palette[row.color_index] }" /><span
+              <i :style="{ background: timelineColors[row.color_index] }" /><span
                 ><strong>{{ row.title }}</strong
                 ><small
                   >{{ activityTypes[row.schedule_type]
@@ -221,7 +220,7 @@ onUnmounted(() => resize.disconnect());
                 transform="translate(0 -12)"
                 height="24"
                 rx="3"
-                :fill="palette[row.color_index]"
+                :fill="timelineColors[row.color_index]"
                 :stroke="s.occurrence_key === selected ? '#F1C64B' : 'none'"
                 stroke-width="2"
                 @click.stop="choose(row, s)"

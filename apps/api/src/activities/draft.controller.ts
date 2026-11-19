@@ -30,6 +30,7 @@ import {
   snapshot,
   json,
 } from './workflow.js';
+import { workingRevision } from './revisions.js';
 import { content, validate } from './validation.js';
 
 @Controller('organizer')
@@ -130,7 +131,7 @@ export class DraftController {
         row.reviews.some((r) => r.status === 'pending')
       )
         wrongState();
-      const old = row.revisions.find((r) => r.revision === row.working_revision)!;
+      const old = workingRevision(row)!;
       const merged = { ...(old.content as unknown as ActivityInput), ...patch };
       if (patch.expected_hours === null && patch.expected_hours_basis === null) {
         delete merged.expected_hours;
@@ -144,7 +145,7 @@ export class DraftController {
           data: { content: next },
         });
       else {
-        revision++;
+        revision = row.working_revision + 1;
         await tx.activityRevision.create({
           data: {
             activity_id: id,

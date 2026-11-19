@@ -8,6 +8,7 @@ import {
   ApiError,
   getActivityMembers,
   getManagedActivity,
+  type ManagedActivityDetail,
   type ActivityMember,
   type Profile,
 } from '@hongyan/contracts';
@@ -18,9 +19,15 @@ const origin = window.history.state?.scheduleReturn;
 const scheduleReturn =
   typeof origin === 'string' && /^\/managed-schedule(?:\?|$)/.test(origin) ? origin : undefined;
 const base = computed(() => '/managed/' + route.params.id);
-const title = ref('');
-const campus = ref('');
-const scheduleText = ref('');
+const detail = ref<ManagedActivityDetail>();
+const activity = computed(() => detail.value?.activity);
+function showDetail(next: ManagedActivityDetail) {
+  if (
+    next.activity.id === route.params.id &&
+    next.activity.version >= (activity.value?.version ?? 0)
+  )
+    detail.value = next;
+}
 const more = ref<HTMLDetailsElement>();
 watch(
   () => route.fullPath,
@@ -28,7 +35,6 @@ watch(
     if (more.value) more.value.open = false;
   },
 );
-const activityCode = ref('');
 const memberMessage = ref('');
 const sections = [
   ['requests', '退出与恢复'],
@@ -49,6 +55,7 @@ async function load(clear = true) {
   const turn = ++generation;
   verifying.value = true;
   if (clear) {
+    detail.value = undefined;
     members.value = [];
     memberMessage.value = '';
   }
@@ -62,12 +69,9 @@ async function load(clear = true) {
       error.value = '当前账号不是该活动的管理成员。';
       return;
     }
-    const detail = (await getManagedActivity({ path, throwOnError: true })).data.data;
+    const latest = (await getManagedActivity({ path, throwOnError: true })).data.data;
     if (turn !== generation) return;
-    title.value = detail.activity.title;
-    campus.value = detail.activity.campus ?? '';
-    scheduleText.value = serviceTime(detail.activity);
-    activityCode.value = detail.activity.activity_code;
+    showDetail(latest);
     members.value = team;
   } catch (e) {
     if (turn !== generation) return;
@@ -91,9 +95,9 @@ onUnmounted(() => {
   >
   <p v-if="error" role="alert">{{ error }} <button @click="refresh">重试</button></p>
   <p v-if="!self && !error" role="status">正在核验活动成员…</p>
-  <template v-if="self">
+  <template v-if="self && activity">
     <header class="section-heading">
-      <h1>{{ title }}</h1>
+      <h1>{{ activity.title }}</h1>
       <span class="state-chip">{{ self.member_role === 'owner' ? '主负责人' : '协作者' }}</span>
       <div class="workspace-tools">
         <RouterLink class="button" :to="{ path: base, query: sourceQuery }"
@@ -105,9 +109,9 @@ onUnmounted(() => {
       </div>
     </header>
     <p class="activity-meta meta-line">
-      <span>{{ activityCode }}</span
-      ><span v-if="campus"><UiIcon name="Location" />{{ campus }}</span
-      ><span><UiIcon name="Clock" />{{ scheduleText }}</span>
+      <span>{{ activity.activity_code }}</span
+      ><span v-if="activity.campus"><UiIcon name="Location" />{{ activity.campus }}</span
+      ><span><UiIcon name="Clock" />{{ serviceTime(activity) }}</span>
     </p>
     <nav class="section-nav" aria-label="活动工作区">
       <RouterLink :to="{ path: base + '/roster', query: sourceQuery }">报名名单</RouterLink>
@@ -139,10 +143,10 @@ onUnmounted(() => {
         :is="Component"
         v-bind="
           route.name === 'organizer-section'
-            ? { activityCode }
-            : route.name === 'activity-edit' || route.name === 'roster'
-              ? { writesPaused: verifying || !!error }
-              : {}
+            ? { activityCode: activity.activity_code }
+            : route.name === 'activity-edit'
+              ? { writesPaused: verifying || !!error, snapshot: detail, onLoaded: showDetail }
+              : { writesPaused: verifying || !!error }
         "
         :key="base"
       />

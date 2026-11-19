@@ -2,7 +2,8 @@ import { Controller, Get, Param, ParseUUIDPipe, Query, Req } from '@nestjs/commo
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import { envelope, invalid, invisible } from '../http.js';
-import { filterViews, includeView, managedScope, paginate, project } from './read.js';
+import { activityPage } from './list.js';
+import { managedScope } from './read.js';
 
 @Controller('organizer/activities')
 export class ManagedController {
@@ -10,22 +11,25 @@ export class ManagedController {
   @Get() async list(@Req() req: SessionRequest, @Query() q: Record<string, string>) {
     const scope = q.revision_scope ?? 'working';
     if (scope !== 'working' && scope !== 'published') invalid('revision_scope', '版本范围无效');
-    const rows = await this.db.activity.findMany({
-      where: managedScope(req.actor, q.scope),
-      include: includeView,
-      orderBy: [{ activity_code: 'asc' }, { id: 'asc' }],
-    });
-    const now = new Date();
-    const items = rows
-      .filter(
-        (row) =>
-          !q.review_status ||
-          row.revisions.find((r) => r.revision === row.working_revision)?.revision_state ===
-            q.review_status,
-      )
-      .map((row) => project(row, scope, now, true))
-      .filter((x) => x !== null);
-    return envelope(paginate(filterViews(items, q), q));
+    const access = managedScope(req.actor, q.scope);
+    if (
+      q.owner_account_id &&
+      !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(q.owner_account_id)
+    )
+      invalid('owner_account_id', '负责人编号无效');
+    const where = {
+      AND: [
+        access,
+        {
+          status: q.status || undefined,
+          ...(scope === 'published' && { published_revision: { not: null } }),
+          ...(q.owner_account_id && {
+            members: { some: { member_role: 'owner' as const, account_id: q.owner_account_id } },
+          }),
+        },
+      ],
+    };
+    return envelope(await activityPage(this.db, where, scope, q));
   }
   @Get(':id/members') async members(
     @Req() req: SessionRequest,

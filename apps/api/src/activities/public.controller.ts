@@ -3,19 +3,17 @@ import type { Activity as View } from '@hongyan/contracts/types';
 import { Database } from '../database.js';
 import { denied, envelope, invalid, invisible } from '../http.js';
 import type { SessionRequest } from '../auth/session.guard.js';
-import { filterViews, includeView, paginate, project, type LoadedActivity } from './read.js';
+import { publishedRevision } from './revisions.js';
+import { activityPage } from './list.js';
+import { includeView, project, type LoadedActivity } from './read.js';
 
-function publicView(
-  row: LoadedActivity & { registrations: { status: string }[] },
-  now: Date,
-  detail = false,
-) {
+function publicView(row: LoadedActivity & { registrations: { status: string }[] }, now: Date) {
   const result = project(row, 'published', now, false);
   if (!result) invisible();
   const own = row.registrations[0];
   if (own) result.my_registration_status = own.status as View['my_registration_status'];
-  if (detail && own?.status === 'accepted') {
-    const approved = row.revisions.find((r) => r.revision === row.published_revision)!;
+  if (own?.status === 'accepted') {
+    const approved = publishedRevision(row)!;
     result.group_join_instructions = (
       approved.content as { group_join_instructions?: string }
     ).group_join_instructions;
@@ -34,30 +32,14 @@ export class PublicController {
       : q.scope === 'mine'
         ? ['published', 'completed', 'cancelled']
         : ['published'];
-    const rows = await this.db.activity.findMany({
-      where: {
-        published_revision: { not: null },
-        status: { in: statuses.filter((s) => ['published', 'completed', 'cancelled'].includes(s)) },
-        ...(q.scope === 'mine' && {
-          registrations: { some: { student_id: id, status: 'accepted' } },
-        }),
-      },
-      include: {
-        ...includeView,
-        registrations: { where: { student_id: id }, select: { status: true } },
-      },
-      orderBy: [{ activity_code: 'asc' }, { id: 'asc' }],
-    });
-    const now = new Date();
-    return envelope(
-      paginate(
-        filterViews(
-          rows.map((row) => publicView(row, now)),
-          q,
-        ),
-        q,
-      ),
-    );
+    const where = {
+      published_revision: { not: null },
+      status: { in: statuses.filter((s) => ['published', 'completed', 'cancelled'].includes(s)) },
+      ...(q.scope === 'mine' && {
+        registrations: { some: { student_id: id, status: 'accepted' } },
+      }),
+    };
+    return envelope(await activityPage(this.db, where, 'public', q, req.actor.student?.id));
   }
   @Get(':id') async detail(
     @Req() req: SessionRequest,
@@ -78,6 +60,6 @@ export class PublicController {
       },
     });
     if (!row) invisible();
-    return envelope(publicView(row, new Date(), true));
+    return envelope(publicView(row, new Date()));
   }
 }

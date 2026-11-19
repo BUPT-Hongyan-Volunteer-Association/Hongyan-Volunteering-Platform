@@ -8,18 +8,19 @@
 | --- | --- |
 | 根目录 | README 负责启动和验证，DESIGN 负责三端视觉与交互。工作区依赖、脚本和锁文件统一维护。 |
 | `config/` | 共享 TypeScript 和 Vite 设置。各应用保留自己的配置入口。 |
-| `apps/web/src/` | 学生与负责人共用的 Vue 应用。`router.ts` 定义路由，`activities/` 放活动列表、详情与编辑，`registrations/` 放本人报名、负责人名单及退出恢复。personal/ 放学生记录与反馈。notices/、hours/、incidents/ 放负责人各业务样例。 |
+| `apps/web/src/` | 学生与负责人共用的 Vue 应用。`router.ts` 定义路由，`activities/` 放活动列表、详情、编辑及版本历史，`registrations/` 放本人报名、负责人名单及退出恢复。personal/ 放学生记录与反馈。notices/、hours/、incidents/ 放负责人各业务样例。 |
 | `apps/admin/src/` | 独立审核后台。`layouts/` 放 Vben 布局及上游许可，`activities/` 放活动审核，`hours/` 放时长样板。management/ 放分角色管理页与样例，TaskInbox.vue 读取真实待审队列。 |
 | `apps/api/` | NestJS 模块化单体。`src/auth/` 负责账号和会话，`src/activities/` 负责活动读写与审批，`src/registrations/` 负责报名查询、申请、录取及决定事件，`prisma/` 保存模型和迁移，`scripts/` 放种子，`test/` 放集成回归。 |
 | `packages/contracts/` | OpenAPI、`templates/` 中的两份空白导入表、`src/index.ts` 共享请求入口及生成的客户端。 |
-| `packages/ui/src/` | 两个前端共用的身份入口、导航标识、图标、选择框、日历、分页、示例列表详情、样式及 timeline/ 中的 Vue/SVG 日程。 |
+| `packages/ui/src/` | 两个前端共用的身份入口、导航标识、图标、选择框、日历、分页、示例列表详情、样式与 `timeline/` 日程。示例数据由 `loadExamplePage.ts` 装配，图表只接收时段和显示参数。 |
 
 新增功能先查同一业务目录。页面专用组件与调用者放在一起，出现跨端复用时再提到共享包。Vue 组件沿用 PascalCase，服务端按职责命名，如 `csrf.controller.ts`。变更目录职责时同步本表。批次索引、规格、计划及验收证据保存在同级本地任务仓库。
 
 ## 开发与验证
 
 - 页面通过生成客户端访问同源 `/api/v1`。变更接口先改 OpenAPI，再生成类型并更新调用方。数据库变更新增迁移，保留已应用的历史。业务字段用 `snake_case`，时间带时区并按北京时间显示，学号保留前导零，时长用十进制字符串。
-- 服务端会话使用 HttpOnly、Secure、SameSite Cookie，写请求校验 CSRF。`session.guard.ts` 逐请求核验身份和有效角色，活动授权复用 `read.ts` 的成员范围判断。先授权、筛选，再分页。审核队列与版本历史在同一数据库快照内计数、取页，按本页引用读取版本。公开列表和管理列表须保留日程与报名阶段等派生筛选的总数语义。
+- 服务端会话使用 HttpOnly、Secure、SameSite Cookie，写请求校验 CSRF。`session.guard.ts` 逐请求核验身份和有效角色，活动授权复用 `read.ts` 的成员范围判断。公开与管理列表共用 `activities/list.ts`。普通查询在数据库分页，涉及日程或内容的筛选分批读取当前版本，在同一快照内计算总数。审核队列与版本历史也按同一快照计数、取页。
+- `activities/revisions.ts` 统一选择展示版本和新草稿的基准。修订驳回或撤回后优先展示获批内容，后续修订使用新版本号。`activities/schedule.ts` 负责展开时段和校验日期边界，保存、送审、批准均复核完整时段。
 - 活动写入复用 `workflow.ts`。活动 ID、审核 ID、内容版本分别定位对应对象。事务内锁定活动，检查权限、目标版本与幂等键。审批结果、公开版本、审计及受影响人员的变更事件共同提交。回放也须重新授权。
 - 失败返回契约规定的 HTTP 状态、错误码、消息、请求编号和字段定位。页面通过共享请求层为同一待确认操作复用幂等键。写入成功后单独刷新读取结果。版本冲突需刷新复核。禁止吞错、自动覆盖或用模拟数据掩盖真实请求失败。
 - 任务明确后主动实现并验证。测试围绕 FR/AC 和具体回归，权限、并发用真实服务与数据库检查，页面流程用浏览器走查。常规可逆选择自行处理，影响需求或既有数据的分歧再提请决定。

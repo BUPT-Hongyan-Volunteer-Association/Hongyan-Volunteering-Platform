@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, watch, ref } from 'vue';
-import { listManagedActivities, type Activity } from '@hongyan/contracts';
+import { hasStudentAccess } from '../identity';
+import { listManagedActivities, type Profile, type Activity } from '@hongyan/contracts';
 
 import { useRoute, useRouter } from 'vue-router';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import { statusLabels, serviceTime } from '@hongyan/ui/activityDisplay';
 import Pager from '@hongyan/ui/Pager.vue';
+const props = defineProps<{ profile: Profile }>();
 const route = useRoute(),
   router = useRouter();
 const page = computed(() => {
@@ -46,7 +48,9 @@ watch(page, load, { immediate: true });
 </script>
 
 <template>
-  <RouterLink class="back-link" to="/mine"><UiIcon name="ArrowLeft" />返回我的</RouterLink>
+  <RouterLink class="back-link" :to="hasStudentAccess(props.profile) ? '/mine' : '/'">
+    <UiIcon name="ArrowLeft" />{{ hasStudentAccess(props.profile) ? '返回我的' : '返回活动列表' }}
+  </RouterLink>
   <div class="page-heading">
     <h1>我的管理活动</h1>
     <div class="page-actions">

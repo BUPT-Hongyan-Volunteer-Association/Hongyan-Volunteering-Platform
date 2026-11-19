@@ -14,7 +14,7 @@ export const router = createRouter({
   routes: [
     { path: '/', component: PublicActivities, meta: { profile: true } },
     { path: '/activities/:id', component: PublicActivities, meta: { profile: true } },
-    { path: '/managed', component: ManagedActivities, meta: { organizer: true } },
+    { path: '/managed', component: ManagedActivities, meta: { organizer: true, profile: true } },
     { path: '/managed/new', component: ActivityEditor, meta: { organizer: true } },
     {
       path: '/managed/:id',

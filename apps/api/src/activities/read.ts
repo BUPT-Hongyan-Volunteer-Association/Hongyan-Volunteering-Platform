@@ -1,11 +1,8 @@
-import type {
-  Activity as View,
-  ActivityInput,
-  ActivitySchedule,
-  ScheduleSlot,
-} from '@hongyan/contracts/types';
+import type { Activity as View, ActivityInput } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Actor } from '../auth/session.guard.js';
+import { publishedRevision, workingRevision } from './revisions.js';
+import { slots } from './schedule.js';
 import { denied, invalid } from '../http.js';
 
 export const staff = (a: Actor) => a.roles.includes('reviewer') || a.roles.includes('tech_admin');
@@ -34,41 +31,19 @@ export const includeView = {
   },
 } as const;
 export type LoadedActivity = Prisma.ActivityGetPayload<{ include: typeof includeView }>;
-export function slots(s: ActivitySchedule): ScheduleSlot[] {
-  if (s.schedule_type === 'continuous') return [s];
-  if (s.schedule_type === 'custom') return s.slots;
-  const result = [...(s.additional_slots ?? [])];
-  for (
-    let t = Date.parse(s.duration_start_date);
-    t <= Date.parse(s.duration_end_date);
-    t += 86400000
-  ) {
-    const day = new Date(t).toISOString().slice(0, 10);
-    if (s.excluded_dates?.includes(day)) continue;
-    for (const rule of s.weekly_slots.filter((x) => x.weekday === (new Date(t).getUTCDay() || 7))) {
-      const end = new Date(t + rule.end_day_offset * 86400000).toISOString().slice(0, 10);
-      result.push({
-        starts_at: day + 'T' + rule.start_time + '+08:00',
-        ends_at: end + 'T' + rule.end_time + '+08:00',
-      });
-    }
-  }
-  return result;
-}
-
 export function project(
-  row: LoadedActivity,
+  row: Omit<LoadedActivity, 'reviews'> & {
+    reviews: Pick<LoadedActivity['reviews'][number], 'id' | 'status'>[];
+  },
   scope: 'working' | 'published',
   now: Date,
   management: boolean,
 ): View | null {
-  const rev = row.revisions.find(
-    (r) => r.revision === (scope === 'published' ? row.published_revision : row.working_revision),
-  );
+  const published = publishedRevision(row);
+  const rev = scope === 'published' ? published : workingRevision(row);
   if (!rev) return null;
   const input = rev.content as unknown as ActivityInput;
   const times = slots(input.schedule);
-  const published = row.revisions.find((r) => r.revision === row.published_revision);
   const live =
     rev === published
       ? times
@@ -118,37 +93,4 @@ export function pagination(query: Query) {
   if (!Number.isInteger(page_size) || page_size < 1 || page_size > 100)
     invalid('page_size', '每页显示 1 至 100 条');
   return { page, page_size, skip: (page - 1) * page_size };
-}
-export function paginate<T>(items: T[], query: Query) {
-  const { page, page_size } = pagination(query);
-  return {
-    items: items.slice((page - 1) * page_size, page * page_size),
-    total: items.length,
-    page,
-    page_size,
-  };
-}
-export function filterViews(items: View[], query: Query) {
-  const from = Date.parse(query.from),
-    to = Date.parse(query.to);
-  if (
-    (query.from !== undefined || query.to !== undefined) &&
-    !(Number.isFinite(from) && Number.isFinite(to) && from < to && to - from <= 31 * 86400000)
-  )
-    invalid('from', '日期窗口须成对填写，最长 31 天');
-  if (query.is_ongoing && !['true', 'false'].includes(query.is_ongoing))
-    invalid('is_ongoing', '进行中筛选值无效');
-  return items.filter(
-    (a) =>
-      (!query.q || [a.title, a.activity_code].some((v) => v.includes(query.q))) &&
-      (!query.campus || a.campus === query.campus) &&
-      (!query.status || a.status === query.status) &&
-      (!query.owner_account_id || a.owner_account_id === query.owner_account_id) &&
-      (!query.registration_phase || a.registration_phase === query.registration_phase) &&
-      (!query.is_ongoing || a.is_ongoing === (query.is_ongoing === 'true')) &&
-      (!query.from ||
-        slots(a.schedule).some(
-          (s) => Date.parse(s.starts_at) < to && Date.parse(s.ends_at) > from,
-        )),
-  );
 }

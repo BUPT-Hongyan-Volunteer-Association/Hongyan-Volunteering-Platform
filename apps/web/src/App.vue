@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import type { Profile } from '@hongyan/contracts';
+import { hasStudentAccess } from './identity';
 import AccountGate from '@hongyan/ui/AccountGate.vue';
 import AccountIdentity from '@hongyan/ui/AccountIdentity.vue';
 import BrandName from '@hongyan/ui/BrandName.vue';
@@ -19,8 +20,6 @@ const managedNav = [
   { to: '/managed/new', label: '新建活动', icon: 'Plus' },
   { to: '/managed-schedule', label: '管理日程', icon: 'Clock' },
 ] as const;
-const personal = (profile: Profile) =>
-  profile.roles.some((r) => r === 'student' || r === 'organizer');
 const canManage = (profile: Profile) => profile.roles.includes('organizer');
 function isCurrent(to: string) {
   if (to === '/')
@@ -55,7 +54,7 @@ const crumb = computed(() => {
         <BrandName :area="canManage(profile) ? '活动负责人' : '学生端'" />
         <nav class="rail-nav" aria-label="学生导航">
           <RouterLink
-            v-for="item in personal(profile) ? studentNav : studentNav.slice(0, 1)"
+            v-for="item in hasStudentAccess(profile) ? studentNav : studentNav.slice(0, 1)"
             :key="item.to"
             :to="item.to"
             :class="{ current: isCurrent(item.to) }"
@@ -103,7 +102,7 @@ const crumb = computed(() => {
           <p v-if="$route.meta.organizer && !canManage(profile)" role="alert">
             当前账号无活动管理权限。
           </p>
-          <p v-else-if="$route.meta.personal && !personal(profile)" role="alert">
+          <p v-else-if="$route.meta.personal && !hasStudentAccess(profile)" role="alert">
             当前账号无学生个人页面权限。
           </p>
           <RouterView v-else v-slot="{ Component }"
@@ -113,7 +112,7 @@ const crumb = computed(() => {
                 $route.meta.profile
                   ? { profile }
                   : $route.meta.studentSchedule
-                    ? { showPersonalScope: personal(profile) }
+                    ? { showPersonalScope: hasStudentAccess(profile) }
                     : {}
               "
           /></RouterView>

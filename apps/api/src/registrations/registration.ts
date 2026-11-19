@@ -5,14 +5,14 @@ import type {
   RegistrationInput,
 } from '@hongyan/contracts/types';
 import type { Registration } from '../generated/prisma/client.js';
-import { slots, type LoadedActivity } from '../activities/read.js';
+import { slots } from '../activities/schedule.js';
+import { publishedRevision } from '../activities/revisions.js';
+import type { LoadedActivity } from '../activities/read.js';
 import { checkVersion, wrongState, type Tx } from '../activities/workflow.js';
 import { BusinessError, invalid, invisible } from '../http.js';
 
 function approvedContent(activity: LoadedActivity) {
-  const revision = activity.revisions.find(
-    (r) => r.revision === activity.published_revision && r.revision_state === 'approved',
-  );
+  const revision = publishedRevision(activity);
   return revision?.content as unknown as ActivityInput | undefined;
 }
 

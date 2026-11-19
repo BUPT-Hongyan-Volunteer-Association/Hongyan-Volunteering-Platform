@@ -44,6 +44,14 @@ const dateClock = format({
   hour: '2-digit',
   minute: '2-digit',
 });
+export const timelineColors = ['#3B82F6', '#10B981', '#8B5CF6', '#06B6D4', '#F97316', '#84CC16'];
+const monthDayClock = format({
+  month: 'numeric',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+export const localTime = (iso: string) => monthDayClock.format(new Date(iso));
 const clock = format({ hour: '2-digit', minute: '2-digit' });
 export const localDate = (value: string | number) =>
   new Date(new Date(value).getTime() + 8 * 3600000).toISOString().slice(0, 10);
