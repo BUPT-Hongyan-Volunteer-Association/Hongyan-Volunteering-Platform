@@ -241,9 +241,12 @@ export function buildWorkbook({ sheets, prefix = true, sharedStrings = false, co
   return zip(files.map((file) => ({ ...file, compress })));
 }
 
-/** 生成“学生建档”工作表：rows 为 {number, values:[学号,姓名,级部,年级,班级,学院], extra?:Record<string,any>}；includeCollege=false 时生成五列旧版表头。 */
+/** 生成“学生建档”工作表：rows 为 {number, values:[学号,姓名,级部,年级,班级,学院], extra?:Record<string,any>}；includeCollege=false 时生成五列旧版表头；columnOrder 可自定义列顺序。 */
 export function rosterSheet(rows, options = {}) {
-  const headers = options.includeCollege === false ? importHeaders.slice(0, 5) : importHeaders;
+  const headers =
+    options.columnOrder ??
+    (options.includeCollege === false ? importHeaders.slice(0, 5) : importHeaders);
+  const valueIndex = new Map(importHeaders.map((label, index) => [label, index]));
   const header = {
     number: 1,
     cells: Object.fromEntries(headers.map((headerText, index) => [String.fromCharCode(65 + index), headerText])),
@@ -258,8 +261,8 @@ export function rosterSheet(rows, options = {}) {
         number: row.number,
         cells: {
           ...Object.fromEntries(
-            headers.flatMap((_header, index) => {
-              const value = row.values[index];
+            headers.flatMap((header, index) => {
+              const value = row.values[valueIndex.get(header)];
               return value === undefined || value === null
                 ? []
                 : [[String.fromCharCode(65 + index), value]];

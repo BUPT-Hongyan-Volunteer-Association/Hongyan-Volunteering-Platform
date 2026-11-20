@@ -763,6 +763,42 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       );
     });
 
+    await t.test('表头按名称识别，列顺序不影响导入', async () => {
+      const reordered = buildWorkbook({
+        sheets: [
+          rosterSheet(
+            [
+              {
+                number: 2,
+                values: ['0000001601', '乱序学生', '本科生', '2026', '0000001701', '信息与通信工程学院'],
+              },
+            ],
+            { columnOrder: ['学院', '班级', '年级', '姓名', '学号', '级部'] },
+          ),
+        ],
+        prefix: true,
+        sharedStrings: true,
+      });
+      const batch = await uploadImport(teacher, reordered);
+      assert.equal(batch.status, 'ready');
+      const preview = (await teacher.request('/admin/student-imports/' + batch.id + '/rows')).data;
+      const row = preview.items[0];
+      assert.equal(row.student_no, '0000001601');
+      assert.equal(row.name, '乱序学生');
+      assert.equal(row.cohort, '本科生');
+      assert.equal(row.grade, '2026');
+      assert.equal(row.class_name, '0000001701');
+      assert.equal(row.college, '信息与通信工程学院');
+      const committed = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        commitBody(batch),
+      );
+      assert.equal(committed.status, 200);
+      const stored = await db.student.findUniqueOrThrow({ where: { student_no: '0000001601' } });
+      assert.equal(stored.college, '信息与通信工程学院');
+    });
+
     await t.test('学院列缺省的五列名单仍可导入', async () => {
       const legacy = buildWorkbook({
         sheets: [

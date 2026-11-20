@@ -85,14 +85,6 @@ interface ParsedRow {
   signature: Record<Exclude<ImportField, 'student_no'>, string>;
 }
 
-const fieldColumns: Record<ImportField, number> = {
-  student_no: 0,
-  name: 1,
-  cohort: 2,
-  grade: 3,
-  class_name: 4,
-  college: 5,
-};
 const fieldLabels: Record<ImportField, string> = {
   student_no: '学号',
   name: '姓名',
@@ -101,6 +93,9 @@ const fieldLabels: Record<ImportField, string> = {
   class_name: '班级',
   college: '学院',
 };
+const importFieldByHeader = new Map<string, ImportField>(
+  importHeaders.map((label, index) => [label, importFields[index]]),
+);
 
 const text = (cell: SheetCell, field: ImportField, errors: FieldIssue[], max = 100) => {
   if (cell.type === 'formula') {
@@ -142,22 +137,22 @@ function columnName(index: number) {
   return name;
 }
 
-function parseRow(row: SheetRow, hasCollege: boolean): ParsedRow {
+function parseRow(row: SheetRow, columns: Map<ImportField, number>): ParsedRow {
   const cells = cellsOf(row);
-  const allowedColumns = hasCollege ? importHeaders.length : importHeaders.length - 1;
+  const allowed = new Set(columns.values());
   const raw_values: Record<string, string> = {};
   for (const field of importFields) {
-    if (field === 'college' && !hasCollege) continue;
-    const cell = cells.get(fieldColumns[field]);
+    const column = columns.get(field);
+    const cell = column === undefined ? undefined : cells.get(column);
     if (cell) raw_values[field] = cell.text;
   }
   for (const cell of row.cells) {
-    if (cell.column >= allowedColumns && cell.text !== '')
+    if (!allowed.has(cell.column) && cell.text !== '')
       raw_values[columnName(cell.column)] = cell.text;
   }
   const errors: FieldIssue[] = [];
   for (const cell of row.cells) {
-    if (cell.column >= allowedColumns && cell.text !== '')
+    if (!allowed.has(cell.column) && cell.text !== '')
       errors.push({
         field: columnName(cell.column),
         code: 'unknown_column',
@@ -167,8 +162,8 @@ function parseRow(row: SheetRow, hasCollege: boolean): ParsedRow {
   const values: NormalizedValues = {};
   const signature: ParsedRow['signature'] = { name: '', cohort: '', grade: '', class_name: '', college: '' };
   for (const field of importFields) {
-    if (field === 'college' && !hasCollege) continue;
-    const cell = cells.get(fieldColumns[field]);
+    const column = columns.get(field);
+    const cell = column === undefined ? undefined : cells.get(column);
     const max = field === 'grade' ? 50 : 100;
     if (field === 'student_no') {
       if (!cell) {
@@ -223,32 +218,30 @@ export function parseImportWorkbook(buffer: Buffer): ParsedImport {
     return { file_error: '数据行超过 5,000 条上限，请拆分后重新上传', rows: [], row_count: 0 };
   const header = rows.find((row) => row.number === 1);
   const mismatch: string[] = [];
-  let hasCollege = false;
+  const columns = new Map<ImportField, number>();
   if (!header) mismatch.push('缺少第 1 行表头');
   else {
-    const cells = cellsOf(header);
-    for (const [index, label] of importHeaders.slice(0, 5).entries()) {
-      const cell = cells.get(index);
-      if (!cell || cell.type !== 'text' || cell.text.trim() !== label) mismatch.push(label);
+    for (const cell of header.cells) {
+      const label = cell.type === 'text' ? cell.text.trim() : '';
+      const field = importFieldByHeader.get(label);
+      if (!field || columns.has(field)) {
+        mismatch.push(label || columnName(cell.column));
+        continue;
+      }
+      columns.set(field, cell.column);
     }
-    const collegeCell = cells.get(5);
-    if (collegeCell) {
-      if (collegeCell.type !== 'text' || collegeCell.text.trim() !== importHeaders[5])
-        mismatch.push(importHeaders[5]);
-      else hasCollege = true;
-    }
-    for (const cell of header.cells)
-      if (cell.column >= (hasCollege ? importHeaders.length : 5) && cell.text !== '')
-        mismatch.push(columnName(cell.column));
+    for (const field of importFields.slice(0, 5))
+      if (!columns.has(field)) mismatch.push(fieldLabels[field]);
   }
   if (mismatch.length)
     return {
-      file_error: '第 1 行表头须为 学号、姓名、级部、年级、班级 五列，可在末尾追加学院列，且不使用其他列',
+      file_error:
+        '第 1 行表头须包含 学号、姓名、级部、年级、班级（学院可选），列顺序不限，且不使用其他列',
       rows: [],
       row_count: 0,
     };
   const data = rows.filter((row) => row.number >= 2);
-  const parsed = data.map((row) => parseRow(row, hasCollege));
+  const parsed = data.map((row) => parseRow(row, columns));
   if (!parsed.length)
     return { file_error: '未找到可导入的数据行，请使用空白模板填写后重新上传', rows: [], row_count: 0 };
   if (parsed.length > maxImportRows)
