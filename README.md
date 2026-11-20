@@ -1,6 +1,6 @@
 # 鸿雁志愿服务平台
 
-学生查看活动、报名和查询结果，负责人创建活动并送审、处理录取，审核员审批活动及修订。
+学生查看活动、报名和查询结果，负责人创建活动并送审、处理录取、上传时长工作簿并核对预览，审核员审批活动及修订。
 
 ## 本地运行
 
@@ -29,5 +29,7 @@
 ## 开发检查
 
 类型检查用 `pnpm typecheck`，服务端回归用 `pnpm --filter @hongyan/api test:flow`，页面回归用 `pnpm test:pages`。两套回归均需数据库账号有建库权限。页面回归和身份选择页可使用已安装的 Chrome 或 Edge。用 Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，再通过 HTTPS 访问。
+
+负责人从「我的管理活动 → 选择活动 → 时长批次」进入上传和预览。工作簿解析和逐行校验可分别运行 `pnpm --filter @hongyan/api test:hour-workbook` 和 `pnpm --filter @hongyan/api test:hour-preview`，两者可离线运行。页面回归覆盖上传、筛选和报告下载，将 `HOUR_EVIDENCE_DIR` 设为本地输出目录可保存合成工作簿、错误报告和截图。
 
 [工程协作约定](AGENTS.md) · [界面规范](DESIGN.md) · [界面复验](docs/ui-samples/README.md) · [接口契约与导入模板](packages/contracts/)

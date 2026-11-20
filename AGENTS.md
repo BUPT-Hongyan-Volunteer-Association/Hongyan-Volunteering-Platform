@@ -5,7 +5,7 @@
 ## 修改位置
 
 - 学生与负责人页面在 `apps/web`，审核后台在 `apps/admin`。页面专用组件就近放置，两端共用的组件与样式放在 `packages/ui`。界面改动遵循[三端界面规范](DESIGN.md)。
-- 服务端按业务归入 `apps/api/src` 的 `auth`、`activities` 或 `registrations` 等模块。
+- 服务端按业务归入 `apps/api/src` 的 `auth`、`activities`、`registrations` 或 `hours` 等模块。时长工作簿上传、批次预览和错误报告在 `hours`。
 - 接口变更先更新 `packages/contracts` 中的 OpenAPI，再生成客户端并更新调用方。页面通过共享请求层访问同源 `/api/v1`。
 
 ## 数据与写入
