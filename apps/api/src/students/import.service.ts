@@ -71,6 +71,7 @@ function studentView(student: {
   cohort: string | null;
   grade: string | null;
   class_name: string | null;
+  college: string | null;
   created_at: Date;
   updated_at: Date;
   account_id: string;
@@ -86,6 +87,7 @@ function studentView(student: {
     ...(student.cohort && { cohort: student.cohort }),
     ...(student.grade && { grade: student.grade }),
     ...(student.class_name && { class_name: student.class_name }),
+    ...(student.college && { college: student.college }),
     status: student.account.active ? ('active' as const) : ('inactive' as const),
     account_id: student.account_id,
   };
@@ -99,6 +101,7 @@ function rowView(row: {
   cohort: string | null;
   grade: string | null;
   class_name: string | null;
+  college: string | null;
   raw_values: Prisma.JsonValue;
   errors: Prisma.JsonValue;
   resulting_account_status: string | null;
@@ -111,6 +114,7 @@ function rowView(row: {
     ...(row.cohort && { cohort: row.cohort }),
     ...(row.grade && { grade: row.grade }),
     ...(row.class_name && { class_name: row.class_name }),
+    ...(row.college && { college: row.college }),
     errors: row.errors as unknown as FieldIssue[],
     raw_values: row.raw_values as unknown as Record<string, string>,
     ...(row.resulting_account_status && {
@@ -149,6 +153,7 @@ export class StudentImportService implements OnApplicationBootstrap {
         cohort: record.cohort ?? '',
         grade: record.grade ?? '',
         class_name: record.class_name ?? '',
+        college: record.college ?? '',
         status: record.account.active ? 'active' : 'inactive',
       });
     const accounts = await this.db.account.findMany({
@@ -164,6 +169,7 @@ export class StudentImportService implements OnApplicationBootstrap {
           cohort: '',
           grade: '',
           class_name: '',
+          college: '',
           status: account.active ? 'active' : 'inactive',
         });
     return existing;
@@ -239,6 +245,7 @@ export class StudentImportService implements OnApplicationBootstrap {
               cohort: row.values.cohort ?? null,
               grade: row.values.grade ?? null,
               class_name: row.values.class_name ?? null,
+              college: row.values.college ?? null,
               raw_values: row.raw_values as Prisma.InputJsonValue,
               errors: row.errors as unknown as Prisma.InputJsonValue,
               resulting_account_status: row.resulting_account_status ?? null,
@@ -358,6 +365,7 @@ export class StudentImportService implements OnApplicationBootstrap {
               cohort: account.student.cohort ?? '',
               grade: account.student.grade ?? '',
               class_name: account.student.class_name ?? '',
+              college: account.student.college ?? '',
             })
           ) {
             skipped += 1;
@@ -395,6 +403,7 @@ export class StudentImportService implements OnApplicationBootstrap {
                 cohort: row.cohort,
                 grade: row.grade,
                 class_name: row.class_name,
+                college: row.college,
               },
             },
           },

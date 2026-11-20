@@ -1,10 +1,10 @@
 openapi: 3.0.3
 info:
   title: 志愿服务平台接口契约
-  version: 1.2.4
+  version: 1.2.5
   description: 2026-11-18 PRD v1.3.4配套规格，尚未实现。沿用/api/v1，本次校订后按本文件重新生成客户端。确认学生初始密码为学号后六位，首次登录强制改密。学号和班级均为十位数字，建档不含在校状态。时长以录入单为准，整数部分最多三位、最多一位小数。本轮聚焦平台搭建与功能实现，暂不考虑部署维护。业务字段、枚举及错误码使用snake_case，自动限制固定off。
     沿用：时长模板末列是否有违纪情况，时长与违规核实合并审批。规则未确定时正常审核时长，处罚固定未启用。按表头识别七列与兼容六列，不仅依赖文件名或版本号。
-  x-document-revision: 2026-11-18-r2
+  x-document-revision: 2026-11-21-r3
 servers:
 - url: /api/v1
   description: 同源相对路径，不指向已部署服务
@@ -3654,7 +3654,7 @@ paths:
     post:
       operationId: upload_student_import
       summary: 上传团委学生名单
-      description: 使用学生建档模板v1.3，仅.xlsx、5MB、5000条，工作表学生建档，固定学号、姓名、级部、年级、班级五列，不含在校状态。学号姓名必填，级部年级班级选填。学号及非空班级均须为十位数字，以文本保存并保留前导零。仅导入学院核定试点名单，新档案建立active账号，初始密码为学号后六位，首次登录强制改密。已有学号所有输入字段一致则跳过，任一不一致整行冲突，须后台资料修正，不用导入批量覆盖或恢复停用账号。重复导入不重置密码、不授予负责人。忽略全空行和无值空列，拒绝公式、未知有值列及同文件同键不同资料。
+      description: 使用学生建档模板v1.4，仅.xlsx、5MB、5000条，工作表学生建档，固定学号、姓名、级部、年级、班级、学院六列，不含在校状态。学号姓名必填，级部年级班级学院选填。学号及非空班级均须为十位数字，以文本保存并保留前导零。仅导入学院核定试点名单，新档案建立active账号，初始密码为学号后六位，首次登录强制改密。已有学号所有输入字段一致则跳过，任一不一致整行冲突，须后台资料修正，不用导入批量覆盖或恢复停用账号。重复导入不重置密码、不授予负责人。忽略全空行和无值空列，拒绝公式、未知有值列及同文件同键不同资料。
         遍历第2行起全部非空数据，含预留区及Excel表格边界外。相同学号且资料相同仅保留首行，其余跳过。冲突涉及的所有同行均报错。读原值类型，数值型学号或班级不得猜测补零。仅后台处理异常标为failed，内容错误为invalid。 5MB按5,242,880字节计，行数在去重前按非空数据行计。
         受理后返回批次ID和原文件摘要，页面用批次ID轮询。
       tags:
@@ -7619,6 +7619,10 @@ components:
           description: 选填，有值时为十位数字，按文本传输并保留前导零。
           maxLength: 10
           pattern: ^(?:[0-9]{10})?$
+        college:
+          type: string
+          description: 学院名称，选填。
+          maxLength: 100
         status:
           type: string
           enum:
@@ -7685,6 +7689,10 @@ components:
           description: 选填，有值时为十位数字，按文本传输并保留前导零。
           maxLength: 10
           pattern: ^(?:[0-9]{10})?$
+        college:
+          type: string
+          description: 学院名称，选填。
+          maxLength: 100
         status:
           type: string
           enum:
@@ -9249,6 +9257,10 @@ components:
           description: 选填，有值时为十位数字，按文本传输并保留前导零。
           maxLength: 10
           pattern: ^(?:[0-9]{10})?$
+        college:
+          type: string
+          description: 学院名称，选填。
+          maxLength: 100
         action:
           type: string
           enum:
@@ -11887,7 +11899,7 @@ x-naming-convention: snake_case for application-owned identifiers. Preserve Open
   library APIs and protocol values.
 x-auth-future-integration: 后续联系学校信息化部门对接统一身份认证。
 x-student-template:
-  version: v1.3
+  version: v1.4
   worksheet: 学生建档
   columns:
   - 学号
@@ -11895,13 +11907,15 @@ x-student-template:
   - 级部
   - 年级
   - 班级
+  - 学院
   field_mapping:
   - student_no
   - name
   - cohort
   - grade
   - class_name
-  parse_policy: 学号姓名必填，级部年级班级选填。学号及非空班级均为十位数字，以文本保存并保留前导零。 按固定五列表头及顺序识别。忽略说明页和全空行，扫描表格范围外追加行，同键冲突关联全部原行号。拒绝公式、合计行和有值的未知列。
+  - college
+  parse_policy: 学号姓名必填，级部年级班级学院选填。学号及非空班级均为十位数字，以文本保存并保留前导零。 按固定六列表头及顺序识别。忽略说明页和全空行，扫描表格范围外追加行，同键冲突关联全部原行号。拒绝公式、合计行和有值的未知列。
   capacity:
     prepared_rows: 200
     max_data_rows: 5000

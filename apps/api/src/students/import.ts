@@ -1,11 +1,11 @@
 import { readXlsxSheet, XlsxContentError, type SheetCell, type SheetRow } from './xlsx.js';
 
 export const importSheetName = '学生建档';
-export const importHeaders = ['学号', '姓名', '级部', '年级', '班级'] as const;
+export const importHeaders = ['学号', '姓名', '级部', '年级', '班级', '学院'] as const;
 export const maxImportBytes = 5_242_880;
 export const maxImportRows = 5_000;
 
-export const importFields = ['student_no', 'name', 'cohort', 'grade', 'class_name'] as const;
+export const importFields = ['student_no', 'name', 'cohort', 'grade', 'class_name', 'college'] as const;
 export type ImportField = (typeof importFields)[number];
 
 export interface FieldIssue {
@@ -23,6 +23,7 @@ export interface NormalizedValues {
   cohort?: string;
   grade?: string;
   class_name?: string;
+  college?: string;
 }
 
 export interface EvaluatedRow {
@@ -39,18 +40,20 @@ export interface ProfileValues {
   cohort?: string | null;
   grade?: string | null;
   class_name?: string | null;
+  college?: string | null;
 }
 
 /** 名单资料与已有档案是否完全一致；用于预览跳过判定与确认时复核。 */
 export function profileMatches(
   values: ProfileValues,
-  existing: { name: string; cohort: string; grade: string; class_name: string },
+  existing: { name: string; cohort: string; grade: string; class_name: string; college: string },
 ) {
   return (
     (values.name ?? '') === existing.name &&
     (values.cohort ?? '') === existing.cohort &&
     (values.grade ?? '') === existing.grade &&
-    (values.class_name ?? '') === existing.class_name
+    (values.class_name ?? '') === existing.class_name &&
+    (values.college ?? '') === existing.college
   );
 }
 
@@ -62,6 +65,7 @@ export interface ExistingStudent {
   cohort: string;
   grade: string;
   class_name: string;
+  college: string;
   status: 'active' | 'inactive';
 }
 
@@ -87,6 +91,7 @@ const fieldColumns: Record<ImportField, number> = {
   cohort: 2,
   grade: 3,
   class_name: 4,
+  college: 5,
 };
 const fieldLabels: Record<ImportField, string> = {
   student_no: '学号',
@@ -94,6 +99,7 @@ const fieldLabels: Record<ImportField, string> = {
   cohort: '级部',
   grade: '年级',
   class_name: '班级',
+  college: '学院',
 };
 
 const text = (cell: SheetCell, field: ImportField, errors: FieldIssue[], max = 100) => {
@@ -153,11 +159,11 @@ function parseRow(row: SheetRow): ParsedRow {
       errors.push({
         field: columnName(cell.column),
         code: 'unknown_column',
-        message: '五列表格之外的第 ' + columnName(cell.column) + ' 列有值',
+        message: '六列表格之外的第 ' + columnName(cell.column) + ' 列有值',
       });
   }
   const values: NormalizedValues = {};
-  const signature: ParsedRow['signature'] = { name: '', cohort: '', grade: '', class_name: '' };
+  const signature: ParsedRow['signature'] = { name: '', cohort: '', grade: '', class_name: '', college: '' };
   for (const field of importFields) {
     const cell = cells.get(fieldColumns[field]);
     const max = field === 'grade' ? 50 : 100;
@@ -227,7 +233,7 @@ export function parseImportWorkbook(buffer: Buffer): ParsedImport {
   }
   if (mismatch.length)
     return {
-      file_error: '第 1 行表头须为 学号、姓名、级部、年级、班级 五列，且不使用其他列',
+      file_error: '第 1 行表头须为 学号、姓名、级部、年级、班级、学院 六列，且不使用其他列',
       rows: [],
       row_count: 0,
     };
@@ -241,7 +247,13 @@ export function parseImportWorkbook(buffer: Buffer): ParsedImport {
 }
 
 const signatureOf = (row: ParsedRow) =>
-  JSON.stringify([row.signature.name, row.signature.cohort, row.signature.grade, row.signature.class_name]);
+  JSON.stringify([
+    row.signature.name,
+    row.signature.cohort,
+    row.signature.grade,
+    row.signature.class_name,
+    row.signature.college,
+  ]);
 
 /**
  * 依据文件内同键去重与已有学生档案判定每行动作。

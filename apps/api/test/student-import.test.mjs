@@ -8,7 +8,7 @@ import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { buildWorkbook, rosterSheet } from './xlsx-fixture.mjs';
 
 const template = readFileSync(
-  new URL('../../../packages/contracts/templates/学生建档导入模板_v1.3.xlsx', import.meta.url),
+  new URL('../../../packages/contracts/templates/学生建档导入模板_v1.4.xlsx', import.meta.url),
 );
 
 function browser(base) {
@@ -123,7 +123,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
     await student.signIn('0000000001', '000001', 'student-new-pass1');
     const upload = (bytes, filename) => teacher.upload('/admin/student-imports', bytes, filename);
 
-    await t.test('上传限 5 MB，只接受 v1.3 模板的工作表与五列表头', async () => {
+    await t.test('上传限 5 MB，只接受 v1.4 模板的工作表与六列表头', async () => {
       const oversized = Buffer.alloc(5_242_881);
       oversized[0] = 0x50;
       oversized[1] = 0x4b;
@@ -148,7 +148,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       response = await teacher.write('POST', '/admin/student-imports', undefined);
       assert.equal(response.status, 422);
 
-      const blank = await uploadImport(teacher, template, '学生建档导入模板_v1.3.xlsx');
+      const blank = await uploadImport(teacher, template, '学生建档导入模板_v1.4.xlsx');
       assert.equal(blank.status, 'invalid');
       assert.match(blank.error_message, /未找到可导入的数据行/);
 
@@ -232,7 +232,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
           extra: { A: { blank: true }, B: { blank: true }, C: { blank: true }, D: { blank: true }, E: { blank: true } },
         },
         { number: 10, values: ['0000000103', { inline: '王五' }, '', '', ''] },
-        { number: 11, values: ['0000000104', '未知列', '', '', ''], extra: { F: '多余' } },
+        { number: 11, values: ['0000000104', '未知列', '', '', ''], extra: { G: '多余' } },
         { number: 250, values: ['0000000105', '赵六', '', '', ''] },
       ];
       const sheet = rosterSheet(rows, { dimension: 'A1:E201', tableRef: 'A1:E201' });
@@ -270,7 +270,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       assert.equal(byNumber.get(8).raw_values.student_no, '=A2');
       assert(byNumber.get(8).errors.some((error) => error.code === 'formula_not_allowed'));
       assert(byNumber.get(10).action, 'create');
-      assert(byNumber.get(11).errors.some((error) => error.code === 'unknown_column'));
+      assert(byNumber.get(11).errors.some((error) => error.code === 'unknown_column' && error.field === 'G'));
       assert.equal(byNumber.get(250).action, 'create');
       assert(!byNumber.has(9));
 
@@ -306,7 +306,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
         teacher,
         workbook([
           { number: 2, values: profile },
-          { number: 3, values: profile, extra: { F: '多余列' } },
+          { number: 3, values: profile, extra: { G: '多余列' } },
         ]),
       );
       assert.equal(batch.status, 'invalid');
@@ -319,9 +319,9 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       assert.equal(byNumber.get(2).action, 'create');
       assert.equal(byNumber.get(3).action, 'error');
       assert(
-        byNumber.get(3).errors.some((error) => error.code === 'unknown_column' && error.field === 'F'),
+        byNumber.get(3).errors.some((error) => error.code === 'unknown_column' && error.field === 'G'),
       );
-      assert.equal(byNumber.get(3).raw_values.F, '多余列');
+      assert.equal(byNumber.get(3).raw_values.G, '多余列');
       const blocked = await teacher.write(
         'POST',
         '/admin/student-imports/' + batch.id + '/commit',
@@ -709,6 +709,58 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       // 服务在畸形输入后仍正常响应
       assert.equal((await teacher.request('/admin/students')).status, 200);
       assert.equal((await teacher.request('/admin/student-imports/' + rowsBatch.id)).status, 200);
+    });
+
+    await t.test('学院随名单导入、在档案中返回，并参与去重与冲突判定', async () => {
+      const batch = await uploadImport(
+        teacher,
+        workbook([
+          {
+            number: 2,
+            values: ['0000001101', '学院甲', '本科生', '2026', '0000001201', '信息与通信工程学院'],
+          },
+          { number: 3, values: ['0000001102', '学院乙', '', '', '', '计算机学院'] },
+        ]),
+      );
+      assert.equal(batch.status, 'ready');
+      assert.equal(batch.created_count, 2);
+      const preview = (await teacher.request('/admin/student-imports/' + batch.id + '/rows')).data;
+      const rows = new Map(preview.items.map((row) => [row.row_number, row]));
+      assert.equal(rows.get(2).college, '信息与通信工程学院');
+      assert.equal(rows.get(3).college, '计算机学院');
+      const committed = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        commitBody(batch),
+      );
+      assert.equal(committed.status, 200);
+      const stored = await db.student.findUniqueOrThrow({ where: { student_no: '0000001101' } });
+      assert.equal(stored.college, '信息与通信工程学院');
+      const listed = (await teacher.request('/admin/students?q=0000001101')).data;
+      assert.equal(listed.items[0].college, '信息与通信工程学院');
+
+      const conflict = await uploadImport(
+        teacher,
+        workbook([
+          {
+            number: 2,
+            values: ['0000001103', '学院冲突', '本科生', '2026', '0000001202', '信息与通信工程学院'],
+          },
+          {
+            number: 3,
+            values: ['0000001103', '学院冲突', '本科生', '2026', '0000001202', '计算机学院'],
+          },
+        ]),
+      );
+      assert.equal(conflict.status, 'invalid');
+      assert.equal(conflict.error_count, 2);
+      const conflictRows = (await teacher.request('/admin/student-imports/' + conflict.id + '/rows'))
+        .data;
+      assert(
+        conflictRows.items.every((row) =>
+          row.errors.some((error) => error.code === 'duplicate_conflict'),
+        ),
+      );
     });
 
     await t.test('5,000 条非空数据行可校验，表格范围外与空行按规则处理', async () => {

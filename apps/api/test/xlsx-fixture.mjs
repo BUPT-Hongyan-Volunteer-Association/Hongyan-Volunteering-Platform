@@ -64,7 +64,7 @@ const escape = (value) =>
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
 
-export const importHeaders = ['学号', '姓名', '级部', '年级', '班级'];
+export const importHeaders = ['学号', '姓名', '级部', '年级', '班级', '学院'];
 
 /**
  * @param {object} options
@@ -241,7 +241,7 @@ export function buildWorkbook({ sheets, prefix = true, sharedStrings = false, co
   return zip(files.map((file) => ({ ...file, compress })));
 }
 
-/** 生成“学生建档”工作表：rows 为 {number, values:[学号,姓名,级部,年级,班级], extra?:Record<string,any>}。 */
+/** 生成“学生建档”工作表：rows 为 {number, values:[学号,姓名,级部,年级,班级,学院], extra?:Record<string,any>}。 */
 export function rosterSheet(rows, options = {}) {
   const header = {
     number: 1,
