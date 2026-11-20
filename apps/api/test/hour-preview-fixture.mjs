@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { previewActivityHours } from '../dist/hours/preview-context.js';
-import { parseHourWorkbook } from '../dist/hours/workbook.js';
-import { readHistory } from '../dist/hours/batch-data.js';
 import { cell, headers, row, workbook } from './hour-workbook-fixture.mjs';
 
 const date = '2020-11-18', code = 'P2026-0901';
@@ -14,7 +12,7 @@ function serviceRow(index, student, value, flag, remark = '已核对现场记录
 }
 
 function mixedWorkbook(students, fixed = false, repeatedRows = 0) {
-  const data = serviceRow(2, students[0], '2', '无') + serviceRow(3, students[0], '2', '无')
+  const data = serviceRow(2, students[0], '2', '无', '') + serviceRow(3, students[0], '2', '无')
     + serviceRow(202, students[1], fixed ? '1.2' : '1.25', '无') + serviceRow(804, students[2], '7', '有')
     + Array.from({ length: repeatedRows }, (_, index) => serviceRow(805 + index, students[0], '2', '无')).join('');
   return workbook(data);
@@ -31,11 +29,16 @@ export async function prepareHourPreviewFixture(db, sample) {
     const owner = students[1].account_id;
     const future = sample.revisions[0].content;
     const past = { ...future, schedule: { schedule_type:'continuous',starts_at:date+'T08:00:00+08:00',ends_at:date+'T16:00:00+08:00' } };
+    const submitted_at = new Date(date+'T07:00:00+08:00');
     const activity = await tx.activity.create({ data: {
       activity_code: code, status:'published', published_revision:2, working_revision:2,
       revisions:{create:[past,future].map((content,index) => ({revision:index+1,revision_state:'approved',content,created_by:owner,approved_at:new Date()}))},
       members:{create:{account_id:owner,member_role:'owner'}},
-      registrations:{create:{student_id:students[0].id,status:'accepted'}},
+      registrations:{create:{student_id:students[0].id, status:'exited', version:2, submitted_at,
+        history:{create:[
+          {version:1, status:'accepted', submitted_at, changed_at:null},
+          {version:2, status:'exited', submitted_at, changed_at:new Date(date+'T20:00:00+08:00')},
+        ]}}},
     } });
     const historical = { id:randomUUID(),version:1,activity_id:sample.id,student_id:students[2].id,service_date:new Date(date),
       status:'current',hours:'18.0',origin_schedule_revision:1,misconduct_reported:'none',misconduct_version:0 };
@@ -56,12 +59,12 @@ export async function prepareHourPreviewFixture(db, sample) {
 }
 
 export async function checkHourPreview(db, { activityId, ownerId, bytes }) {
-  const book = await parseHourWorkbook('合成混合预览.xlsx', bytes);
+  const source = { name: '合成混合预览.xlsx', contents: bytes };
   await db.$transaction(async tx => {
     const allHistory = () => tx.hourRecord.findMany({orderBy:{id:'asc'}});
     const before = await allHistory();
-    const preview = () => previewActivityHours(tx,{account_id:ownerId,roles:['organizer']},activityId,book,
-      {mode:'new',now:new Date('2026-11-19T01:00:00Z'),schedule_revision:1},readHistory);
+    const preview = () => previewActivityHours(tx,{account_id:ownerId,roles:['organizer']},activityId,source,
+      {mode:'new',now:new Date('2026-11-19T01:00:00Z'),schedule_revision:1});
     const result = await preview();
     assert.deepEqual(result.rows.map(({row_number,action}) => [row_number,action]),
       [[2,'add'],[3,'skip_identical'],[202,'error'],[804,'add']]);

@@ -30,20 +30,28 @@ function rejectIssues(issues: ReturnType<typeof workbookIssue>[]): never {
   throw new BusinessError(422, 'validation_error', first.field + '：' + first.message + count, issues);
 }
 
+function decodeText(value: string) {
+  // Decode each XML text element once so a quoted underscore (_x005F_x000D_) stays literal.
+  return value.replace(/_x([\da-fA-F]{4})_/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+}
+
 function sharedStrings(xml: string | null, spreadsheet: string) {
   const strings: string[] = [];
   if (!xml) return strings;
-  let value = '', reading = false;
+  let value = '', run: string | undefined;
   scan(xml, {
     open(tag, parent) {
       if (tag.uri !== spreadsheet) return;
       if (tag.local === 'si') value = '';
-      if (tag.local === 't') reading = parent?.local === 'si' || parent?.local === 'r';
+      if (tag.local === 't' && (parent?.local === 'si' || parent?.local === 'r')) run = '';
     },
-    text(text) { if (reading) value += text; },
+    text(text) { if (run !== undefined) run += text; },
     close(tag) {
       if (tag.uri !== spreadsheet) return;
-      if (tag.local === 't') reading = false;
+      if (tag.local === 't' && run !== undefined) {
+        value += decodeText(run);
+        run = undefined;
+      }
       if (tag.local === 'si') strings.push(value);
     },
   });
@@ -53,13 +61,17 @@ function sharedStrings(xml: string | null, spreadsheet: string) {
 function decode(type: string, value: string, strings: string[], ref: string,
   report: (at: string, message: string) => null): Raw {
   if (value === '') return null;
+  if (type === 's') {
+    if (!/^\d+$/.test(value) || strings[Number(value)] === undefined) return report(ref, '共享字符串索引无效');
+    value = strings[Number(value)];
+    if (!value) return null;
+    type = 'str';
+  }
   switch (type) {
-    case 's': {
-      if (!/^\d+$/.test(value) || strings[Number(value)] === undefined) return report(ref, '共享字符串索引无效');
-      return strings[Number(value)] === '' ? null : { type: 'text', value: strings[Number(value)] };
-    }
     case 'inlineStr':
-    case 'str': return { type: 'text', value };
+    case 'str':
+      if (/[\u0000\uD800-\uDFFF]/u.test(value)) return report(ref, '文本含有无法保存的字符');
+      return { type: 'text', value };
     case 'n': return { type: 'number', value };
     case 'b': return { type: 'boolean', value };
     case 'd': return { type: 'date', value };
@@ -87,7 +99,7 @@ export async function parseHourWorkbook(filename: string, bytes: Buffer) {
     return rejectIssues(issues);
   }
   let width = 0, rowNumber = 0, column = 0, rowIssueStart = 0;
-  let inData = false, inRow = false, reading = false;
+  let inData = false, inRow = false, run: string | undefined;
   let cells: Raw[] = [];
   let cell: { ref: string; type: string; value: string } | undefined;
   scan(parts.sheet, {
@@ -121,12 +133,15 @@ export async function parseHourWorkbook(filename: string, bytes: Buffer) {
         cell = { ref: address ?? `R${rowNumber}C${column}`, type: attr(tag, 't') ?? 'n', value: '' };
       }
       if (cell && tag.local === 'f') report(cell.ref, '不接受公式');
-      if (cell && (tag.local === 'v' && parent?.local === 'c' || tag.local === 't' && ['is', 'r'].includes(parent?.local ?? ''))) reading = true;
+      if (cell && (tag.local === 'v' && parent?.local === 'c' || tag.local === 't' && ['is', 'r'].includes(parent?.local ?? ''))) run = '';
     },
-    text(value) { if (reading && cell) cell.value += value; },
+    text(value) { if (run !== undefined) run += value; },
     close(tag) {
       if (tag.uri !== spreadsheet) return;
-      if (tag.local === 'v' || tag.local === 't') reading = false;
+      if (cell && run !== undefined && (tag.local === 'v' || tag.local === 't')) {
+        cell.value += tag.local === 't' || cell.type === 'str' ? decodeText(run) : run;
+        run = undefined;
+      }
       if (tag.local === 'c' && cell) {
         const value = decode(cell.type, cell.value, strings, cell.ref, report);
         if (value) {

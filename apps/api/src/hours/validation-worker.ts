@@ -4,8 +4,7 @@ import { Database } from '../database.js';
 import { BusinessError, denied } from '../http.js';
 import { json, stable, type Tx } from '../activities/workflow.js';
 import { previewActivityHours } from './preview-context.js';
-import { readHourUpload } from './upload-input.js';
-import { digest, emptySummary, readHistory, type SourceInfo } from './batch-data.js';
+import { digest, emptySummary, type SourceInfo } from './batch-data.js';
 import { errorWorkbook } from './error-report.js';
 
 @Injectable()
@@ -61,11 +60,9 @@ export class HourValidationWorker implements OnApplicationBootstrap, OnModuleDes
       roles: account.roles.map((role) => role.role), must_change_password: false };
     let summary: object, errors: FieldError[];
     try {
-      const book = await readHourUpload(tx, actor, batch.activity_id, batch.source.name, Buffer.from(batch.source.contents));
-      const preview = await previewActivityHours(tx, actor, batch.activity_id, book, {
+      const { rows, ...summaryFields } = await previewActivityHours(tx, actor, batch.activity_id, batch.source, {
         mode: batch.mode === 'new' ? 'new' : 'correction', now: new Date(), schedule_revision: info.schedule_revision,
-      }, readHistory);
-      const { rows, ...counts } = preview;
+      });
       for (let offset = 0; offset < rows.length; offset += 250) {
         await tx.hourImportRow.createMany({ data: rows.slice(offset, offset+250).map((row) => ({
           batch_id: id, row_number: row.row_number, action: row.action,
@@ -73,7 +70,7 @@ export class HourValidationWorker implements OnApplicationBootstrap, OnModuleDes
         })) });
       }
       errors = rows.flatMap((row) => row.errors);
-      summary = { ...counts, template_structure: book.template_structure, warning_snapshot_hash: digest(stable(preview.warnings)),
+      summary = { ...summaryFields, warning_snapshot_hash: digest(stable(summaryFields.warnings)),
         ...(errors.length && { error_message: '请按错误报告修正后重新上传。' }) };
     } catch (error) {
       if (!(error instanceof BusinessError) || error.getStatus() !== 422) throw error;

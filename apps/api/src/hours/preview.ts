@@ -10,9 +10,12 @@ export interface HourHistory {
   misconduct_reported: Flag; misconduct_fact?: string; misconduct_version: number;
   reusable_facts?: readonly string[];
 }
+interface RegistrationState {
+  status: string; submitted_at: Date; changed_at?: Date | null;
+}
 export interface HourSnapshot {
   activity_id: string; activity_code: string; published_revision: number | null;
-  students: readonly { id: string; student_no: string; name: string; registered: boolean }[];
+  students: readonly { id: string; student_no: string; name: string; registration: readonly RegistrationState[] }[];
   approved_schedules: readonly { revision: number; schedule: ActivitySchedule }[];
   history: readonly HourHistory[];
 }
@@ -24,6 +27,18 @@ const text = (raw: HourInputRow['remark']) => raw?.type === 'text' ? raw.value :
 const fail = (row: PreviewRow, field: string, message: string) => {
   row.errors.push({ row: row.row_number, field, code: 'validation_error', message });
 };
+
+function registeredOnDay(history: readonly RegistrationState[], day: string) {
+  const start = Date.parse(day + 'T00:00:00+08:00');
+  const end = start + 86_400_000;
+  const effectiveTime = (state: RegistrationState) => (state.changed_at ?? state.submitted_at).getTime();
+  // 工作簿只记录日期。有效报名与该北京时间自然日须有正交集。
+  return history.some((state, index) => {
+    if (!['submitted', 'waitlisted', 'accepted'].includes(state.status)) return false;
+    const next = history[index + 1];
+    return Math.max(start, effectiveTime(state)) < Math.min(end, next ? effectiveTime(next) : Infinity);
+  });
+}
 
 function inspect({ row_number, errors = [], ...input }: HourInputRow, system: '1900' | '1904', today: string, activity: string,
   students: Map<string, HourSnapshot['students'][number]>) {
@@ -56,7 +71,10 @@ function inspect({ row_number, errors = [], ...input }: HourInputRow, system: '1
     row.remark = undefined;
   }
   const fact = normalizeFact(row.remark ?? '');
-  if (!fact && (row.misconduct_reported === 'reported' || student?.registered === false)) fail(row,'remark','违纪上报或未报名补录须说明事实');
+  if (!fact && (row.misconduct_reported === 'reported' ||
+    (student && (day ? !registeredOnDay(student.registration, day) : !student.registration.length)))) {
+    fail(row, 'remark', '违纪上报或未报名补录须说明事实');
+  }
   const key = student && day && row.activity_code === activity ? student.id + '/' + day : undefined;
   const comparison = {
     credited_hours: JSON.stringify(value ?? input.credited_hours),

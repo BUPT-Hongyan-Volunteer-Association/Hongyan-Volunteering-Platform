@@ -31,17 +31,20 @@ test('旧六列补未提供，七列缺值仍为缺值；保留稀疏原行和�
   assert.equal((await parse(workbook(data))).rows[0].misconduct_reported, null);
 });
 
-test('七列、共享字符串与内联富文本按实际内容读取', async () => {
-  const bytes = workbook(row(2, cell('A2','1','n') + cell('B2','0','s')
-    + '<x:c r="F2" t="inlineStr"><x:is><x:r><x:t>服务</x:t></x:r><x:r><x:t>说明</x:t></x:r></x:is></x:c>' + cell('G2','有')), headers, (parts) => {
-    parts['xl/sharedStrings.xml'] = strToU8('<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>合成学生</t></si></sst>');
+test('共享、内联与直接文本还原 Excel 转义，富文本按段拼接', async () => {
+  const note = '迟到_x000D_\n已补签';
+  const rich = '<x:c r="F2" t="inlineStr"><x:is><x:r><x:t>迟到_x000D_</x:t></x:r><x:r><x:t>\n已补签</x:t></x:r></x:is></x:c>';
+  const data = row(2, cell('A2', '1', 'n') + cell('B2', '_x005F_x000D_与_xZZZZ_') + rich + cell('G2', '有'))
+    + row(3, cell('F3', '0', 's')) + row(4, cell('F4', note));
+  const bytes = workbook(data, headers, (parts) => {
+    parts['xl/sharedStrings.xml'] = strToU8('<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>' + note + '</t></si></sst>');
   });
   const result = await parse(bytes);
   assert.deepEqual(await parse(asStrict(bytes)), result);
   const [record] = result.rows;
   assert.deepEqual(record.student_no, { type: 'number', value: '1' });
-  assert.equal(record.student_name.value, '合成学生');
-  assert.equal(record.remark.value, '服务说明');
+  assert.equal(record.student_name.value, '_x000D_与_xZZZZ_');
+  for (const { remark } of result.rows) assert.equal(remark.value, '迟到\r\n已补签');
   assert.equal(record.misconduct_reported.value, '有');
 });
 
@@ -78,11 +81,12 @@ test('一次报告所有可继续扫描的单元格错误，保留实际行号�
   const data = row(202, cell('H202','多余') + cell('I202','多余'))
     + row(803, '<x:c r="E803"><x:f>1+1</x:f><x:v>2</x:v></x:c>')
     + row(804, cell('E804','1.25','n') + cell('H804','多余') + '<x:c r="I804" s="1"/>')
-    + row(805, cell('A805', '合计'));
+    + row(805, cell('A805', '合计')) + row(806, cell('F806', '说明_x0000_'));
   const { rows } = await parse(workbook(data));
   assert.deepEqual(rows.map(row => row.errors.map(issue => [issue.row, issue.field, issue.message])), [
     [[202, 'H202', '未知列存在数据'], [202, 'I202', '未知列存在数据']],
     [[803, 'E803', '不接受公式']], [[804, 'H804', '未知列存在数据']], [[805, '第 805 行', '不接受合计行']],
+    [[806, 'F806', '文本含有无法保存的字符']],
   ]);
   assert.deepEqual(rows[2].credited_hours, { type: 'number', value: '1.25' });
   const legacy = await parse(workbook(row(888, cell('G888','有')), headers.slice(0,6)));

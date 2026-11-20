@@ -22,7 +22,7 @@ const existing = (overrides = {}) => ({
 const snapshot = {
   activity_id: 'a', activity_code: activity, published_revision: 1,
   approved_schedules: [{ revision: 1, schedule: schedule(day+'T08:00:00+08:00', day+'T16:00:00+08:00') }],
-  students: [{ id: studentId, student_no: '0000000001', name: '合成学生', registered: true }],
+  students: [{ id: studentId, student_no: '0000000001', name: '合成学生', registration: [{ status: 'accepted', submitted_at: new Date(day + 'T07:00:00+08:00') }] }],
   history: [],
 };
 function preview(rows, data = {}, options = {}) {
@@ -151,7 +151,7 @@ test('跨活动 24 小时边界：更正替换旧值；警告缺说明不计有�
   assert.equal(missing.projected_delta_hours,'0.0');
 });
 
-test('历史获批安排、午夜端点、分钟精度、缺报名说明', () => {
+test('历史获批安排、午夜端点、分钟精度', () => {
   const schedules = [{revision:1,schedule:schedule(day+'T23:30:00+08:00','2026-11-19T00:00:00+08:00')}];
   const data = {published_revision:2,approved_schedules:schedules};
   assert.equal(preview([input(2)],data).error_count,1);
@@ -163,7 +163,24 @@ test('历史获批安排、午夜端点、分钟精度、缺报名说明', () =>
   assert.equal(late.rows[0].warnings[0].code,'exceeds_planned_hours');
   assert.equal(late.rows[0].warnings[0].planned_hours,'0.5');
   assert.equal(late.rows[0].misconduct_requires_review,false);
-  assert.equal(preview([input(2,{remark:null})],{students:[{...snapshot.students[0],registered:false}]}).error_count,1);
+});
+
+test('补录按服务日核对历次报名，撤回重报之间须说明', () => {
+  const at = (date, hour = '00:00') => new Date('2026-11-' + date + 'T' + hour + ':00+08:00');
+  const registration = [
+    { status: 'submitted', submitted_at: at(16, '20:00'), changed_at: at(16, '20:00') },
+    { status: 'withdrawn', submitted_at: at(16, '20:00'), changed_at: at(17) },
+    { status: 'submitted', submitted_at: at(19), changed_at: at(19) },
+    { status: 'exited', submitted_at: at(19), changed_at: at(20, '12:00') },
+  ];
+  const dates = ['15', '16', '17', '18', '19', '20', '21'];
+  const rows = dates.map((d, i) => input(i + 2, { service_date: text('2026-11-'+d), remark: null }));
+  const result = preview(rows, {
+    students: [{ ...snapshot.students[0], registration }],
+    approved_schedules: [{ revision: 1, schedule: schedule(at(15).toISOString(), at(22).toISOString()) }],
+  }, { now: at(22) });
+  assert.deepEqual(result.rows.map(row => row.errors.map(error => error.field)),
+    [['remark'], [], ['remark'], ['remark'], [], [], ['remark']]);
 });
 
 test('时长精度错误仍能核对历史安排、旧值与独立的违纪上报', () => {

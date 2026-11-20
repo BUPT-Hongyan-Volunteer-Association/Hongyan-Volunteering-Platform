@@ -34,11 +34,13 @@ export async function checkHourHttp(db,{activityId,bytes,fixed,ownerId,legacyWor
   };
   const retry = (batch,key,version=batch.version) => owner.raw('/hour-imports/'+batch.id+'/retry',{method:'POST',
     headers:{'Idempotency-Key':key,'Content-Type':'application/json'},body:JSON.stringify({expected_version:version})});
-  await result(await upload(student,bytes,randomUUID()),403);
-  await result(await upload(other,bytes,randomUUID()),404);
+  // An oversized request would fail file parsing if the activity guard ran too late.
+  const oversized = Buffer.alloc(5243000);
+  await result(await upload(student,oversized,randomUUID()),403);
+  await result(await upload(other,oversized,randomUUID()),404);
   await result(await upload(owner,bytes,randomUUID(),{},{'X-CSRF-Token':'invalid'}),403);
   await result(await upload(owner,Buffer.alloc(5242881),randomUUID()),422);
-  await result(await upload(owner,Buffer.alloc(5243000),randomUUID()),422);
+  await result(await upload(owner,oversized,randomUUID()),422);
   const key = randomUUID();
   const accepted = await result(await upload(owner,bytes,key),202);
   assert.equal(accepted.status,'validating');
