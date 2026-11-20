@@ -12,7 +12,7 @@ import {
   type StudentImport,
   type StudentImportRow,
 } from '@hongyan/contracts';
-import templateUrl from '../../../../packages/contracts/templates/学生建档导入模板_v1.3.xlsx?url';
+import templateUrl from '../../../../packages/contracts/templates/学生建档导入模板_v1.4.xlsx?url';
 
 const route = useRoute(),
   router = useRouter(),
@@ -62,7 +62,10 @@ function stopPolling() {
     pollTimer = undefined;
   }
 }
-function display(row: StudentImportRow, field: 'student_no' | 'name' | 'cohort' | 'grade' | 'class_name') {
+function display(
+  row: StudentImportRow,
+  field: 'student_no' | 'name' | 'cohort' | 'grade' | 'class_name' | 'college',
+) {
   return row[field] ?? row.raw_values?.[field] ?? '—';
 }
 async function loadRows(page = rowPage.value) {
@@ -227,14 +230,14 @@ watch(
         neutral: batch.status === 'validating',
       }">{{ statusText }}</span>
     </div>
-    <a class="button" :href="templateUrl" download="学生建档导入模板_v1.3.xlsx">下载空白模板</a>
+    <a class="button" :href="templateUrl" download="学生建档导入模板_v1.4.xlsx">下载空白模板</a>
   </div>
   <form class="preview-form" @submit.prevent="upload">
     <label>名单文件
       <input type="file" accept=".xlsx" @change="choose" />
     </label>
     <p class="hint">
-      使用学生建档模板 v1.3，仅接受 .xlsx、5 MB（5,242,880 字节）、5,000 条非空数据。工作表「学生建档」，五列表头。
+      使用学生建档模板 v1.4，仅接受 .xlsx、5 MB（5,242,880 字节）、5,000 条非空数据。工作表「学生建档」，六列表头（含学院）。
     </p>
     <button class="primary" type="submit" :disabled="busy || !file">
       {{ busy ? '正在上传…' : '上传并预览' }}
@@ -284,6 +287,7 @@ watch(
             <th scope="col">级部</th>
             <th scope="col">年级</th>
             <th scope="col">班级</th>
+            <th scope="col">学院</th>
             <th scope="col">处理</th>
             <th scope="col">错误</th>
           </tr>
@@ -301,6 +305,7 @@ watch(
             <td>{{ display(row, 'cohort') }}</td>
             <td>{{ display(row, 'grade') }}</td>
             <td>{{ display(row, 'class_name') }}</td>
+            <td>{{ display(row, 'college') }}</td>
             <td>
               <span class="state-chip" :class="{ attention: row.action === 'error', neutral: row.action === 'skip_identical' }">
                 {{ actionLabels[row.action as keyof typeof actionLabels] }}

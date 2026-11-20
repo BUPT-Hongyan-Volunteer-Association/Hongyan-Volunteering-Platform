@@ -112,6 +112,7 @@ function goPage(next: number) {
             <th scope="col">级部</th>
             <th scope="col">年级</th>
             <th scope="col">班级</th>
+            <th scope="col">学院</th>
             <th scope="col">账号状态</th>
           </tr>
         </thead>
@@ -122,6 +123,7 @@ function goPage(next: number) {
             <td>{{ student.cohort || '—' }}</td>
             <td>{{ student.grade || '—' }}</td>
             <td>{{ student.class_name || '—' }}</td>
+            <td>{{ student.college || '—' }}</td>
             <td>
               <span class="state-chip" :class="{ neutral: student.status !== 'active' }">
                 {{ student.status === 'active' ? '启用' : '停用' }}

@@ -13,7 +13,7 @@ export async function checkStudentImportPages(page, admin, { fits }) {
   const profile = ['0000001201', '页面导入学生', '本科生', '2026', '0000001301'];
   const invalid = workbook([
     { number: 2, values: profile },
-    { number: 3, values: profile, extra: { F: '多余列' } },
+    { number: 3, values: profile, extra: { G: '多余列' } },
   ]);
   const fixed = workbook([{ number: 2, values: profile }]);
 
@@ -34,8 +34,8 @@ export async function checkStudentImportPages(page, admin, { fits }) {
   const errorRow = page.locator('tr[data-row="3"]');
   await errorRow.waitFor();
   assert.match(await errorRow.innerText(), /错误/);
-  assert.match(await errorRow.innerText(), /F/);
-  assert.match(await errorRow.innerText(), /多余列|未知列|五列表格之外/);
+  assert.match(await errorRow.innerText(), /G/);
+  assert.match(await errorRow.innerText(), /多余列|未知列|表格之外/);
   assert.equal(await button('确认建档').count(), 0);
   await fits(page);
 
