@@ -12,6 +12,7 @@ const search = ref('');
 const cohort = ref('');
 const rows = ref<Student[]>([]);
 const total = ref(0);
+const gradeOptions = ref<string[]>([]);
 const loading = ref(false);
 const error = ref('');
 let serial = 0;
@@ -28,6 +29,11 @@ const statusOptions = [
   { value: 'active', label: '启用' },
   { value: 'inactive', label: '停用' },
 ] as const;
+const selectedGrade = computed(() => String(route.query.grade ?? 'all'));
+const gradeChoices = computed(() => [
+  { value: 'all', label: '全部年级' },
+  ...gradeOptions.value.map((grade) => ({ value: grade, label: grade + '级' })),
+]);
 
 async function load() {
   const current = ++serial;
@@ -39,6 +45,7 @@ async function load() {
         query: {
           ...(route.query.q ? { q: String(route.query.q) } : {}),
           ...(route.query.cohort ? { cohort: String(route.query.cohort) } : {}),
+          ...(selectedGrade.value !== 'all' ? { grade: selectedGrade.value } : {}),
           ...(status.value !== 'all' ? { status: status.value } : {}),
           page: page.value,
           page_size: size,
@@ -49,6 +56,7 @@ async function load() {
     if (current !== serial) return;
     rows.value = result.items;
     total.value = result.total;
+    gradeOptions.value = result.grade_options;
   } catch (reason) {
     if (current === serial) error.value = reason instanceof Error ? reason.message : '读取学生档案失败';
   } finally {
@@ -69,9 +77,15 @@ function apply() {
     query: {
       ...(search.value.trim() ? { q: search.value.trim() } : {}),
       ...(cohort.value.trim() ? { cohort: cohort.value.trim() } : {}),
+      ...(selectedGrade.value !== 'all' ? { grade: selectedGrade.value } : {}),
       ...(status.value !== 'all' ? { status: status.value } : {}),
       page: 1,
     },
+  });
+}
+function setGrade(value: string) {
+  void router.push({
+    query: { ...route.query, ...(value === 'all' ? { grade: undefined } : { grade: value }), page: 1 },
   });
 }
 function setStatus(value: string) {
@@ -94,7 +108,10 @@ function goPage(next: number) {
   <form class="filters" @submit.prevent="apply">
     <label>学号或姓名<input v-model="search" type="search" placeholder="输入学号或姓名" /></label>
     <label>级部<input v-model="cohort" type="search" placeholder="按级部筛选" /></label>
-    <label class="status-filter">账号状态
+    <label class="filter-select">年级
+      <UiSelect :model-value="selectedGrade" label="年级" :options="gradeChoices" @update:model-value="setGrade" />
+    </label>
+    <label class="filter-select">账号状态
       <UiSelect :model-value="status" label="账号状态" :options="statusOptions" @update:model-value="setStatus" />
     </label>
     <button class="primary" type="submit">查询</button>
@@ -121,7 +138,7 @@ function goPage(next: number) {
             <th scope="row">{{ student.student_no }}</th>
             <td>{{ student.name }}</td>
             <td>{{ student.cohort || '—' }}</td>
-            <td>{{ student.grade || '—' }}</td>
+            <td>{{ student.grade ? student.grade + '级' : '—' }}</td>
             <td>{{ student.class_name || '—' }}</td>
             <td>{{ student.college || '—' }}</td>
             <td>
@@ -155,7 +172,7 @@ function goPage(next: number) {
   color: var(--muted);
   min-width: 0;
 }
-.filters .status-filter {
+.filters .filter-select {
   --select-width: 10rem;
 }
 </style>

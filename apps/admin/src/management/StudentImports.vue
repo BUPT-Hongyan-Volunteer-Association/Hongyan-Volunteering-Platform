@@ -68,7 +68,9 @@ function display(
   row: StudentImportRow,
   field: 'student_no' | 'name' | 'cohort' | 'grade' | 'class_name' | 'college',
 ) {
-  return row[field] ?? row.raw_values?.[field] ?? '—';
+  const value = row[field] ?? row.raw_values?.[field];
+  if (!value) return '—';
+  return field === 'grade' ? value + '级' : value;
 }
 async function loadRows(page = rowPage.value) {
   const current = batch.value;
