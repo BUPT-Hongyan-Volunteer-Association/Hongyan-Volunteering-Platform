@@ -7,6 +7,7 @@ import { preview } from 'vite';
 import { createApp } from '../dist/app.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { Database } from '../dist/database.js';
+import { checkHourPages } from './hour-pages-fixture.mjs';
 
 const link = (page, name) => page.getByRole('link', { name, exact: true });
 const button = (page, name) => page.getByRole('button', { name, exact: true });
@@ -196,6 +197,12 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           if (!(await link(owner, tab).isVisible()))
             await owner.getByText('更多', { exact: true }).click();
           await link(owner, tab).click();
+          if (tab === '时长批次') {
+            await visible(owner.getByText('本活动还没有上传批次。'));
+            assert.ok(await button(owner, '上传并预览').isDisabled());
+            await fits(owner);
+            continue;
+          }
           await owner.locator('.entry-list a').first().click();
           await visible(owner.locator('article dl'));
           await fits(owner);
@@ -1079,6 +1086,9 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(student.getByText('单次活动', { exact: true }));
       assert.equal(await student.getByText('每周参加报名在活动群内完成。').count(), 0);
     }
+    await t.test('负责人上传并逐行核对时长、下载报告、修正重传和原批重试', async () => {
+      await checkHourPages(owner, web, db, first.id, { pickOption, fits });
+    });
   } finally {
     try {
       await browser?.close();
