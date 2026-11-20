@@ -87,12 +87,8 @@ function inspect({ row_number, errors = [], ...input }: HourInputRow, system: '1
 function indexHistory(snapshot: HourSnapshot) {
   const existing = new Map<string, { record: HourHistory; effective: number }>();
   const daily = new Map<string, number>();
-  const seen = new Set<string>();
   for (const record of snapshot.history) {
     const key = record.student_id + '/' + record.service_date;
-    const businessKey = record.activity_id + '/' + key;
-    if (seen.has(businessKey)) throw Error('同一业务键存在多个最新历史记录');
-    seen.add(businessKey);
     const amount = record.status === 'voided' ? 0 : hourTenths({ type: 'number', value: record.hours });
     if (amount === null) throw Error('历史有效时长不符合契约');
     daily.set(key, (daily.get(key) ?? 0) + amount);

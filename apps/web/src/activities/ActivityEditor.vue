@@ -136,7 +136,7 @@ function payload(partial: boolean) {
 }
 const command = createCommand();
 async function run(action: 'save' | 'submit' | 'withdraw') {
-  if (busy.value || props.writesPaused) return;
+  if (busy.value || props.writesPaused || (action === 'save' && id.value && !dirty.value)) return;
   busy.value = true;
   fieldErrors.value = {};
   confirmation.value = undefined;
@@ -330,7 +330,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
           type="submit"
           form="activity-form"
           :class="{ primary: !detail || dirty }"
-          :disabled="!!readonly || busy || writesPaused || conflict"
+          :disabled="!!readonly || busy || writesPaused || conflict || (!!id && !dirty)"
         >
           <UiIcon name="Document" />保存草稿
         </button>

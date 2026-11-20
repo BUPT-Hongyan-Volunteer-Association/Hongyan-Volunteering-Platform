@@ -83,7 +83,7 @@ async function download(report: boolean) {
         <strong>全批预计差额：{{ signed(batch.projected_delta_hours) }} 小时</strong>
         <span>共 {{ batch.row_count }} 行 · 有效 {{ batch.valid_count }} · 跳过 {{ batch.skipped_count }} · 错误 {{ batch.error_count }}</span>
         <span>时长警告 {{ batch.warnings.length }} 条 · 违纪待核实 {{ batch.misconduct_review_required_count ?? 0 }} 行</span>
-        <small>按整个批次计算，不随筛选或翻页变化。预览不入账。</small>
+        <small>预览不计入学生时长。</small>
       </div>
       <HourRows v-if="batch.row_count" ref="rows" :batch-id="id" @denied="refresh()" />
     </template>

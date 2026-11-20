@@ -122,6 +122,13 @@ export async function checkHourPages(page, web, db, sampleId, { pickOption, fits
   assert.equal(page.url(), originalUrl);
   await page.getByRole('link', { name: '返回时长批次' }).click();
   await page.getByRole('link', { name: '修正时长表.xlsx' }).waitFor();
+  await page.route('**/activities/' + fixture.activityId + '/revisions?*', route => route.abort('failed'), { times: 1 });
+  await pickOption(page, '获批安排', '上传时的当前获批安排');
+  await button('重读安排').waitFor();
+  await upload('按当前安排.xlsx', fixture.legacyWorkbook(2));
+  await text('内容有误').waitFor();
+  await text('获批版本 2').first().waitFor();
+  await page.getByRole('link', { name: '返回时长批次' }).click();
   await pickOption(page, '获批安排', /^版本 1 ·/);
   await upload('旧六列.xlsx', fixture.legacyWorkbook(2));
   await text('校验完成').waitFor();

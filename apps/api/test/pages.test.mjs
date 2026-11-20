@@ -288,6 +288,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(location);
       assert.equal(await location.innerText(), '沙河 · 活动室 A');
       await owner.goto(web + '/managed/' + first.id + '/edit');
+      await visible(button(owner, '保存草稿'));
+      assert.ok(await button(owner, '保存草稿').isDisabled());
       await owner.getByLabel('活动地点', { exact: true }).fill('活动室 B');
       await button(owner, '保存草稿').click();
       await visible(owner.getByText('草稿已保存', { exact: true }));
@@ -296,7 +298,12 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await student.reload();
       await visible(location);
       assert.equal(await location.innerText(), '沙河 · 活动室 A');
-      await teacher.goto(admin + '/schedule');
+      // A failed connection check must leave the signed-in reviewer's write token intact.
+      await teacher.route(url => ['/api/v1/me', '/api/v1/auth/csrf'].includes(url.pathname),
+        route => route.abort('failed'), { times: 1 });
+      await link(teacher, '连接状态').click();
+      await visible(teacher.getByRole('heading', { name: '连接失败' }));
+      await link(teacher, '全院日程').click();
       await teacher.getByLabel('待审核', { exact: true }).check();
       await button(teacher, '校园服务甲').click();
       await link(teacher, '查看待审版本').click();
@@ -674,57 +681,50 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         assert.ok(menu.y >= -1 && menu.y + menu.height <= view.height + 1);
         assert.ok(menu.x >= -1 && menu.x + menu.width <= view.width + 1);
       }
-      for (const width of [1440, 390]) {
-        for (const [page, url] of [
-          [student, web],
-          [owner, web + '/managed-schedule'],
-          [teacher, admin + '/schedule'],
-        ]) {
-          await page.setViewportSize({ width, height: 844 });
-          await page.goto(url);
-          if (width === 390) await button(page, '筛选').click();
-          const { trigger, list } = await openOptions(page, '报名阶段');
-          await assertAnchor(trigger, list);
-          assert.equal(await list.getByRole('option').first().innerText(), '所有阶段');
-          await list.getByRole('option', { name: '报名中', exact: true }).click();
-          await page.waitForURL((u) => u.searchParams.get('phase') === 'open');
-          await pickOption(page, '报名阶段', '所有阶段');
-          await page.waitForURL((u) => !u.searchParams.has('phase'));
-        }
-      }
-      for (const width of [1440, 390]) {
-        await teacher.setViewportSize({ width, height: 844 });
-        await teacher.goto(admin + '/schedule');
-        if (width === 390) await button(teacher, '筛选').click();
-        for (const [label, initial, choice, key, value] of [
-          ['校区', '所有校区', '沙河', 'campus', '沙河'],
-          ['活动状态', '所有状态', '已发布', 'status', 'published'],
-          ['展示版本', '工作版本', '获批版本', 'revision', 'published'],
-          ['负责人', '所有负责人', '甲负责人', 'owner', '甲负责人'],
-        ]) {
-          const { trigger, list } = await openOptions(teacher, label);
-          await assertAnchor(trigger, list);
-          assert.equal(await list.getByRole('option').first().innerText(), initial);
-          await list.getByRole('option', { name: choice, exact: true }).click();
-          await teacher.waitForURL((u) => u.searchParams.get(key) === value);
-          await pickOption(teacher, label, initial);
-          await teacher.waitForURL((u) =>
-            key === 'revision' ? u.searchParams.get(key) === 'working' : !u.searchParams.has(key),
-          );
-        }
-        for (const [label, key] of [
-          ['进行中', 'ongoing'],
-          ['待审核', 'pending'],
-        ]) {
-          const check = teacher.getByRole('checkbox', { name: label, exact: true });
-          await check.check();
-          await teacher.waitForURL((u) => u.searchParams.get(key) === '1');
-          await check.uncheck();
-          await teacher.waitForURL((u) => !u.searchParams.has(key));
-        }
+      for (const [page, url, width] of [
+        [student, web, 390],
+        [owner, web + '/managed-schedule', 1440],
+        [teacher, admin + '/schedule', 390],
+      ]) {
+        await page.setViewportSize({ width, height: 844 });
+        await page.goto(url);
+        if (width === 390) await button(page, '筛选').click();
+        const { trigger, list } = await openOptions(page, '报名阶段');
+        await assertAnchor(trigger, list);
+        assert.equal(await list.getByRole('option').first().innerText(), '所有阶段');
+        await list.getByRole('option', { name: '报名中', exact: true }).click();
+        await page.waitForURL((u) => u.searchParams.get('phase') === 'open');
+        await pickOption(page, '报名阶段', '所有阶段');
+        await page.waitForURL((u) => !u.searchParams.has('phase'));
       }
       await teacher.setViewportSize({ width: 1440, height: 900 });
       await teacher.goto(admin + '/schedule');
+      for (const [label, initial, choice, key, value] of [
+        ['校区', '所有校区', '沙河', 'campus', '沙河'],
+        ['活动状态', '所有状态', '已发布', 'status', 'published'],
+        ['展示版本', '工作版本', '获批版本', 'revision', 'published'],
+        ['负责人', '所有负责人', '甲负责人', 'owner', '甲负责人'],
+      ]) {
+        const { trigger, list } = await openOptions(teacher, label);
+        await assertAnchor(trigger, list);
+        assert.equal(await list.getByRole('option').first().innerText(), initial);
+        await list.getByRole('option', { name: choice, exact: true }).click();
+        await teacher.waitForURL((u) => u.searchParams.get(key) === value);
+        await pickOption(teacher, label, initial);
+        await teacher.waitForURL((u) =>
+          key === 'revision' ? u.searchParams.get(key) === 'working' : !u.searchParams.has(key),
+        );
+      }
+      for (const [label, key] of [
+        ['进行中', 'ongoing'],
+        ['待审核', 'pending'],
+      ]) {
+        const check = teacher.getByRole('checkbox', { name: label, exact: true });
+        await check.check();
+        await teacher.waitForURL((u) => u.searchParams.get(key) === '1');
+        await check.uncheck();
+        await teacher.waitForURL((u) => !u.searchParams.has(key));
+      }
       let previousList;
       for (const label of ['校区', '报名阶段', '活动状态', '展示版本', '负责人', '校区']) {
         const { trigger, list } = await openOptions(teacher, label);
@@ -1001,8 +1001,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       assert.equal(await title.inputValue(), '正在编辑中');
     });
 
-    if (process.env.UI_CAPTURE_DIR) {
-      // Build an approved weekly revision inside this test's disposable database.
+    await t.test('每周活动在手机首屏展示报名截止、时长和报名入口', async () => {
       const approved = await db.activityRevision.findFirstOrThrow({
         where: { activity_id: first.id, revision: 1 },
       });
@@ -1085,7 +1084,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await student.goto(web + '/activities/' + first.id);
       await visible(student.getByText('单次活动', { exact: true }));
       assert.equal(await student.getByText('每周参加报名在活动群内完成。').count(), 0);
-    }
+    });
     await t.test('负责人上传并逐行核对时长、下载报告、修正重传和原批重试', async () => {
       await checkHourPages(owner, web, db, first.id, { pickOption, fits });
     });

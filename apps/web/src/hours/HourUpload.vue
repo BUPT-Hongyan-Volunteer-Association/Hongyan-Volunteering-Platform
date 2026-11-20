@@ -14,8 +14,13 @@ const revision = ref(props.previous?.schedule_revision ?? 0), description = ref(
 const busy = ref(false), error = ref(''), created = ref('');
 let alive = true;
 onScopeDispose(() => { alive = false; });
-const { data: revisions, error: revisionError, refresh } = useHourRead(() => props.activityId, async (signal) => {
-  const options = [{value:0,label:'上传时的当前获批安排'}];
+const currentRevision = { value: 0, label: '上传时的当前获批安排' };
+const initialOptions = [currentRevision];
+if (revision.value) initialOptions.push({ value: revision.value, label: '版本 ' + revision.value });
+const historyRequested = ref(false);
+const { data: revisions, error: revisionError, refresh } = useHourRead(() => historyRequested.value && props.activityId, async (signal) => {
+  if (!historyRequested.value) return initialOptions;
+  const options = [currentRevision];
   for (let page = 1; ; page++) {
     const { data } = await listActivityRevisions({path:{id:props.activityId},query:{page,page_size:100},signal,throwOnError:true});
     for (const item of data.data.items) if (item.revision_state === 'approved') {
@@ -66,12 +71,12 @@ async function upload() {
       <label>工作簿<input type="file" accept=".xlsx" @change="select" required /></label>
       <div class="hour-controls">
         <label>导入模式<UiSelect v-model="mode" label="导入模式" :disabled="unavailable" :options="[{value:'new',label:'新增时长'},{value:'correction',label:'更正时长'}]" /></label>
-        <label v-if="mode === 'new'">获批安排<UiSelect v-model="revision" label="获批安排" :disabled="unavailable || !revisions" :options="revisions ?? []" /></label>
+        <label v-if="mode === 'new'">获批安排<UiSelect v-model="revision" label="获批安排" :disabled="unavailable" :options="revisions ?? initialOptions" @open="historyRequested = true" /></label>
         <span v-else>更正绑定原记录的获批安排。</span>
       </div>
       <p v-if="mode === 'new' && revisionError" role="alert">{{ revisionError }} <button type="button" @click="refresh()">重读安排</button></p>
       <label>批次说明（选填）<input v-model="description" maxlength="2000" /></label>
-      <button class="primary" :disabled="unavailable || !file || (mode === 'new' && !revisions)">{{ busy ? '正在上传…' : '上传并预览' }}</button>
+      <button class="primary" :disabled="unavailable || !file">{{ busy ? '正在上传…' : '上传并预览' }}</button>
     </fieldset>
     <p v-if="error" role="alert">{{ error }}</p>
     <RouterLink v-if="created" :to="{name:'hour-batch',params:{id:activityId,item:created},query:route.query}">已创建，查看批次</RouterLink>

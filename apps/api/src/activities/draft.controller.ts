@@ -130,6 +130,7 @@ export class DraftController {
         row.reviews.some((r) => r.status === 'pending')
       )
         wrongState();
+      if (!Object.keys(patch).length) return project(row, 'working', new Date());
       const old = workingRevision(row)!;
       const merged = { ...(old.content as unknown as ActivityInput), ...patch };
       if (patch.expected_hours === null && patch.expected_hours_basis === null) {

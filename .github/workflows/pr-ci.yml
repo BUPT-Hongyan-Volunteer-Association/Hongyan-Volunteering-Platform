@@ -42,6 +42,5 @@ jobs:
       - run: pnpm --filter @hongyan/api exec prisma validate
       - run: pnpm db:generate
       - run: pnpm typecheck
-      - run: pnpm --filter @hongyan/api test:hour-workbook
-      - run: pnpm --filter @hongyan/api test:hour-preview
-      - run: pnpm --filter @hongyan/api exec node --test test/activity-flow.test.mjs
+      - run: pnpm --filter @hongyan/api build
+      - run: pnpm --filter @hongyan/api exec node --test test/hour-workbook.test.mjs test/hour-preview.test.mjs test/activity-flow.test.mjs

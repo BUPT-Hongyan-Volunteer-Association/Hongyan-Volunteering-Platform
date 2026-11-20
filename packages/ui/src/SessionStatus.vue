@@ -1,26 +1,22 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { ElButton } from 'element-plus';
-import { ApiError, openSession } from '@hongyan/contracts';
+import { ApiError, getProfile } from '@hongyan/contracts';
 
 const status = ref<'loading' | 'ready' | 'failed'>('loading');
 const detail = ref('');
 const requestId = ref('');
-const clock = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false,
-});
 
 async function connect() {
   status.value = 'loading';
   detail.value = '';
   requestId.value = '';
   try {
-    const { expiresAt } = await openSession();
-    detail.value = `匿名会话有效至北京时间 ${clock.format(new Date(expiresAt))}。`;
+    await getProfile({ throwOnError: true, cache: 'no-store' });
     status.value = 'ready';
   } catch (error) {
     status.value = 'failed';
-    detail.value = error instanceof Error ? error.message : '未能建立会话，请重试。';
+    detail.value = error instanceof Error ? error.message : '连接检查失败，请重试。';
     if (error instanceof ApiError) requestId.value = error.body?.request_id ?? '';
   }
 }

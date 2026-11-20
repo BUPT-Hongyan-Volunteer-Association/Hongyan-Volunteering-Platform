@@ -11,7 +11,7 @@ const props = defineProps<{
   modelValue?: T;
   disabled?: boolean;
 }>();
-const emit = defineEmits<{ 'update:modelValue': [value: T] }>();
+const emit = defineEmits<{ 'update:modelValue': [value: T]; open: [] }>();
 const local = shallowRef<T>();
 const choices = computed(() =>
   props.options.map((choice) =>
@@ -36,6 +36,7 @@ function select(value: T) {
     :disabled="disabled"
     :model-value="selected"
     @update:model-value="select"
+    @visible-change="(visible: boolean) => visible && emit('open')"
     :options="choices"
     :empty-values="[null, undefined]"
     placement="bottom-start"
