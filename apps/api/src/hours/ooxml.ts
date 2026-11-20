@@ -120,8 +120,7 @@ export async function readHourParts(bytes: Buffer): Promise<{
     for (const link of (await relationships(pkg, sheet.target)).values()) {
       if (link.type !== documentRels + '/table') continue;
       scan(await pkg.xml(link.target), { open(tag) {
-        if (tag.uri === spreadsheet && tag.local === 'table' && (Number(attr(tag, 'totalsRowCount')) > 0
-          || ['true', '1'].includes(attr(tag, 'totalsRowShown') ?? ''))) {
+        if (tag.uri === spreadsheet && tag.local === 'table' && Number(attr(tag, 'totalsRowCount')) > 0) {
           reject('时长录入不接受表格合计行：' + (attr(tag, 'ref') ?? ''));
         }
       } });

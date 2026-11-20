@@ -62,9 +62,13 @@ test('错误表头和带合计行的表结构拒绝整表', async () => {
   for (const names of [[...headers.slice(0, 6), '认定依据'], headers.toReversed(), headers.slice(0, 5), [...headers, '多余列']]) {
     await assert.rejects(parse(workbook('', names)), /表头|未知列/);
   }
-  await assert.rejects(parse(workbook('', headers, (parts) => {
-    parts['xl/tables/table1.xml'] = strToU8(strFromU8(parts['xl/tables/table1.xml']).replace('totalsRowCount="0"', 'totalsRowCount="1"'));
-  })), /合计/);
+  const afterShowingTotals = count => workbook(row(2, cell('E2', '4', 'n')), headers, parts => {
+    const table = 'xl/tables/table1.xml';
+    parts[table] = strToU8(strFromU8(parts[table]).replace('totalsRowShown="0"', 'totalsRowShown="1"')
+      .replace('totalsRowCount="0"', 'totalsRowCount="' + count + '"'));
+  });
+  await assert.rejects(parse(afterShowingTotals(1)), /合计/);
+  assert.equal((await parse(afterShowingTotals(0))).rows[0].credited_hours.value, '4');
 });
 
 test('一次报告所有可继续扫描的单元格错误，保留实际行号和列', async () => {
