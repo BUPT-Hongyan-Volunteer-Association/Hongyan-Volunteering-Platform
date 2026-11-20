@@ -763,6 +763,37 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       );
     });
 
+    await t.test('学院列缺省的五列名单仍可导入', async () => {
+      const legacy = buildWorkbook({
+        sheets: [
+          rosterSheet(
+            [
+              {
+                number: 2,
+                values: ['0000001401', '缺省学院学生', '本科生', '2026', '0000001501'],
+              },
+            ],
+            { includeCollege: false },
+          ),
+        ],
+        prefix: true,
+        sharedStrings: true,
+      });
+      const batch = await uploadImport(teacher, legacy);
+      assert.equal(batch.status, 'ready');
+      assert.equal(batch.created_count, 1);
+      const preview = (await teacher.request('/admin/student-imports/' + batch.id + '/rows')).data;
+      assert.equal(preview.items[0].college, undefined);
+      const committed = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        commitBody(batch),
+      );
+      assert.equal(committed.status, 200);
+      const stored = await db.student.findUniqueOrThrow({ where: { student_no: '0000001401' } });
+      assert.equal(stored.college, null);
+    });
+
     await t.test('5,000 条非空数据行可校验，表格范围外与空行按规则处理', async () => {
       const rows = Array.from({ length: 5_000 }, (_, index) => ({
         number: index + 2,
