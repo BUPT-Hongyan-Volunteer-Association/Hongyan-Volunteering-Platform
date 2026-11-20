@@ -126,8 +126,13 @@ function xml(buffer: Buffer) {
   return buffer.toString('utf8').replace(/^\uFEFF/, '');
 }
 
+const attributePatterns = new Map<string, RegExp>();
 function attribute(attributes: string, name: string) {
-  const pattern = new RegExp('(?:^|\\s)' + name.replace(':', '\\:') + '="([^"]*)"');
+  let pattern = attributePatterns.get(name);
+  if (!pattern) {
+    pattern = new RegExp('(?:^|\\s)' + name.replace(':', '\\:') + '="([^"]*)"');
+    attributePatterns.set(name, pattern);
+  }
   return pattern.exec(attributes)?.[1];
 }
 
@@ -144,10 +149,16 @@ function decodeEntities(value: string) {
         return '"';
       case 'apos':
         return "'";
-      default:
-        return String.fromCodePoint(
-          entity.startsWith('#x') ? Number.parseInt(entity.slice(2), 16) : Number(entity.slice(1)),
-        );
+      default: {
+        const codePoint = entity.startsWith('#x')
+          ? Number.parseInt(entity.slice(2), 16)
+          : Number(entity.slice(1));
+        try {
+          return String.fromCodePoint(codePoint);
+        } catch {
+          throw new XlsxContentError('工作簿文本包含无效字符编码');
+        }
+      }
     }
   });
 }
@@ -283,6 +294,7 @@ function sharedStrings(files: ReturnType<typeof archive>) {
   try {
     source = xml(files.get('xl/sharedStrings.xml'));
   } catch {
+    // 共享文本是可选部件；没有它时单元格应使用内联文本或公式结果。
     return [];
   }
   const values: string[] = [];
@@ -303,12 +315,7 @@ interface WorkbookSheet {
 
 function workbookSheets(files: ReturnType<typeof archive>): WorkbookSheet[] {
   const book = xml(files.get('xl/workbook.xml'));
-  let rels = '';
-  try {
-    rels = xml(files.get('xl/_rels/workbook.xml.rels'));
-  } catch {
-    rels = '';
-  }
+  const rels = xml(files.get('xl/_rels/workbook.xml.rels'));
   const targets = new Map<string, string>();
   let cursor = 0;
   let relationship = nextElement(rels, cursor, 'Relationship');
@@ -324,49 +331,35 @@ function workbookSheets(files: ReturnType<typeof archive>): WorkbookSheet[] {
   let sheet = nextElement(book, cursor, 'sheet');
   while (sheet) {
     const name = attribute(sheet.attributes, 'name');
-    const id = attribute(sheet.attributes, 'r:id') ?? attribute(sheet.attributes, 'id');
-    if (name) {
-      const target = id ? targets.get(id) : undefined;
-      sheets.push({ name, target: resolveTarget(target, sheets.length) });
-    }
+    const relation = attribute(sheet.attributes, 'r:id');
+    const target = relation ? targets.get(relation) : undefined;
+    if (!name || !target) throw new XlsxContentError('工作簿工作表缺少名称或关系目标');
+    sheets.push({ name, target: resolveTarget(target) });
     cursor = sheet.end;
     sheet = nextElement(book, cursor, 'sheet');
   }
   return sheets;
 }
 
-function resolveTarget(target: string | undefined, index: number) {
-  if (!target) return 'xl/worksheets/sheet' + (index + 1) + '.xml';
+function resolveTarget(target: string) {
   const normalized = target.replaceAll('\\', '/').replace(/^\/+/, '');
-  if (normalized.startsWith('xl/')) return normalized;
-  return 'xl/' + normalized;
+  return normalized.startsWith('xl/') ? normalized : 'xl/' + normalized;
 }
 
-function cellFrom(
-  body: string,
-  attributes: string,
-  rowNumber: number,
-  index: number,
-  shared: string[],
-): SheetCell | null {
-  const ref = attribute(attributes, 'r') ?? '';
-  const column = columnIndex(ref.match(/^[A-Z]+/)?.[0] ?? '') ?? index;
+function cellFrom(body: string, attributes: string, shared: string[]): SheetCell {
+  const ref = attribute(attributes, 'r');
+  if (!ref) malformed();
+  const column = columnIndex(ref.match(/^[A-Z]+/)?.[0] ?? '');
+  if (column === undefined) malformed();
   const type = attribute(attributes, 't');
   const formula = nextElement(body, 0, 'f');
-  if (formula)
-    return {
-      column,
-      ref: ref || columnName(column) + rowNumber,
-      type: 'formula',
-      text: '=' + decodeEntities(formula.body),
-    };
+  if (formula) return { column, ref, type: 'formula', text: '=' + decodeEntities(formula.body) };
   const inline = nextElement(body, 0, 'is');
-  if (inline)
-    return { column, ref: ref || columnName(column) + rowNumber, type: 'text', text: texts(inline.body) };
+  if (inline) return { column, ref, type: 'text', text: texts(inline.body) };
   const value = nextElement(body, 0, 'v');
-  if (!value) return null;
+  if (!value) return { column, ref, type: 'text', text: '' };
   const raw = decodeEntities(value.body);
-  const cell: SheetCell = { column, ref: ref || columnName(column) + rowNumber, type: 'text', text: raw };
+  const cell: SheetCell = { column, ref, type: 'text', text: raw };
   switch (type) {
     case 's': {
       const entry = shared[Number(raw)];
@@ -375,10 +368,8 @@ function cellFrom(
       return cell;
     }
     case 'inlineStr':
-      cell.text = raw;
       return cell;
     case 'str':
-      cell.text = raw;
       return cell;
     case 'b':
       cell.type = 'boolean';
@@ -386,15 +377,12 @@ function cellFrom(
       return cell;
     case 'e':
       cell.type = 'error';
-      cell.text = raw;
       return cell;
     case 'd':
       cell.type = 'date';
-      cell.text = raw;
       return cell;
     default:
       cell.type = 'number';
-      cell.text = raw;
       return cell;
   }
 }
@@ -403,17 +391,6 @@ function columnIndex(letters: string) {
   let index = 0;
   for (const letter of letters) index = index * 26 + (letter.charCodeAt(0) - 64);
   return index ? index - 1 : undefined;
-}
-
-function columnName(index: number) {
-  let name = '';
-  let value = index + 1;
-  while (value > 0) {
-    const remainder = (value - 1) % 26;
-    name = String.fromCharCode(65 + remainder) + name;
-    value = Math.floor((value - 1) / 26);
-  }
-  return name;
 }
 
 /** 读取指定名称的工作表；文件结构不合法时抛出 XlsxContentError。 */
@@ -426,21 +403,17 @@ export function readXlsxSheet(buffer: Buffer, name: string): Sheet {
   const shared = sharedStrings(files);
   const rows: SheetRow[] = [];
   let truncated = false;
-  let previousNumber = 0;
   let cursor = 0;
   let row = nextElement(source, cursor, 'row');
   while (row) {
-    const parsedNumber = Number(attribute(row.attributes, 'r') ?? previousNumber + 1);
-    const number =
-      Number.isSafeInteger(parsedNumber) && parsedNumber > 0 ? parsedNumber : previousNumber + 1;
+    const number = Number(attribute(row.attributes, 'r'));
+    if (!Number.isSafeInteger(number) || number < 1) malformed();
     const cells: SheetCell[] = [];
-    let position = 0;
     let cellCursor = 0;
     let cell = nextElement(row.body, cellCursor, 'c');
     while (cell) {
-      const parsed = cellFrom(cell.body, cell.attributes, number, position, shared);
-      position = parsed ? parsed.column + 1 : position + 1;
-      if (parsed && parsed.text !== '') cells.push(parsed);
+      const parsed = cellFrom(cell.body, cell.attributes, shared);
+      if (parsed.text !== '') cells.push(parsed);
       cellCursor = cell.end;
       cell = nextElement(row.body, cellCursor, 'c');
     }
@@ -451,7 +424,6 @@ export function readXlsxSheet(buffer: Buffer, name: string): Sheet {
         break;
       }
     }
-    previousNumber = number;
     cursor = row.end;
     row = nextElement(source, cursor, 'row');
   }

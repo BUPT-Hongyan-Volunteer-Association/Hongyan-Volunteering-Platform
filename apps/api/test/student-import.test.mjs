@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { createApp } from '../dist/app.js';
 import { Database } from '../dist/database.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
-import { buildWorkbook, importHeaders, rosterSheet } from './xlsx-fixture.mjs';
+import { buildWorkbook, rosterSheet } from './xlsx-fixture.mjs';
 
 const template = readFileSync(
   new URL('../../../packages/contracts/templates/学生建档导入模板_v1.3.xlsx', import.meta.url),

@@ -261,7 +261,7 @@ export function rosterSheet(rows, options = {}) {
               value === undefined || value === null ? [] : [[String.fromCharCode(65 + index), value]],
             ),
           ),
-          ...(row.extra ?? {}),
+          ...row.extra,
         },
       })),
     ],

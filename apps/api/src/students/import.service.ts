@@ -3,8 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma, StudentImportBatch } from '../generated/prisma/client.js';
 import { hashPassword } from '../auth/password.js';
 import type { SessionRequest } from '../auth/session.guard.js';
-import { pagination } from '../activities/read.js';
-import { Database } from '../database.js';
+import { pagination } from '../activities/read.js';import { Database } from '../database.js';
 import { BusinessError, invalid, invisible } from '../http.js';
 import { command } from './command.js';
 import {
@@ -12,10 +11,12 @@ import {
   evaluateRows,
   maxImportBytes,
   parseImportWorkbook,
+  profileMatches,
   type EvaluatedRow,
   type ExistingStudent,
   type FieldIssue,
 } from './import.js';
+import { checkVersion } from '../activities/workflow.js';
 
 export interface UploadedStudentFile {
   buffer: Buffer;
@@ -117,22 +118,6 @@ function rowView(row: {
   };
 }
 
-function sameProfile(
-  row: { name: string | null; cohort: string | null; grade: string | null; class_name: string | null },
-  account: {
-    display_name: string;
-    student: { cohort: string | null; grade: string | null; class_name: string | null } | null;
-  },
-) {
-  if (!account.student) return false;
-  return (
-    row.name === account.display_name &&
-    (row.cohort ?? '') === (account.student.cohort ?? '') &&
-    (row.grade ?? '') === (account.student.grade ?? '') &&
-    (row.class_name ?? '') === (account.student.class_name ?? '')
-  );
-}
-
 @Injectable()
 export class StudentImportService {
   constructor(private readonly db: Database) {}
@@ -182,7 +167,7 @@ export class StudentImportService {
     if (file.buffer[0] !== 0x50 || file.buffer[1] !== 0x4b)
       invalid('file', '文件不是有效的 .xlsx 工作簿');
     const source_hash = sha256(file.buffer);
-    const source_name = (file.originalname ?? '名单.xlsx').slice(0, 255);
+    const source_name = file.originalname ?? '名单.xlsx';
     let batchId = '';
     const response = await command(
       this.db,
@@ -354,7 +339,15 @@ export class StudentImportService {
           include: { student: true },
         });
         if (account) {
-          if (sameProfile(row, account)) {
+          if (
+            account.student &&
+            profileMatches(row, {
+              name: account.display_name,
+              cohort: account.student.cohort ?? '',
+              grade: account.student.grade ?? '',
+              class_name: account.student.class_name ?? '',
+            })
+          ) {
             skipped += 1;
             continue;
           }
@@ -484,9 +477,4 @@ export class StudentImportService {
       { isolationLevel: 'RepeatableRead' },
     );
   }
-}
-
-function checkVersion(actual: number, expected: number) {
-  if (actual !== expected)
-    throw new BusinessError(409, 'version_conflict', '批次已更新，请刷新后复核');
 }

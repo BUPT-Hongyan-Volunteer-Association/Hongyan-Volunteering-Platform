@@ -34,6 +34,26 @@ export interface EvaluatedRow {
   resulting_account_status?: 'active' | 'inactive';
 }
 
+export interface ProfileValues {
+  name?: string | null;
+  cohort?: string | null;
+  grade?: string | null;
+  class_name?: string | null;
+}
+
+/** 名单资料与已有档案是否完全一致；用于预览跳过判定与确认时复核。 */
+export function profileMatches(
+  values: ProfileValues,
+  existing: { name: string; cohort: string; grade: string; class_name: string },
+) {
+  return (
+    (values.name ?? '') === existing.name &&
+    (values.cohort ?? '') === existing.cohort &&
+    (values.grade ?? '') === existing.grade &&
+    (values.class_name ?? '') === existing.class_name
+  );
+}
+
 export interface ExistingStudent {
   student_no: string;
   /** 是否已有学生档案；仅有同名账号时不能当作可跳过的已有档案。 */
@@ -187,11 +207,8 @@ export function parseImportWorkbook(buffer: Buffer): ParsedImport {
   try {
     ({ rows, truncated } = readXlsxSheet(buffer, importSheetName));
   } catch (error) {
-    return {
-      file_error: error instanceof XlsxContentError ? error.message : '工作簿无法读取',
-      rows: [],
-      row_count: 0,
-    };
+    if (!(error instanceof XlsxContentError)) throw error;
+    return { file_error: error.message, rows: [], row_count: 0 };
   }
   if (truncated)
     return { file_error: '数据行超过 5,000 条上限，请拆分后重新上传', rows: [], row_count: 0 };
@@ -278,12 +295,7 @@ export function evaluateRows(rows: ParsedRow[], existing: Map<string, ExistingSt
     let status: 'active' | 'inactive' = 'active';
     const match = existing.get(student_no);
     if (match) {
-      const same =
-        match.has_record &&
-        match.name === first.values.name &&
-        match.cohort === (first.values.cohort ?? '') &&
-        match.grade === (first.values.grade ?? '') &&
-        match.class_name === (first.values.class_name ?? '');
+      const same = match.has_record && profileMatches(first.values, match);
       if (same) {
         action = 'skip_identical';
         status = match.status;
