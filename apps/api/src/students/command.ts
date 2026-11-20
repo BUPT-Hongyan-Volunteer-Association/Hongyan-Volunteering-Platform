@@ -8,11 +8,6 @@ import { BusinessError, denied, envelope, expired, invalid } from '../http.js';
 
 export type Tx = Prisma.TransactionClient;
 
-/** 学生建档接口仅向老师审核员与技术服务管理员开放。 */
-export function requireStaff(req: SessionRequest) {
-  if (!staff(req.actor)) denied();
-}
-
 /**
  * 写命令的统一入口：事务内重新核验会话与角色，幂等键相同且内容一致的请求复用首次结果，
  * 并在同一事务内落库与写入命令回执。

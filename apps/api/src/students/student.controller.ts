@@ -9,17 +9,19 @@ import {
   Query,
   Req,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { validate } from '../activities/validation.js';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { envelope } from '../http.js';
-import { requireStaff } from './command.js';
 import { maxImportBytes } from './import.js';
 import { StudentImportService, type UploadedStudentFile } from './import.service.js';
+import { StaffGuard } from './staff.guard.js';
 
 @Controller()
+@UseGuards(StaffGuard)
 export class StudentController {
   constructor(private readonly imports: StudentImportService) {}
 
@@ -29,23 +31,19 @@ export class StudentController {
     FileInterceptor('file', { limits: { fileSize: maxImportBytes + 1024 * 1024, fields: 4 } }),
   )
   upload(@Req() req: SessionRequest, @UploadedFile() file: UploadedStudentFile | undefined) {
-    requireStaff(req);
     return this.imports.create(req, file);
   }
 
   @Get('admin/student-imports/:id')
-  async get(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string) {
-    requireStaff(req);
+  async get(@Param('id', ParseUUIDPipe) id: string) {
     return envelope(await this.imports.get(id));
   }
 
   @Get('admin/student-imports/:id/rows')
   async rows(
-    @Req() req: SessionRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Query() query: Record<string, string>,
   ) {
-    requireStaff(req);
     return envelope(await this.imports.rows(id, query));
   }
 
@@ -56,7 +54,6 @@ export class StudentController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: unknown,
   ) {
-    requireStaff(req);
     const input = validate<{ expected_version: number; source_hash: string }>(
       'hour_batch_submit',
       body,
@@ -71,14 +68,12 @@ export class StudentController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: unknown,
   ) {
-    requireStaff(req);
     const input = validate<{ expected_version: number }>('version_action', body);
     return this.imports.retry(req, id, input);
   }
 
   @Get('admin/students')
-  async students(@Req() req: SessionRequest, @Query() query: Record<string, string>) {
-    requireStaff(req);
+  async students(@Query() query: Record<string, string>) {
     return envelope(await this.imports.students(query));
   }
 }

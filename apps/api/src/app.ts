@@ -28,6 +28,7 @@ import { HourBatchesController, HourUploadScope } from './hours/batches.controll
 import { HourValidationWorker } from './hours/validation-worker.js';
 import { StudentController } from './students/student.controller.js';
 import { StudentImportService } from './students/import.service.js';
+import { StaffGuard } from './students/staff.guard.js';
 
 @Catch()
 class HttpErrorFilter implements ExceptionFilter {
@@ -87,6 +88,7 @@ class HttpErrorFilter implements ExceptionFilter {
     Workflow,
     SessionService,
     SessionGuard,
+    StaffGuard,
     HourUploadScope,
     HourValidationWorker,
     StudentImportService,

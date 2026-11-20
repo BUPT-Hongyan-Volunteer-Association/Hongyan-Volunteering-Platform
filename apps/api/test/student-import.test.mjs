@@ -58,8 +58,22 @@ function browser(base) {
     );
     return request(path, { method: 'POST', key, form });
   }
+  async function raw(path, { method = 'GET', body, form, key, csrfToken, omitCsrf = false } = {}) {
+    const headers = { Cookie: cookie };
+    if (!omitCsrf) headers['X-CSRF-Token'] = csrfToken ?? csrf;
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (key) headers['Idempotency-Key'] = key;
+    const response = await fetch(base + path, {
+      method,
+      headers,
+      body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
+    });
+    const fresh = response.headers.get('set-cookie');
+    if (fresh) cookie = fresh.split(';')[0];
+    return { status: response.status, ...(await response.json()) };
+  }
   const write = (method, path, body, key = randomUUID()) => request(path, { method, body, key });
-  return { request, signIn, upload, write };
+  return { request, signIn, upload, write, raw };
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -92,7 +106,11 @@ const commitBody = (batch) => ({
 
 test('学生名单导入校验、预览、确认与首次登录在真实 PostgreSQL 上保持一致', async (t) => {
   const staffPassword = randomUUID();
-  await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: staffPassword });
+  const adminPassword = randomUUID();
+  await prepareTestDatabase(t, {
+    DEMO_STAFF_PASSWORD: staffPassword,
+    DEMO_ADMIN_PASSWORD: adminPassword,
+  });
   let app;
   try {
     app = await createApp();
@@ -676,6 +694,173 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       assert.equal(batch.created_count, 5_000);
       assert.equal(batch.error_count, 0);
     });
+    await t.test('鉴权与角色边界：仅有效教职工可读写，缓存回执也重新授权', async () => {
+      const multipart = (bytes) => {
+        const form = new FormData();
+        form.append(
+          'file',
+          new Blob([bytes], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          }),
+          '名单.xlsx',
+        );
+        return form;
+      };
+      const batch = await uploadImport(
+        teacher,
+        workbook([{ number: 2, values: ['0000000701', '鉴权批次学生', '', '', ''] }]),
+      );
+
+      // 匿名访问
+      const anonymous = browser(base);
+      for (const [url, init] of [
+        ['/admin/students'],
+        ['/admin/student-imports/' + batch.id],
+        ['/admin/student-imports/' + batch.id + '/rows'],
+      ])
+        assert.equal((await anonymous.request(url, init)).status, 401);
+      assert.equal((await anonymous.upload('/admin/student-imports', template)).status, 401);
+      assert.equal(
+        (
+          await anonymous.write('POST', '/admin/student-imports/' + batch.id + '/commit', {
+            expected_version: 1,
+            source_hash: batch.source_hash,
+          })
+        ).status,
+        401,
+      );
+
+      // 首次改密未完成：会话守卫在文件解析前拦截
+      const pendingNo = '0000000702';
+      const pending = await uploadImport(
+        teacher,
+        workbook([{ number: 2, values: [pendingNo, '待改密学生', '', '', ''] }]),
+      );
+      assert.equal(
+        (
+          await teacher.write(
+            'POST',
+            '/admin/student-imports/' + pending.id + '/commit',
+            commitBody(pending),
+          )
+        ).status,
+        200,
+      );
+      const pendingStudent = browser(base);
+      const pendingInitial = pendingNo.slice(-6);
+      await pendingStudent.signIn(pendingNo, pendingInitial);
+      const gated = await pendingStudent.request('/admin/students');
+      assert.equal(gated.status, 403);
+      assert.equal(gated.code, 'password_change_required');
+      const gatedUpload = await pendingStudent.upload('/admin/student-imports', template);
+      assert.equal(gatedUpload.status, 403);
+      assert.equal(gatedUpload.code, 'password_change_required');
+      await pendingStudent.request('/auth/change-password', {
+        method: 'POST',
+        body: { current_password: pendingInitial, new_password: 'PendingPass123' },
+      });
+      await pendingStudent.request('/auth/csrf');
+      const studentDenied = await pendingStudent.request('/admin/students');
+      assert.equal(studentDenied.status, 403);
+      assert.equal(studentDenied.code, 'forbidden');
+
+      // 普通负责人不是教职工
+      const organizer = browser(base);
+      await organizer.signIn('0000000002', '000002', 'OrganizerPass123');
+      assert.equal((await organizer.request('/admin/students')).status, 403);
+      assert.equal((await organizer.upload('/admin/student-imports', template)).status, 403);
+
+      // CSRF：缺令牌或伪造令牌均拒绝；GET 不要求 CSRF
+      const body = { expected_version: batch.version, source_hash: batch.source_hash };
+      const missing = await teacher.raw('/admin/student-imports/' + batch.id + '/commit', {
+        method: 'POST',
+        body,
+        key: randomUUID(),
+        omitCsrf: true,
+      });
+      assert.equal(missing.status, 403);
+      assert.equal(missing.code, 'forbidden');
+      const forged = await teacher.raw('/admin/student-imports/' + batch.id + '/commit', {
+        method: 'POST',
+        body,
+        key: randomUUID(),
+        csrfToken: 'forged-token',
+      });
+      assert.equal(forged.status, 403);
+      assert.equal(
+        (
+          await teacher.raw('/admin/student-imports', {
+            method: 'POST',
+            form: multipart(template),
+            key: randomUUID(),
+            omitCsrf: true,
+          })
+        ).status,
+        403,
+      );
+      assert.equal((await teacher.request('/admin/students')).status, 200);
+
+      // 角色过期：读接口拒绝；同一幂等键的已成功回执也必须重新授权
+      const replayBatch = await uploadImport(
+        teacher,
+        workbook([
+          { number: 2, values: ['0000000703', '回放学生甲', '', '', ''] },
+          { number: 3, values: ['0000000704', '回放学生乙', '', '', ''] },
+        ]),
+      );
+      const commitKey = randomUUID();
+      const committed = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + replayBatch.id + '/commit',
+        commitBody(replayBatch),
+        commitKey,
+      );
+      assert.equal(committed.status, 200);
+      const teacherAccount = await db.account.findUniqueOrThrow({
+        where: { username: 'demo.teacher' },
+      });
+      const grant = {
+        account_id_role: { account_id: teacherAccount.id, role: 'reviewer' },
+      };
+      await db.roleGrant.update({
+        where: grant,
+        data: { expires_at: new Date(Date.now() - 1_000) },
+      });
+      try {
+        assert.equal((await teacher.request('/admin/students')).status, 403);
+        assert.equal((await teacher.upload('/admin/student-imports', template)).status, 403);
+        const replay = await teacher.write(
+          'POST',
+          '/admin/student-imports/' + replayBatch.id + '/commit',
+          commitBody(replayBatch),
+          commitKey,
+        );
+        assert.equal(replay.status, 403);
+        assert.equal(replay.code, 'forbidden');
+      } finally {
+        await db.roleGrant.update({ where: grant, data: { expires_at: null } });
+      }
+      const replay = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + replayBatch.id + '/commit',
+        commitBody(replayBatch),
+        commitKey,
+      );
+      assert.deepEqual(replay, committed);
+
+      // 技术管理员同样获准
+      const tech = browser(base);
+      await tech.signIn('demo.admin', adminPassword);
+      assert.equal((await tech.request('/admin/students')).status, 200);
+      assert.equal((await tech.request('/admin/student-imports/' + replayBatch.id)).status, 200);
+
+      // 退出后会话立即失效
+      const leaving = browser(base);
+      await leaving.signIn('0000000001', 'student-new-pass1');
+      assert.equal((await leaving.request('/auth/logout', { method: 'POST' })).status, 200);
+      assert.equal((await leaving.request('/admin/students')).status, 401);
+    });
+
   } finally {
     await app?.close();
   }
