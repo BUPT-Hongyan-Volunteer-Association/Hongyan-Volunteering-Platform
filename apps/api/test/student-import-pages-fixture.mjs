@@ -61,6 +61,7 @@ export async function checkStudentImportPages(page, admin, { fits }) {
   await studentRow.waitFor();
   assert.match(await studentRow.innerText(), /页面导入学生/);
   assert.match(await studentRow.innerText(), /本科生/);
+  assert.match(await studentRow.innerText(), /2026级/);
   assert.match(await studentRow.innerText(), /启用/);
   await fits(page);
 

@@ -471,10 +471,14 @@ export class StudentImportService implements OnApplicationBootstrap {
     const status = query.status;
     if (status !== undefined && status !== 'active' && status !== 'inactive')
       invalid('status', '账号状态筛选值无效');
+    if (query.grade !== undefined && !/^\d{4}$/.test(query.grade.trim()))
+      invalid('grade', '年级筛选值无效');
     const q = query.q?.trim();
     const cohort = query.cohort?.trim();
+    const grade = query.grade?.trim();
     const where: Prisma.StudentWhereInput = {
       ...(cohort && { cohort }),
+      ...(grade && { grade }),
       ...(status && { account: { active: status === 'active' } }),
       ...(q && {
         OR: [{ student_no: { contains: q } }, { account: { display_name: { contains: q } } }],
@@ -483,6 +487,15 @@ export class StudentImportService implements OnApplicationBootstrap {
     return this.db.$transaction(
       async (tx) => {
         const total = await tx.student.count({ where });
+        const gradeRows = await tx.student.findMany({
+          where: { grade: { not: null } },
+          select: { grade: true },
+          distinct: ['grade'],
+          orderBy: { grade: 'desc' },
+        });
+        const grade_options = gradeRows
+          .map((row) => row.grade)
+          .filter((value): value is string => !!value);
         const items =
           skip < total
             ? await tx.student.findMany({
@@ -493,7 +506,7 @@ export class StudentImportService implements OnApplicationBootstrap {
                 take: page_size,
               })
             : [];
-        return { items: items.map(studentView), page, page_size, total };
+        return { items: items.map(studentView), page, page_size, total, grade_options };
       },
       { isolationLevel: 'RepeatableRead' },
     );

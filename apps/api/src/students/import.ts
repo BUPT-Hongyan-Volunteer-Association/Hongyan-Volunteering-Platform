@@ -97,6 +97,16 @@ const importFieldByHeader = new Map<string, ImportField>(
   importHeaders.map((label, index) => [label, importFields[index]]),
 );
 
+/** 学号前四位为入学年份；非 19xx/20xx 开头时不推断。 */
+export function gradeFromStudentNo(student_no: string) {
+  return /^((?:19|20)\d{2})/.exec(student_no)?.[1];
+}
+
+/** 年级统一保存为四位年份；兼容历史文件中带「级」的写法。 */
+export function normalizeGrade(value: string) {
+  return /^(\d{4})(?:级)?$/.exec(value.trim())?.[1] ?? value.trim();
+}
+
 const text = (cell: SheetCell, field: ImportField, errors: FieldIssue[], max = 100) => {
   if (cell.type === 'formula') {
     errors.push({ field, code: 'formula_not_allowed', message: fieldLabels[field] + '不能使用公式' });
@@ -192,6 +202,12 @@ function parseRow(row: SheetRow, columns: Map<ImportField, number>): ParsedRow {
     if (!cell) continue;
     const value = text(cell, field, errors, max);
     if (value === undefined) continue;
+    if (field === 'grade') {
+      const grade = normalizeGrade(value);
+      signature.grade = grade;
+      if (grade) values.grade = grade;
+      continue;
+    }
     signature[field] = value;
     if (field === 'class_name') {
       if (value && !/^\d{10}$/.test(value))
@@ -200,6 +216,13 @@ function parseRow(row: SheetRow, columns: Map<ImportField, number>): ParsedRow {
       continue;
     }
     if (value) values[field] = value;
+  }
+  if (!values.grade) {
+    const derived = values.student_no ? gradeFromStudentNo(values.student_no) : undefined;
+    if (derived) {
+      values.grade = derived;
+      signature.grade = derived;
+    }
   }
   return { row_number: row.number, values, raw_values, errors, signature };
 }

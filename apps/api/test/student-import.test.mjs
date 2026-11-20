@@ -763,6 +763,46 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       );
     });
 
+    await t.test('年级缺省取学号前四位，统一保存为 YYYY 并支持年级筛选', async () => {
+      const batch = await uploadImport(
+        teacher,
+        workbook([
+          {
+            number: 2,
+            values: ['2026123401', '年级缺省甲', '本科生', '', '0000001801', '信息与通信工程学院'],
+          },
+          {
+            number: 3,
+            values: ['2025123402', '年级显式乙', '本科生', '2025级', '', ''],
+          },
+        ]),
+      );
+      assert.equal(batch.status, 'ready');
+      const preview = (await teacher.request('/admin/student-imports/' + batch.id + '/rows')).data;
+      const rows = new Map(preview.items.map((row) => [row.row_number, row]));
+      assert.equal(rows.get(2).grade, '2026');
+      assert.equal(rows.get(3).grade, '2025');
+      const committed = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        commitBody(batch),
+      );
+      assert.equal(committed.status, 200);
+      const derived = await db.student.findUniqueOrThrow({ where: { student_no: '2026123401' } });
+      assert.equal(derived.grade, '2026');
+      const explicit = await db.student.findUniqueOrThrow({ where: { student_no: '2025123402' } });
+      assert.equal(explicit.grade, '2025');
+
+      const listed = (await teacher.request('/admin/students?grade=2026&page_size=100')).data;
+      assert(listed.grade_options.includes('2026'));
+      assert(listed.grade_options.includes('2025'));
+      assert(listed.items.every((item) => item.grade === '2026'));
+      assert(listed.items.some((item) => item.student_no === '2026123401'));
+      const none = (await teacher.request('/admin/students?grade=2001')).data;
+      assert.equal(none.total, 0);
+      assert.equal((await teacher.request('/admin/students?grade=26')).status, 422);
+    });
+
     await t.test('表头按名称识别，列顺序不影响导入', async () => {
       const reordered = buildWorkbook({
         sheets: [
