@@ -134,6 +134,11 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
     if (record && (record.status === 'voided' || value !== previous) && options.mode !== 'correction') {
       fail(row,'credited_hours','修改时长或恢复已撤销记录须使用更正模式');
     }
+    if (group.accepted && row.errors.length === 0) {
+      row.action = 'skip_identical';
+      row.delta_hours = '0.0';
+      continue;
+    }
     if (!record) row.action = 'add';
     else if (record.status === 'voided' || previous !== value) row.action = 'correct';
     else if (row.misconduct_reported && row.misconduct_reported !== 'not_provided' && (record.misconduct_reported !== row.misconduct_reported ||
@@ -151,11 +156,7 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
       if (row.warnings.length && !fact && !row.errors.some((error) => error.field === 'remark')) fail(row,'remark','时长警告须填写说明');
     }
     if (row.errors.length) row.action = 'error';
-    else if (group.accepted) {
-      row.action = 'skip_identical';
-      row.delta_hours = '0.0';
-      row.warnings = [];
-    } else {
+    else {
       group.accepted = row;
       total += delta;
       row.delta_hours = hours(delta);

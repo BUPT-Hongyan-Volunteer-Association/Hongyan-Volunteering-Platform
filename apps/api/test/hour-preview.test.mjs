@@ -74,6 +74,21 @@ test('全组判重：普通备注忽略，数值等价；不同上报事实/小�
   assert.equal(preview([reported(2,'甲乙'),reported(3,'甲 乙')]).error_count,2);
 });
 
+test('超计划的等价重复行仅在计入时长的行要求说明', () => {
+  const data = { approved_schedules: [{ revision: 1, schedule: schedule(day+'T08:00:00+08:00', day+'T12:00:00+08:00') }] };
+  const first = input(2, { credited_hours: number('5'), remark: text('延长现场服务') });
+  const second = input(3, { credited_hours: number('5'), remark: null });
+  const batch = preview([first, second], data);
+  assert.deepEqual(batch.rows.map(row => [row.action, row.delta_hours]), [['add', '5.0'], ['skip_identical', '0.0']]);
+  assert.deepEqual(batch.warnings.map(w => [w.code, w.row_numbers, w.explanation]),
+    [['exceeds_planned_hours', [2], '延长现场服务']]);
+  assert.deepEqual([batch.valid_count, batch.skipped_count, batch.error_count, batch.projected_delta_hours], [1, 1, 0, '5.0']);
+
+  const [alone] = preview([second], data).rows;
+  assert.equal(alone.action, 'error');
+  assert.deepEqual(alone.errors.map(error => error.field), ['remark']);
+});
+
 test('同键按首条合格行计时，姓名错误的行保留自己的错误', () => {
   for (const invalidRow of [2, 202]) {
     const rows = [2, 202, 804].map(n => input(n, {
