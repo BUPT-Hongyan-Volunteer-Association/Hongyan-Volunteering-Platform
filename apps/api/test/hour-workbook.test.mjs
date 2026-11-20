@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { unzipSync, zipSync, strToU8, strFromU8 } from 'fflate';
 import { parseHourWorkbook } from '../dist/hours/workbook.js';
-import { cell, headers, row, sheet, template, workbook } from './hour-workbook-fixture.mjs';
+import { asStrict, cell, headers, row, sheet, template, workbook } from './hour-workbook-fixture.mjs';
 
 const parse = (buffer) => parseHourWorkbook('合成.xlsx', buffer);
 
@@ -32,10 +32,12 @@ test('旧六列补未提供，七列缺值仍为缺值；保留稀疏原行和�
 });
 
 test('七列、共享字符串与内联富文本按实际内容读取', async () => {
-  const result = await parse(workbook(row(2, cell('A2','1','n') + cell('B2','0','s')
+  const bytes = workbook(row(2, cell('A2','1','n') + cell('B2','0','s')
     + '<x:c r="F2" t="inlineStr"><x:is><x:r><x:t>服务</x:t></x:r><x:r><x:t>说明</x:t></x:r></x:is></x:c>' + cell('G2','有')), headers, (parts) => {
     parts['xl/sharedStrings.xml'] = strToU8('<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>合成学生</t></si></sst>');
-  }));
+  });
+  const result = await parse(bytes);
+  assert.deepEqual(await parse(asStrict(bytes)), result);
   const [record] = result.rows;
   assert.deepEqual(record.student_no, { type: 'number', value: '1' });
   assert.equal(record.student_name.value, '合成学生');
@@ -68,6 +70,7 @@ test('错误表头和带合计行的表结构拒绝整表', async () => {
       .replace('totalsRowCount="0"', 'totalsRowCount="' + count + '"'));
   });
   await assert.rejects(parse(afterShowingTotals(1)), /合计/);
+  await assert.rejects(parse(asStrict(afterShowingTotals(1))), /合计/);
   assert.equal((await parse(afterShowingTotals(0))).rows[0].credited_hours.value, '4');
 });
 

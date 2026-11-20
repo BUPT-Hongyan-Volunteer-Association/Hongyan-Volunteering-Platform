@@ -1,6 +1,6 @@
 import type { FieldError } from '@hongyan/contracts/types';
 import { BusinessError, invalid } from '../http.js';
-import { attr, readHourParts, scan, spreadsheet } from './ooxml.js';
+import { attr, readHourParts, scan } from './ooxml.js';
 
 const headers = ['学号', '姓名', '活动编号', '服务日期', '认证时长（小时）', '备注', '是否有违纪情况'];
 type Cell = { type: 'text' | 'number' | 'boolean' | 'date' | 'error'; value: string };
@@ -30,7 +30,7 @@ function rejectIssues(issues: ReturnType<typeof workbookIssue>[]): never {
   throw new BusinessError(422, 'validation_error', first.field + '：' + first.message + count, issues);
 }
 
-function sharedStrings(xml: string | null) {
+function sharedStrings(xml: string | null, spreadsheet: string) {
   const strings: string[] = [];
   if (!xml) return strings;
   let value = '', reading = false;
@@ -72,7 +72,8 @@ export async function parseHourWorkbook(filename: string, bytes: Buffer) {
   if (!/\.xlsx$/i.test(filename)) invalid('file', '只接受 .xlsx 工作簿');
   if (bytes.length > 5242880) invalid('file', '工作簿不能超过 5 MB');
   const parts = await readHourParts(bytes);
-  const strings = sharedStrings(parts.shared);
+  const { spreadsheet } = parts;
+  const strings = sharedStrings(parts.shared, spreadsheet);
   const rows: HourInputRow[] = [];
   const issues: ReturnType<typeof workbookIssue>[] = [];
   let nonempty = false;

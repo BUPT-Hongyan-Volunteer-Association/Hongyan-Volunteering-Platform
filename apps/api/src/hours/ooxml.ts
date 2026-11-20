@@ -4,8 +4,12 @@ import { SaxesParser, type SaxesTagNS } from 'saxes';
 import { fromBufferPromise, type Entry } from 'yauzl';
 import { BusinessError, invalid } from '../http.js';
 
-export const spreadsheet = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-export const documentRels = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const workbookNamespaces = [
+  { spreadsheet: 'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
+    documentRels: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships' },
+  { spreadsheet: 'http://purl.oclc.org/ooxml/spreadsheetml/main',
+    documentRels: 'http://purl.oclc.org/ooxml/officeDocument/relationships' },
+];
 const packageRels = 'http://schemas.openxmlformats.org/package/2006/relationships';
 const contentTypes = 'http://schemas.openxmlformats.org/package/2006/content-types';
 const workbookType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml';
@@ -87,14 +91,21 @@ async function relationships(pkg: Package, part: string) {
   return links;
 }
 
+async function locateWorkbook(pkg: Package) {
+  const root = await relationships(pkg, '');
+  for (const link of root.values()) {
+    const namespaces = workbookNamespaces.find(ns => link.type === ns.documentRels + '/officeDocument');
+    if (namespaces) return { book: link.target, ...namespaces };
+  }
+  return reject('工作簿缺少主文档');
+}
+
 export async function readHourParts(bytes: Buffer): Promise<{
-  date_system: '1900' | '1904'; sheet: string; shared: string | null;
+  date_system: '1900' | '1904'; sheet: string; spreadsheet: string; shared: string | null;
 }> {
   const pkg = await openPackage(bytes);
   try {
-    const root = await relationships(pkg, '');
-    const book = [...root.values()].find((link) => link.type === documentRels + '/officeDocument')?.target
-      ?? reject('工作簿缺少主文档');
+    const { book, documentRels, spreadsheet } = await locateWorkbook(pkg);
     let defaultType: string | undefined, overrideType: string | undefined;
     scan(await pkg.xml('[Content_Types].xml'), { open(tag) {
       if (tag.uri !== contentTypes) return;
@@ -126,7 +137,7 @@ export async function readHourParts(bytes: Buffer): Promise<{
       } });
     }
     const strings = [...links.values()].find((link) => link.type === documentRels + '/sharedStrings');
-    return { date_system, sheet: await pkg.xml(sheet.target), shared: strings ? await pkg.xml(strings.target) : null };
+    return { date_system, spreadsheet, sheet: await pkg.xml(sheet.target), shared: strings ? await pkg.xml(strings.target) : null };
   } finally {
     pkg.close();
   }

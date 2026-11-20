@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { previewHourRows } from '../dist/hours/preview.js';
 import { serviceDate, hourTenths } from '../dist/hours/values.js';
 import { validate } from '../dist/activities/validation.js';
+import { parseHourWorkbook } from '../dist/hours/workbook.js';
+import { asStrict, cell, row, workbook } from './hour-workbook-fixture.mjs';
 
 const text = (value) => ({ type: 'text', value });
 const number = (value) => ({ type: 'number', value });
@@ -27,6 +29,19 @@ function preview(rows, data = {}, options = {}) {
   return previewHourRows({ rows, date_system: '1900' }, { ...snapshot, ...data },
     { mode: 'new', now: new Date('2026-11-18T16:00:00Z'), ...options });
 }
+
+test('相同的有效服务记录在 Strict 与 Transitional 格式下预览一致', async () => {
+  const data = row(202, cell('A202','0000000001') + cell('B202','合成学生') + cell('C202',activity)
+    + cell('D202',day,'d') + cell('E202','9','n') + cell('F202','现场说明') + cell('G202','无'));
+  const bytes = workbook(data);
+  const options = { mode: 'new', now: new Date('2026-11-19T00:00:00Z') };
+  const run = async file => previewHourRows(await parseHourWorkbook('合成.xlsx', file), snapshot, options);
+  const result = await run(bytes);
+  assert.equal(result.valid_count, 1);
+  assert.equal(result.projected_delta_hours, '9.0');
+  assert.deepEqual(result.warnings.map(w => w.row_numbers), [[202]]);
+  assert.deepEqual(await run(asStrict(bytes)), result);
+});
 
 test('精确解析日期和十分位，不按显示值或二进制浮点近似', () => {
   for (const [raw, expected] of [['0.1',1], ['999.9',9999], ['1.20',12], ['1E-1',1], ['1.25',null],

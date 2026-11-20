@@ -9,6 +9,16 @@ export const cell = (ref, value, type = 'str') => '<x:c r="' + ref + '" t="' + t
   + String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') + '</x:v></x:c>';
 export const row = (index, cells) => '<x:row r="' + index + '">' + cells + '</x:row>';
 
+export function asStrict(bytes) {
+  const parts = unzipSync(bytes);
+  for (const path of Object.keys(parts).filter(path => /\.(xml|rels)$/.test(path))) {
+    parts[path] = strToU8(strFromU8(parts[path])
+      .replaceAll('http://schemas.openxmlformats.org/spreadsheetml/2006/main', 'http://purl.oclc.org/ooxml/spreadsheetml/main')
+      .replaceAll('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'http://purl.oclc.org/ooxml/officeDocument/relationships'));
+  }
+  return Buffer.from(zipSync(parts));
+}
+
 export function workbook(rows = '', names = headers, change = () => {}) {
   const parts = { ...source };
   const header = row(1, names.map((name, i) => cell(String.fromCharCode(65 + i) + '1', name)).join(''));
