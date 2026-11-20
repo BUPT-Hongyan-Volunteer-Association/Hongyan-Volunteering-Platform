@@ -8,6 +8,7 @@ import { createApp } from '../dist/app.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { Database } from '../dist/database.js';
 import { checkHourPages } from './hour-pages-fixture.mjs';
+import { checkStudentImportPages } from './student-import-pages-fixture.mjs';
 
 const link = (page, name) => page.getByRole('link', { name, exact: true });
 const button = (page, name) => page.getByRole('button', { name, exact: true });
@@ -217,8 +218,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           '错账修复组',
           '异常复核',
           '申诉与更正',
-          '学生档案',
-          '建档导入',
           '账号与角色',
           '通知失败队列',
           '审计记录',
@@ -233,6 +232,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         await visible(teacher.locator(width === 390 ? '.schedule-list' : '.chart-scroll'));
         await fits(teacher);
       }
+    });
+
+    await t.test('老师从后台导入学生名单并在学生档案中查到新学生', async () => {
+      await checkStudentImportPages(teacher, admin, { fits });
     });
 
     await t.test('时间轴保留筛选、分钟比例和当前线，并按角色定位时段', async () => {
