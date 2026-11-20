@@ -25,10 +25,8 @@ function legacyWorkbook(students, count) {
     ? serviceRow(i + 2, students[1], '1.2') : serviceRow(i + 2, students[0], '2')).join(''), headers.slice(0, 6));
 }
 
-export async function checkHourPreview(db, sample) {
+export async function prepareHourPreviewFixture(db, sample) {
   const students = await db.student.findMany({ include: { account: true }, orderBy: { student_no: 'asc' }, take: 3 });
-  const bytes = mixedWorkbook(students);
-  const book = await parseHourWorkbook('合成混合预览.xlsx',bytes);
   const activityId = await db.$transaction(async (tx) => {
     const owner = students[1].account_id;
     const future = sample.revisions[0].content;
@@ -42,9 +40,27 @@ export async function checkHourPreview(db, sample) {
     const historical = { id:randomUUID(),version:1,activity_id:sample.id,student_id:students[2].id,service_date:new Date(date),
       status:'current',hours:'18.0',origin_schedule_revision:1,misconduct_reported:'none',misconduct_version:0 };
     await tx.hourRecord.create({data:historical});
+    return activity.id;
+  },{isolationLevel:'RepeatableRead'});
+  return { activityId, bytes:mixedWorkbook(students), fixed:mixedWorkbook(students,true), ownerId:students[1].account_id,
+    mixedKeyErrors: () => workbook(
+      serviceRow(2, { ...students[0], account: { display_name: '姓名不符' } }, '4', '无') +
+      serviceRow(3, students[0], '4', '无') +
+      serviceRow(202, students[1], '4', '无') +
+      serviceRow(804, students[1], '5', '有', '新上报事实')),
+    combinedErrors: () => workbook(serviceRow(202, students[1], '1.25', '有') + serviceRow(804, students[0], '9', '', '')),
+    extraCellsWorkbook: () => workbook(serviceRow(202, students[0], '2', '无', '已核对', '多余')
+      + serviceRow(804, students[1], '1.25', '无', '已核对', '多余') + serviceRow(805, students[0], '2', '无')),
+    legacyWorkbook: count => legacyWorkbook(students, count),
+    paginatedWorkbook: () => mixedWorkbook(students,false,17) };
+}
+
+export async function checkHourPreview(db, { activityId, ownerId, bytes }) {
+  const book = await parseHourWorkbook('合成混合预览.xlsx', bytes);
+  await db.$transaction(async tx => {
     const allHistory = () => tx.hourRecord.findMany({orderBy:{id:'asc'}});
     const before = await allHistory();
-    const preview = () => previewActivityHours(tx,{account_id:owner,roles:['organizer']},activity.id,book,
+    const preview = () => previewActivityHours(tx,{account_id:ownerId,roles:['organizer']},activityId,book,
       {mode:'new',now:new Date('2026-11-19T01:00:00Z'),schedule_revision:1},readHistory);
     const result = await preview();
     assert.deepEqual(result.rows.map(({row_number,action}) => [row_number,action]),
@@ -56,17 +72,5 @@ export async function checkHourPreview(db, sample) {
     assert.equal(result.rows[3].bound_schedule_revision,1);
     assert.deepEqual(await preview(),result);
     assert.deepEqual(await allHistory(),before);
-    return activity.id;
-  },{isolationLevel:'RepeatableRead'});
-  return { activityId, bytes, fixed:mixedWorkbook(students,true), ownerId:students[1].account_id,
-    mixedKeyErrors: () => workbook(
-      serviceRow(2, { ...students[0], account: { display_name: '姓名不符' } }, '4', '无') +
-      serviceRow(3, students[0], '4', '无') +
-      serviceRow(202, students[1], '4', '无') +
-      serviceRow(804, students[1], '5', '有', '新上报事实')),
-    combinedErrors: () => workbook(serviceRow(202, students[1], '1.25', '有') + serviceRow(804, students[0], '9', '', '')),
-    extraCellsWorkbook: () => workbook(serviceRow(202, students[0], '2', '无', '已核对', '多余')
-      + serviceRow(804, students[1], '1.25', '无', '已核对', '多余') + serviceRow(805, students[0], '2', '无')),
-    legacyWorkbook: count => legacyWorkbook(students, count),
-    paginatedWorkbook: () => mixedWorkbook(students,false,17) };
+  }, { isolationLevel: 'RepeatableRead' });
 }

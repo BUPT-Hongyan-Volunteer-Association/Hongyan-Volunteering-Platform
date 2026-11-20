@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { strFromU8, unzipSync } from 'fflate';
-import { checkHourPreview } from './hour-preview-fixture.mjs';
+import { prepareHourPreviewFixture } from './hour-preview-fixture.mjs';
 
 export async function checkHourPages(page, web, db, sampleId, { pickOption, fits }) {
   const sample = await db.activity.findUniqueOrThrow({
     where: { id: sampleId }, include: { revisions: { orderBy: { revision: 'asc' } } },
   });
-  const fixture = await checkHourPreview(db, sample);
+  const fixture = await prepareHourPreviewFixture(db, sample);
   const bytes = await fixture.paginatedWorkbook();
   const before = await db.hourRecord.findMany({ orderBy: { id: 'asc' } });
   const evidence = process.env.HOUR_EVIDENCE_DIR;

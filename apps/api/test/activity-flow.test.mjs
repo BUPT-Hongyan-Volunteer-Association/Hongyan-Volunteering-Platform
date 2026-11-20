@@ -6,7 +6,7 @@ import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { Database } from '../dist/database.js';
 import { readFile } from 'node:fs/promises';
 import { readHourUpload } from '../dist/hours/upload-input.js';
-import { checkHourPreview } from './hour-preview-fixture.mjs';
+import { checkHourPreview, prepareHourPreviewFixture } from './hour-preview-fixture.mjs';
 import { checkHourHttp } from './hour-http-fixture.mjs';
 
 function browser(base) {
@@ -429,10 +429,10 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal(await db.registrationDecisionEvent.count({ where: { activity_id: id } }), 1);
     });
 
-    await t.test('独立库混合工作簿：HTTP 上传、报告、权限回收和失败重试均不入账', async () => {
-      const fixture = await checkHourPreview(db, sample);
-      await checkHourHttp(db, fixture, { owner, other, student, teacher });
-    });
+    const fixture = await prepareHourPreviewFixture(db, sample);
+    await t.test('混合工作簿重复预览保持逐行结果和正式时长一致', () => checkHourPreview(db, fixture));
+    await t.test('独立库混合工作簿：HTTP 上传、报告、权限回收和失败重试均不入账', () =>
+      checkHourHttp(db, fixture, { owner, other, student, teacher }));
   } finally {
     await app?.close();
   }
