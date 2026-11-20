@@ -7,9 +7,9 @@ import { cell, headers, row, workbook } from './hour-workbook-fixture.mjs';
 
 const date = '2020-11-18', code = 'P2026-0901';
 
-function serviceRow(index, student, value, flag, remark = '已核对现场记录') {
+function serviceRow(index, student, value, flag, remark = '已核对现场记录', ...extraCells) {
   const values = [student.student_no, student.account.display_name, code, date, value, remark];
-  if (flag !== undefined) values.push(flag);
+  if (flag !== undefined) values.push(flag, ...extraCells);
   return row(index, values.map((item, col) => cell(String.fromCharCode(65 + col) + index, item, col === 4 ? 'n' : 'str')).join(''));
 }
 
@@ -65,6 +65,8 @@ export async function checkHourPreview(db, sample) {
       serviceRow(202, students[1], '4', '无') +
       serviceRow(804, students[1], '5', '有', '新上报事实')),
     combinedErrors: () => workbook(serviceRow(202, students[1], '1.25', '有') + serviceRow(804, students[0], '9', '', '')),
+    extraCellsWorkbook: () => workbook(serviceRow(202, students[0], '2', '无', '已核对', '多余')
+      + serviceRow(804, students[1], '1.25', '无', '已核对', '多余') + serviceRow(805, students[0], '2', '无')),
     legacyWorkbook: count => legacyWorkbook(students, count),
     paginatedWorkbook: () => mixedWorkbook(students,false,17) };
 }

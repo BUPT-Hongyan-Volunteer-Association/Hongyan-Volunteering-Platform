@@ -25,10 +25,10 @@ const fail = (row: PreviewRow, field: string, message: string) => {
   row.errors.push({ row: row.row_number, field, code: 'validation_error', message });
 };
 
-function inspect(input: HourInputRow, system: '1900' | '1904', today: string, activity: string,
+function inspect({ row_number, errors = [], ...input }: HourInputRow, system: '1900' | '1904', today: string, activity: string,
   students: Map<string, HourSnapshot['students'][number]>) {
-  const row: PreviewRow = { row_number: input.row_number, action: 'error', errors: [], warnings: [],
-    raw_values: Object.fromEntries(Object.entries(input).filter(([field]) => field !== 'row_number')
+  const row: PreviewRow = { row_number, action: 'error', errors: [...errors], warnings: [],
+    raw_values: Object.fromEntries(Object.entries(input)
       .map(([field, cell]) => [field, cell === 'not_provided' ? cell : cell?.value ?? ''])) };
   const studentNo = text(input.student_no), student = students.get(studentNo ?? '');
   if (!studentNo || !/^\d{10}$/.test(studentNo)) fail(row, 'student_no', '学号必须是十位数字文本');

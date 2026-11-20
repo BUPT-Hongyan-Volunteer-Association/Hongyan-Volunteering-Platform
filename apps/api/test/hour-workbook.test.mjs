@@ -58,14 +58,10 @@ test('从工作簿关系定位目标页，不假定文件名或第一页', async
   assert.deepEqual(result.rows.map((record) => [record.row_number, record.student_no.value]), [[34, '0000000007']]);
 });
 
-test('错误表头、未知非空列、公式和合计行拒绝并定位', async () => {
+test('错误表头和带合计行的表结构拒绝整表', async () => {
   for (const names of [[...headers.slice(0, 6), '认定依据'], headers.toReversed(), headers.slice(0, 5), [...headers, '多余列']]) {
     await assert.rejects(parse(workbook('', names)), /表头|未知列/);
   }
-  await assert.rejects(parse(workbook(row(900, cell('H900','越界')))), /H900/);
-  await assert.rejects(parse(workbook(row(888, cell('G888','有')), headers.slice(0,6))), /G888/);
-  await assert.rejects(parse(workbook(row(205,'<x:c r="E205"><x:f>1+1</x:f><x:v>2</x:v></x:c>'))), /E205/);
-  await assert.rejects(parse(workbook(row(202, cell('A202', '合计')))), /202/);
   await assert.rejects(parse(workbook('', headers, (parts) => {
     parts['xl/tables/table1.xml'] = strToU8(strFromU8(parts['xl/tables/table1.xml']).replace('totalsRowCount="0"', 'totalsRowCount="1"'));
   })), /合计/);
@@ -74,15 +70,16 @@ test('错误表头、未知非空列、公式和合计行拒绝并定位', async
 test('一次报告所有可继续扫描的单元格错误，保留实际行号和列', async () => {
   const data = row(202, cell('H202','多余') + cell('I202','多余'))
     + row(803, '<x:c r="E803"><x:f>1+1</x:f><x:v>2</x:v></x:c>')
-    + row(804, cell('H804','多余') + '<x:c r="I804" s="1"/>');
-  await assert.rejects(parse(workbook(data)), error => {
-    assert.equal(error.getStatus(), 422);
-    assert.deepEqual(error.getResponse().details.map(issue => [issue.row, issue.field, issue.message]), [
-      [202, 'H202', '未知列存在数据'], [202, 'I202', '未知列存在数据'],
-      [803, 'E803', '不接受公式'], [804, 'H804', '未知列存在数据'],
-    ]);
-    return true;
-  });
+    + row(804, cell('E804','1.25','n') + cell('H804','多余') + '<x:c r="I804" s="1"/>')
+    + row(805, cell('A805', '合计'));
+  const { rows } = await parse(workbook(data));
+  assert.deepEqual(rows.map(row => row.errors.map(issue => [issue.row, issue.field, issue.message])), [
+    [[202, 'H202', '未知列存在数据'], [202, 'I202', '未知列存在数据']],
+    [[803, 'E803', '不接受公式']], [[804, 'H804', '未知列存在数据']], [[805, '第 805 行', '不接受合计行']],
+  ]);
+  assert.deepEqual(rows[2].credited_hours, { type: 'number', value: '1.25' });
+  const legacy = await parse(workbook(row(888, cell('G888','有')), headers.slice(0,6)));
+  assert.equal(legacy.rows[0].errors[0].field, 'G888');
 });
 
 test('无效文件、宏、缺失目标页均拒收', async () => {

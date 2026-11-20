@@ -3,9 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { strFromU8, unzipSync } from 'fflate';
 import { validate } from '../dist/activities/validation.js';
-import { cell, row, workbook } from './hour-workbook-fixture.mjs';
 
-export async function checkHourHttp(db,{activityId,bytes,fixed,ownerId,legacyWorkbook,combinedErrors,mixedKeyErrors},{owner,other,student,teacher}) {
+export async function checkHourHttp(db,{activityId,bytes,fixed,ownerId,legacyWorkbook,combinedErrors,mixedKeyErrors,extraCellsWorkbook},{owner,other,student,teacher}) {
   const collection = '/organizer/activities/'+activityId+'/hour-imports';
   const before = await db.hourRecord.findMany();
   const upload = (client, data, key, fields = {}, headers = {}) => {
@@ -122,15 +121,19 @@ export async function checkHourHttp(db,{activityId,bytes,fixed,ownerId,legacyWor
   const reviewPage = await result(await owner.raw(keyedPath + '?action=error&misconduct_requires_review=true'), 200);
   assert.deepEqual(reviewPage.items.map(r => [r.row_number, r.remark]), [[804, '新上报事实']]);
 
-  const extraCells = workbook(row(202, cell('H202', '多余')) + row(804, cell('H804', '多余')));
-  const extra = await result(await upload(owner, extraCells, randomUUID()), 202);
-  await settled(extra.id, 'invalid');
+  const extra = await result(await upload(owner, extraCellsWorkbook(), randomUUID()), 202);
+  const extraBatch = await settled(extra.id, 'invalid');
   const extraReport = await result(await owner.raw('/hour-imports/' + extra.id + '/error-report'), 200);
   const extraFile = await owner.raw('/files/' + extraReport.id + '/download');
   assert.equal(extraFile.status, 200);
   const extraXml = strFromU8(unzipSync(new Uint8Array(await extraFile.arrayBuffer()))['xl/worksheets/errors.xml']);
   assert.deepEqual([...extraXml.matchAll(/<t>([^<>]*)<\/t>/g)].slice(3).map(match => match[1]),
-    ['202', 'H202', '未知列存在数据', '804', 'H804', '未知列存在数据']);
+    ['202', 'H202', '未知列存在数据', '804', 'H804', '未知列存在数据',
+      '804', 'credited_hours', '须为 0.1–999.9 的数值，最多一位小数']);
+  assert.deepEqual([extraBatch.row_count, extraBatch.error_count, extraBatch.valid_count, extraBatch.projected_delta_hours],
+    [3, 2, 1, '2.0']);
+  const validRows = await result(await owner.raw('/hour-imports/' + extra.id + '/rows?action=add'), 200);
+  assert.deepEqual(validRows.items.map(row => row.row_number), [805]);
 
   const bad = await result(await upload(owner,Buffer.from('工作簿损坏'),randomUUID()),202);
   const invalid = await settled(bad.id,'invalid');
