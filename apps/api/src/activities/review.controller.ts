@@ -206,6 +206,7 @@ export class ReviewController {
                 payload: {
                   review_id: id,
                   revision: r.revision,
+                  previous_revision: r.previous_revision,
                   changed_fields,
                   recipients: recipients.map((p) => p.student_id),
                   actor_id: req.actor.account_id,

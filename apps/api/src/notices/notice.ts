@@ -25,16 +25,78 @@ const changeFieldLabels: Record<string, string> = {
   hours_import_expected_at: '时长导入时间',
 };
 
-export function changedLabels(fields: string[]): string[] {
-  return [
-    ...new Set(fields.map((field) => changeFieldLabels[field.split('.')[0]] ?? '活动信息')),
-  ];
+const stamp = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
+function clip(text: string, limit = 30): string {
+  return text.length > limit ? text.slice(0, limit) + '…' : text;
 }
 
-export function changeNoticeBody(title: string, fields: string[]): string {
-  const labels = changedLabels(fields);
-  const detail = labels.length ? labels.join('、') : '活动信息';
-  return `${title}有以下内容调整：${detail}。请查看最新安排并在活动详情页确认。`;
+function moment(value: unknown): string {
+  const at = typeof value === 'string' ? new Date(value) : null;
+  return at && !Number.isNaN(at.getTime()) ? stamp.format(at) : '未设置';
+}
+
+const scheduleKinds: Record<string, string> = {
+  continuous: '单次',
+  weekly: '每周',
+  custom: '多时段',
+};
+
+type ScheduleLike = { starts_at?: unknown; ends_at?: unknown; schedule_type?: unknown };
+
+function isSchedule(value: object): value is ScheduleLike {
+  return 'starts_at' in value || 'ends_at' in value || 'schedule_type' in value;
+}
+
+// 活动时间可能只填截止时间，也可能按周重复，逐种情况给出一句能读懂的描述。
+function scheduleText(schedule: ScheduleLike): string {
+  const from = schedule.starts_at ? moment(schedule.starts_at) : '';
+  const to = schedule.ends_at ? moment(schedule.ends_at) : '';
+  const range = from && to ? `${from} 至 ${to}` : to ? `截止 ${to}` : from ? `${from} 起` : '未设置';
+  const kind = scheduleKinds[String(schedule.schedule_type)];
+  return kind ? `${range}（${kind}）` : range;
+}
+
+// 把快照里的字段值变成学生能直接读懂的一句话，时间统一按东八区展示。
+function displayValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '未设置';
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string') return clip(value);
+  if (Array.isArray(value)) return clip(value.map(String).join('、'));
+  if (typeof value === 'object' && isSchedule(value)) return scheduleText(value);
+  return clip(JSON.stringify(value));
+}
+
+function read(source: unknown, key: string): unknown {
+  return source && typeof source === 'object' ? (source as Record<string, unknown>)[key] : undefined;
+}
+
+// 变更说明只讲"哪里从什么变成了什么"，比罗列字段名更能帮学生判断要不要重新看安排。
+function changeLines(fields: string[], before: unknown, after: unknown): string[] {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const field of fields) {
+    const root = field.split('.')[0];
+    if (seen.has(root)) continue;
+    seen.add(root);
+    const label = changeFieldLabels[root] ?? '活动信息';
+    lines.push(`${label}：${displayValue(read(before, root))} → ${displayValue(read(after, root))}`);
+  }
+  return lines;
+}
+
+export function changeNoticeBody(fields: string[], before: unknown, after: unknown): string {
+  const lines = changeLines(fields, before, after);
+  const detail = lines.length ? lines.map((line) => `· ${line}`).join('\n') : '· 活动信息已更新';
+  return `以下内容有调整：\n${detail}\n请查看最新安排，并在活动详情页确认。`;
 }
 
 export function noticeView(row: NoticeRow, receipt?: NoticeReceipt | null): Notice {

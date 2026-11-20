@@ -5,6 +5,7 @@ import { createApp } from '../dist/app.js';
 import { Database } from '../dist/database.js';
 import { Clock } from '../dist/notices/clock.js';
 import { NoticeWorker } from '../dist/notices/notice.worker.js';
+import { changeNoticeBody } from '../dist/notices/notice.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
 
 function browser(base) {
@@ -43,6 +44,26 @@ function browser(base) {
   const write = (method, path, body, key = randomUUID()) => request(path, { method, body, key });
   return { request, signIn, write };
 }
+
+test('通知文案把字段变更写成可读的前后对比', () => {
+  assert.equal(
+    changeNoticeBody(['location'], { location: '东门' }, { location: '西门' }),
+    '以下内容有调整：\n· 活动地点：东门 → 西门\n请查看最新安排，并在活动详情页确认。',
+  );
+  const moved = (day) => ({
+    schedule: {
+      schedule_type: 'continuous',
+      starts_at: `2026-11-${day}T06:00:00.000Z`,
+      ends_at: `2026-11-${day}T10:00:00.000Z`,
+    },
+  });
+  const schedule = changeNoticeBody(['schedule.starts_at', 'schedule.ends_at'], moved('25'), moved('26'));
+  assert.match(
+    schedule,
+    /活动时间：2026\/11\/25 14:00 至 2026\/11\/25 18:00（单次） → 2026\/11\/26 14:00 至 2026\/11\/26 18:00（单次）/,
+  );
+  assert.match(changeNoticeBody([], null, null), /活动信息已更新/);
+});
 
 test('地点变更按事件投递站内通知，回执、催办与失败重试保持一致', async (t) => {
   const staffPassword = randomUUID();
@@ -120,7 +141,7 @@ test('地点变更按事件投递站内通知，回执、催办与失败重试�
       assert.equal(event.attempt_count, 1);
       const notice = await db.notice.findFirstOrThrow({ where: { activity_id: id } });
       assert.equal(notice.title, '通知回归安排有调整');
-      assert.match(notice.body, /活动地点/);
+      assert.match(notice.body, /活动地点：A → B/);
       assert.equal(notice.information_version, 1);
       assert.equal(notice.is_current, true);
       assert.equal(await db.noticeReceipt.count({ where: { notice_id: notice.id } }), 1);
@@ -306,6 +327,46 @@ test('地点变更按事件投递站内通知，回执、催办与失败重试�
       assert.equal(notices.filter((n) => n.is_current).length, 1);
       assert.equal((await db.notice.findFirstOrThrow({ where: { is_current: true } })).information_version, 4);
     });
+    await t.test('两个消费者同时处理同一事件只投递一次', async () => {
+      const created = await owner.write('POST', '/organizer/activities', {
+        ...sample.revisions[0].content,
+        title: '并发投递',
+        location: '甲',
+      });
+      assert.equal(created.status, 201);
+      const race = '/organizer/activities/' + created.data.id;
+      const raceVersion = async () => (await owner.request(race)).data.activity.version;
+      const raceSubmit = async () =>
+        (await owner.write('POST', race + '/submit', { expected_version: await raceVersion() }))
+          .data;
+      assert.equal((await decide(await raceSubmit())).status, 200);
+      const student = await studentRow('0000000001');
+      await db.registration.create({
+        data: { activity_id: created.data.id, student_id: student.id, status: 'accepted' },
+      });
+      assert.equal(
+        (await owner.write('PATCH', race, { location: '乙', expected_version: await raceVersion() }))
+          .status,
+        200,
+      );
+      assert.equal((await decide(await raceSubmit())).status, 200);
+
+      // 同一进程内两个消费者竞争同一条事件：认领租约保证只有一个真正投递。
+      const rival = new NoticeWorker(db, clock);
+      await Promise.all([worker.drain(clock.now()), rival.drain(clock.now())]);
+
+      const event = await db.notificationEvent.findFirstOrThrow({
+        where: { activity_id: created.data.id },
+      });
+      assert.equal(event.status, 'delivered');
+      assert.equal(event.attempt_count, 1);
+      assert.equal(await db.notice.count({ where: { activity_id: created.data.id } }), 1);
+      const notice = await db.notice.findFirstOrThrow({ where: { activity_id: created.data.id } });
+      assert.match(notice.body, /活动地点：甲 → 乙/);
+      assert.equal(notice.information_version, 1);
+      assert.equal(await db.noticeReceipt.count({ where: { notice_id: notice.id } }), 1);
+    });
+
   } finally {
     delete process.env.NOTICE_WORKER;
     await app?.close();

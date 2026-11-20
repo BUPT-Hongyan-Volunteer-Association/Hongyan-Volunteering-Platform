@@ -9,6 +9,7 @@ const retryDelaysMinutes = [1, 2, 5, 15, 30];
 
 type ChangePayload = {
   revision?: number;
+  previous_revision?: number;
   changed_fields?: string[];
   recipients?: string[];
   actor_id?: string;
@@ -96,6 +97,8 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
   protected async deliver(event: NotificationEvent, now: Date) {
     const activity_id = event.activity_id;
     if (!activity_id) throw new Error('通知事件缺少活动标识');
+    if (event.event_type !== 'activity_changed' || event.source_revision === null)
+      throw new Error(`暂不支持的通知事件类型 ${event.event_type}`);
     const payload = event.payload as ChangePayload;
     await this.db.$transaction(async (tx) => {
       // 锁住活动行：核对公开版本与递增 information_version 必须在同一把锁内完成，
@@ -131,18 +134,31 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
         where: { activity_id, notice_kind: 'change', is_current: true },
         orderBy: { information_version: 'desc' },
       });
-      const revision = await tx.activityRevision.findUnique({
-        where: {
-          activity_id_revision: { activity_id, revision: event.source_revision! },
-        },
-        select: { content: true },
-      });
+      const [revision, before] = await Promise.all([
+        tx.activityRevision.findUnique({
+          where: {
+            activity_id_revision: { activity_id, revision: event.source_revision! },
+          },
+          select: { content: true },
+        }),
+        payload.previous_revision
+          ? tx.activityRevision.findUnique({
+              where: {
+                activity_id_revision: {
+                  activity_id,
+                  revision: payload.previous_revision,
+                },
+              },
+              select: { content: true },
+            })
+          : null,
+      ]);
       const title = (revision?.content as { title?: string } | null)?.title ?? '活动';
       const notice = await tx.notice.create({
         data: {
           activity_id,
           title: `${title}安排有调整`,
-          body: changeNoticeBody(title, payload.changed_fields ?? []),
+          body: changeNoticeBody(payload.changed_fields ?? [], before?.content, revision?.content),
           requires_ack: true,
           notice_kind: 'change',
           information_version: (previous?.information_version ?? 0) + 1,
