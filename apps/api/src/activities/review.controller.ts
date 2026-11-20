@@ -25,6 +25,8 @@ import {
 } from './workflow.js';
 import { content, validate } from './validation.js';
 
+// 会通知到学生的字段。新增字段时同步 notices/notice.ts 的 changeFieldLabels，
+// 否则正文只能回退成「活动信息」，学生看不出变了什么。
 const notifiedFields = new Set([
   'schedule',
   'registration_opens_at',

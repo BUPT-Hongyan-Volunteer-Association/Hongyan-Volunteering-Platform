@@ -5,7 +5,8 @@ import type {
   NotificationEvent as EventRow,
 } from '../generated/prisma/client.js';
 
-// 变更字段对学生的可读名称。嵌套字段只取根键，避免把技术路径暴露给用户。
+// 变更字段对学生的可读名称，键必须覆盖 activities/review.controller.ts 的 notifiedFields。
+// 嵌套字段只取根键，避免把技术路径暴露给用户。
 const changeFieldLabels: Record<string, string> = {
   location: '活动地点',
   meeting_point: '集合地点',
@@ -144,6 +145,8 @@ export function eventView(row: EventRow): NotificationEvent {
     version: row.version,
     event_type: row.event_type,
     ...(row.activity_id ? { activity_id: row.activity_id } : {}),
+    // 契约里 resource_id 是必填字符串；activity_changed 事件总会写入审核 id，
+    // 这里只为将来的无资源事件留一个空值兜底。
     resource_id: row.resource_id ?? '',
     status: row.status as NotificationEvent['status'],
     attempt_count: row.attempt_count,

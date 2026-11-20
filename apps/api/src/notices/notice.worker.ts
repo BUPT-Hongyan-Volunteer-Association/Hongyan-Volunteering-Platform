@@ -29,7 +29,12 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     // 单进程测试由用例自行驱动 drain()，不需要后台定时器。
     if (process.env.NOTICE_WORKER === 'off') return;
-    this.timer = setInterval(() => void this.drain().catch(() => undefined), 5000);
+    this.timer = setInterval(() => {
+      // 整批取数失败（例如数据库瞬时不可用）不该静默：留给下一轮，但要在日志里留痕。
+      void this.drain().catch((error: unknown) => {
+        this.logger.error(`通知队列本轮取数失败 ${errorText(error)}`);
+      });
+    }, 5000);
     this.timer.unref();
   }
 

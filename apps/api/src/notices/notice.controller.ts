@@ -9,11 +9,12 @@ import {
   Req,
 } from '@nestjs/common';
 import type { NoticePage, NotificationEventPage, ReceiptPage } from '@hongyan/contracts/types';
+import type { Prisma } from '../generated/prisma/client.js';
 import { Database } from '../database.js';
 import { BusinessError, denied, envelope, invalid, invisible } from '../http.js';
 import { managedScope, pagination, staff } from '../activities/read.js';
 import { Workflow, wrongState, type Tx } from '../activities/workflow.js';
-import { studentId, type SessionRequest } from '../auth/session.guard.js';
+import { studentId, type Actor, type SessionRequest } from '../auth/session.guard.js';
 import { Clock } from './clock.js';
 import { eventView, noticeView, receiptView } from './notice.js';
 
@@ -54,7 +55,7 @@ export class NoticeController {
       invalid('notice_kind', '通知类别无效');
     if (q.activity_id && !uuidPattern.test(q.activity_id))
       invalid('activity_id', '活动标识格式错误');
-    const where = {
+    const where: Prisma.NoticeReceiptWhereInput = {
       student_id: student,
       ...(unacknowledged && { acknowledged_at: null }),
       notice: {
@@ -126,11 +127,7 @@ export class NoticeController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Query() q: Record<string, string>,
   ) {
-    const activity = await this.db.activity.findFirst({
-      where: { id, ...managedScope(req.actor) },
-      select: { id: true },
-    });
-    if (!activity) invisible();
+    await this.managed(id, req.actor);
     const { page, page_size, skip } = pagination(q);
     const [rows, total] = await Promise.all([
       this.db.notice.findMany({
@@ -165,11 +162,7 @@ export class NoticeController {
       select: { id: true, activity_id: true, is_current: true, requires_ack: true },
     });
     if (!notice) invisible();
-    const activity = await this.db.activity.findFirst({
-      where: { id: notice.activity_id, ...managedScope(req.actor) },
-      select: { id: true },
-    });
-    if (!activity) invisible();
+    await this.managed(notice.activity_id, req.actor);
     const { page, page_size, skip } = pagination(q);
     const followUp = flag(q, 'follow_up_only');
     if (q.status && !receiptStatuses.includes(q.status)) invalid('status', '回执状态无效');
@@ -178,7 +171,7 @@ export class NoticeController {
       const empty: ReceiptPage = { items: [], page, page_size, total: 0 };
       return envelope(empty);
     }
-    const where = {
+    const where: Prisma.NoticeReceiptWhereInput = {
       notice_id: id,
       ...(q.status === 'unread' && { read_at: null }),
       ...(q.status === 'read' && { read_at: { not: null }, acknowledged_at: null }),
@@ -264,6 +257,15 @@ export class NoticeController {
       });
       return eventView(updated);
     });
+  }
+
+  // 活动管理范围：负责人只能触达自己管理的活动，审核员与管理员触达全部，其余一律不可见。
+  private async managed(activity_id: string, actor: Actor) {
+    const row = await this.db.activity.findFirst({
+      where: { id: activity_id, ...managedScope(actor) },
+      select: { id: true },
+    });
+    if (!row) invisible();
   }
 
   // 只操作本人回执时先锁定该行，避免并发确认写入两个不同的首次时间。
