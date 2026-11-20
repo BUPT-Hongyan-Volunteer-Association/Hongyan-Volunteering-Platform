@@ -26,12 +26,15 @@ const changeFieldLabels: Record<string, string> = {
 };
 
 export function changedLabels(fields: string[]): string[] {
-  return [...new Set(fields.map((field) => changeFieldLabels[field.split('.')[0]] ?? field))];
+  return [
+    ...new Set(fields.map((field) => changeFieldLabels[field.split('.')[0]] ?? '活动信息')),
+  ];
 }
 
 export function changeNoticeBody(title: string, fields: string[]): string {
   const labels = changedLabels(fields);
-  return `${title} 有以下内容调整：${labels.join('、')}。请查看最新安排并在活动详情页确认。`;
+  const detail = labels.length ? labels.join('、') : '活动信息';
+  return `${title}有以下内容调整：${detail}。请查看最新安排并在活动详情页确认。`;
 }
 
 export function noticeView(row: NoticeRow, receipt?: NoticeReceipt | null): Notice {

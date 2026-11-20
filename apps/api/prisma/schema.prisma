@@ -83,6 +83,7 @@ model LoginWindow {
 model Activity {
   reviews            ActivityReview[]
   registrations      Registration[]
+  notices            Notice[]
   id                 String             @id @default(uuid()) @db.Uuid
   activity_code      String             @unique
   status             String             @default("draft")
@@ -245,8 +246,11 @@ model Notice {
   published_at        DateTime        @default(now()) @db.Timestamptz(3)
   created_at          DateTime        @default(now()) @db.Timestamptz(3)
   updated_at          DateTime        @updatedAt @db.Timestamptz(3)
+  activity            Activity        @relation(fields: [activity_id], references: [id], onDelete: Cascade)
   receipts            NoticeReceipt[]
 
+  // 同一活动的同一类通知版本号唯一，兜住并发投递写坏版本链的情况。
+  @@unique([activity_id, notice_kind, information_version])
   @@index([activity_id, notice_kind, is_current])
   @@map("notice")
 }

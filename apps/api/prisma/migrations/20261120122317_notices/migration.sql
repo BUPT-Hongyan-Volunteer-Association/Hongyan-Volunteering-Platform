@@ -52,6 +52,9 @@ CREATE TABLE "notification_event" (
 );
 
 -- CreateIndex
+CREATE UNIQUE INDEX "notice_activity_id_notice_kind_information_version_key" ON "notice"("activity_id", "notice_kind", "information_version");
+
+-- CreateIndex
 CREATE INDEX "notice_activity_id_notice_kind_is_current_idx" ON "notice"("activity_id", "notice_kind", "is_current");
 
 -- CreateIndex
@@ -62,6 +65,9 @@ CREATE UNIQUE INDEX "notification_event_event_key_key" ON "notification_event"("
 
 -- CreateIndex
 CREATE INDEX "notification_event_status_next_retry_at_idx" ON "notification_event"("status", "next_retry_at");
+
+-- AddForeignKey
+ALTER TABLE "notice" ADD CONSTRAINT "notice_activity_id_fkey" FOREIGN KEY ("activity_id") REFERENCES "activity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "notice_receipt" ADD CONSTRAINT "notice_receipt_notice_id_fkey" FOREIGN KEY ("notice_id") REFERENCES "notice"("id") ON DELETE CASCADE ON UPDATE CASCADE;

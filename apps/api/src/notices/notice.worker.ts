@@ -11,10 +11,12 @@ type ChangePayload = {
   revision?: number;
   changed_fields?: string[];
   recipients?: string[];
+  actor_id?: string;
 };
 
 @Injectable()
 export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(NoticeWorker.name);
   private timer?: NodeJS.Timeout;
   private draining = false;
 
@@ -48,20 +50,34 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
         select: { id: true },
         take: 50,
       });
-      for (const { id } of due) await this.attempt(id, now);
+      for (const { id } of due) {
+        // 单个事件处理失败（例如数据库瞬时错误）不能拖垮整批，下一轮会重新取到它。
+        try {
+          await this.attempt(id, now);
+        } catch (error) {
+          this.logger.error(`通知事件处理异常 event=${id} ${errorText(error)}`);
+        }
+      }
     } finally {
       this.draining = false;
     }
   }
 
   private async attempt(id: string, now: Date) {
+    // 抢占成功的同时写入 1 分钟租约：多实例部署时，别的进程不会在同一时刻把
+    // 这条事件再认领一次；进程崩溃后租约到期，事件会自动回到队列。
     const claimed = await this.db.notificationEvent.updateMany({
       where: {
         id,
         status: { in: ['pending', 'running'] },
         OR: [{ next_retry_at: null }, { next_retry_at: { lte: now } }],
       },
-      data: { status: 'running', attempt_count: { increment: 1 }, version: { increment: 1 } },
+      data: {
+        status: 'running',
+        attempt_count: { increment: 1 },
+        version: { increment: 1 },
+        next_retry_at: new Date(now.getTime() + 60_000),
+      },
     });
     if (claimed.count === 0) return;
     const event = await this.db.notificationEvent.findUnique({ where: { id } });
@@ -69,41 +85,62 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
     try {
       await this.deliver(event, now);
     } catch (error) {
-      Logger.warn({ event_id: id, error: error instanceof Error ? error.message : 'unknown' });
+      this.logger.warn(
+        `通知投递失败 event=${id} attempt=${event.attempt_count} ${errorText(error)}`,
+      );
       await this.fail(event, error, now);
     }
   }
 
   // 事件指向的公开版本已被替换时，旧通知没有发送意义，直接作废。
   protected async deliver(event: NotificationEvent, now: Date) {
-    if (!event.activity_id) throw new Error('通知事件缺少活动标识');
-    const activity = await this.db.activity.findUnique({
-      where: { id: event.activity_id },
-      select: { published_revision: true },
-    });
-    if (!activity || activity.published_revision !== event.source_revision) {
-      await this.db.notificationEvent.update({
-        where: { id: event.id },
-        data: { status: 'superseded', next_retry_at: null, version: { increment: 1 } },
-      });
-      return;
-    }
+    const activity_id = event.activity_id;
+    if (!activity_id) throw new Error('通知事件缺少活动标识');
     const payload = event.payload as ChangePayload;
     await this.db.$transaction(async (tx) => {
+      // 锁住活动行：核对公开版本与递增 information_version 必须在同一把锁内完成，
+      // 否则并发投递会生成两个相同版本，或对着已被替换的版本发通知。
+      await tx.$executeRaw`SELECT id FROM activity WHERE id = ${activity_id}::uuid FOR UPDATE`;
+      const activity = await tx.activity.findUnique({
+        where: { id: activity_id },
+        select: { published_revision: true },
+      });
+      if (!activity || activity.published_revision !== event.source_revision) {
+        await tx.notificationEvent.update({
+          where: { id: event.id },
+          data: { status: 'superseded', next_retry_at: null, version: { increment: 1 } },
+        });
+        return;
+      }
+      const recipients = [...new Set(payload.recipients ?? [])];
+      // 没有受影响的学生就不生成通知，否则负责人的已发送列表里会多出一条无人接收的空通知。
+      if (!recipients.length) {
+        await tx.notificationEvent.update({
+          where: { id: event.id },
+          data: {
+            status: 'delivered',
+            delivered_at: now,
+            next_retry_at: null,
+            last_error: null,
+            version: { increment: 1 },
+          },
+        });
+        return;
+      }
       const previous = await tx.notice.findFirst({
-        where: { activity_id: event.activity_id!, notice_kind: 'change', is_current: true },
+        where: { activity_id, notice_kind: 'change', is_current: true },
         orderBy: { information_version: 'desc' },
       });
       const revision = await tx.activityRevision.findUnique({
         where: {
-          activity_id_revision: { activity_id: event.activity_id!, revision: event.source_revision! },
+          activity_id_revision: { activity_id, revision: event.source_revision! },
         },
         select: { content: true },
       });
       const title = (revision?.content as { title?: string } | null)?.title ?? '活动';
       const notice = await tx.notice.create({
         data: {
-          activity_id: event.activity_id!,
+          activity_id,
           title: `${title}安排有调整`,
           body: changeNoticeBody(title, payload.changed_fields ?? []),
           requires_ack: true,
@@ -111,6 +148,7 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
           information_version: (previous?.information_version ?? 0) + 1,
           supersedes_id: previous?.id ?? null,
           is_current: true,
+          published_by: payload.actor_id ?? null,
           published_at: now,
         },
       });
@@ -119,12 +157,10 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
           where: { id: previous.id },
           data: { is_current: false, version: { increment: 1 } },
         });
-      const recipients = [...new Set(payload.recipients ?? [])];
-      if (recipients.length)
-        await tx.noticeReceipt.createMany({
-          data: recipients.map((student_id) => ({ notice_id: notice.id, student_id })),
-          skipDuplicates: true,
-        });
+      await tx.noticeReceipt.createMany({
+        data: recipients.map((student_id) => ({ notice_id: notice.id, student_id })),
+        skipDuplicates: true,
+      });
       await tx.notificationEvent.update({
         where: { id: event.id },
         data: {
@@ -140,7 +176,7 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
 
   private async fail(event: NotificationEvent, error: unknown, now: Date) {
     const attempt = event.attempt_count;
-    const message = (error instanceof Error ? error.message : '通知投递失败').slice(0, 200);
+    const message = errorText(error).slice(0, 200);
     const delay = retryDelaysMinutes[attempt - 1];
     await this.db.notificationEvent.update({
       where: { id: event.id },
@@ -154,4 +190,8 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
         : { status: 'failed', last_error: message, next_retry_at: null, version: { increment: 1 } },
     });
   }
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

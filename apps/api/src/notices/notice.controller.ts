@@ -174,25 +174,26 @@ export class NoticeController {
     const followUp = flag(q, 'follow_up_only');
     if (q.status && !receiptStatuses.includes(q.status)) invalid('status', '回执状态无效');
     // 被替代或无需确认的通知没有待跟进名单，直接返回空页。
-    const closed = followUp && (!notice.is_current || !notice.requires_ack);
+    if (followUp && (!notice.is_current || !notice.requires_ack)) {
+      const empty: ReceiptPage = { items: [], page, page_size, total: 0 };
+      return envelope(empty);
+    }
     const where = {
       notice_id: id,
       ...(q.status === 'unread' && { read_at: null }),
       ...(q.status === 'read' && { read_at: { not: null }, acknowledged_at: null }),
       ...(q.status === 'acknowledged' && { acknowledged_at: { not: null } }),
-      ...(followUp &&
-        !closed && {
-          acknowledged_at: null,
-          student: {
-            registrations: {
-              some: {
-                activity_id: notice.activity_id,
-                status: { in: ['submitted', 'waitlisted', 'accepted'] },
-              },
+      ...(followUp && {
+        acknowledged_at: null,
+        student: {
+          registrations: {
+            some: {
+              activity_id: notice.activity_id,
+              status: { in: ['submitted', 'waitlisted', 'accepted'] },
             },
           },
-        }),
-      ...(closed && { notice_id: '00000000-0000-0000-0000-000000000000' }),
+        },
+      }),
     };
     const [rows, total] = await Promise.all([
       this.db.noticeReceipt.findMany({

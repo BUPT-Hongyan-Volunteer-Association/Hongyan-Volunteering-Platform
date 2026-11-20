@@ -244,6 +244,37 @@ test('地点变更按事件投递站内通知，回执、催办与失败重试�
       assert.equal(notices.filter((n) => n.is_current).length, 1);
     });
 
+    await t.test('没有受影响学生时不生成空通知', async () => {
+      const blank = await owner.write('POST', '/organizer/activities', {
+        ...sample.revisions[0].content,
+        title: '空名单活动',
+        location: 'X',
+      });
+      assert.equal(blank.status, 201);
+      const blankPath = '/organizer/activities/' + blank.data.id;
+      const blankVersion = async () => (await owner.request(blankPath)).data.activity.version;
+      const blankSubmit = async () => {
+        const r = await owner.write('POST', blankPath + '/submit', {
+          expected_version: await blankVersion(),
+        });
+        assert.equal(r.status, 201);
+        return r.data;
+      };
+      assert.equal((await decide(await blankSubmit())).status, 200);
+      assert.equal(
+        (await owner.write('PATCH', blankPath, { location: 'Y', expected_version: await blankVersion() }))
+          .status,
+        200,
+      );
+      assert.equal((await decide(await blankSubmit())).status, 200);
+      await drain();
+      assert.equal(await db.notice.count({ where: { activity_id: blank.data.id } }), 0);
+      const empty = await db.notificationEvent.findFirstOrThrow({
+        where: { activity_id: blank.data.id },
+      });
+      assert.equal(empty.status, 'delivered');
+    });
+
     await t.test('公开版本已被新修订替代的事件重试后标记 superseded 不发送', async () => {
       const deliver = worker.deliver;
       worker.deliver = async () => {

@@ -208,6 +208,7 @@ export class ReviewController {
                   revision: r.revision,
                   changed_fields,
                   recipients: recipients.map((p) => p.student_id),
+                  actor_id: req.actor.account_id,
                 },
               },
             ],
