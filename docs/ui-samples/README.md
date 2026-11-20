@@ -22,7 +22,7 @@
 
 ## 负责人时长导入
 
-从「我的管理活动 → 选择活动 → 时长批次」上传工作簿。按原表行号核对错误、时长警告与违纪待核实标记；筛选和翻页后，全批预计差额应保持一致。内容错误时下载报告并修正重传，系统校验失败时在原批次重试。[合成样本与验收记录](https://github.com/BUPT-Hongyan-Volunteer-Association/Hongyan-Volunteering-Platform/pull/7)
+用合成时长表复验。错误报告应定位到原表第 202 行，勾选「只看违纪待核实行」应显示第 804 行。筛选或翻页后，全批预计差额仍为 +9.0 小时。运行 `pnpm test:pages` 前将 `HOUR_EVIDENCE_DIR` 设为本地输出目录的绝对路径，可保存合成工作簿、错误报告及桌面和手机截图。[合成样本与验收记录](https://github.com/BUPT-Hongyan-Volunteer-Association/Hongyan-Volunteering-Platform/pull/7)
 
 ## 桌面日程
 
