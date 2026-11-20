@@ -281,16 +281,11 @@ export function evaluateRows(rows: ParsedRow[], existing: Map<string, ExistingSt
       }
       continue;
     }
-    const [first, ...duplicates] = group;
+    // 只对无错行去重：行级错误（未知列、格式错误等）不能被“相同资料跳过”掩盖。
+    const clean = group.filter((row) => row.errors.length === 0);
+    if (!clean.length) continue;
+    const [first, ...duplicates] = clean;
     const firstRow = evaluated.get(first.row_number)!;
-    if (first.errors.length) {
-      for (const row of duplicates) {
-        const target = evaluated.get(row.row_number)!;
-        target.action = 'error';
-        target.errors = [...first.errors];
-      }
-      continue;
-    }
     let action: ImportAction = 'create';
     let status: 'active' | 'inactive' = 'active';
     const match = existing.get(student_no);
@@ -300,16 +295,17 @@ export function evaluateRows(rows: ParsedRow[], existing: Map<string, ExistingSt
         action = 'skip_identical';
         status = match.status;
       } else {
-        firstRow.action = 'error';
-        firstRow.errors.push({
-          field: 'student_no',
-          code: 'profile_conflict',
-          message: '已有学号 ' + student_no + ' 的学生资料与文件不一致，请在学生档案中修正',
-        });
-        for (const row of duplicates) {
+        for (const row of clean) {
           const target = evaluated.get(row.row_number)!;
           target.action = 'error';
-          target.errors = [...firstRow.errors];
+          target.errors = [
+            ...target.errors,
+            {
+              field: 'student_no',
+              code: 'profile_conflict',
+              message: '已有学号 ' + student_no + ' 的学生资料与文件不一致，请在学生档案中修正',
+            },
+          ];
         }
         continue;
       }

@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import type { Prisma, StudentImportBatch } from '../generated/prisma/client.js';
 import { hashPassword } from '../auth/password.js';
 import type { SessionRequest } from '../auth/session.guard.js';
-import { pagination } from '../activities/read.js';import { Database } from '../database.js';
+import { pagination } from '../activities/read.js';
+import { Database } from '../database.js';
 import { BusinessError, invalid, invisible } from '../http.js';
 import { command } from './command.js';
 import {
@@ -119,8 +120,19 @@ function rowView(row: {
 }
 
 @Injectable()
-export class StudentImportService {
+export class StudentImportService implements OnApplicationBootstrap {
   constructor(private readonly db: Database) {}
+
+  /** 服务重启后恢复上传事务已提交、但校验回调尚未执行的批次。 */
+  async onApplicationBootstrap() {
+    const pending = await this.db.studentImportBatch.findMany({
+      where: { status: 'validating' },
+      select: { id: true },
+    });
+    if (!pending.length) return;
+    Logger.log('恢复 ' + pending.length + ' 个未完成的学生建档校验');
+    for (const batch of pending) this.schedule(batch.id);
+  }
 
   private async loadExisting(student_nos: string[]) {
     const unique = [...new Set(student_nos)];

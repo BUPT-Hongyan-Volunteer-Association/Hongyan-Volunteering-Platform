@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createApp } from '../dist/app.js';
 import { Database } from '../dist/database.js';
@@ -298,6 +298,37 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
           .status,
         403,
       );
+    });
+
+    await t.test('相同资料的第二行有行级错误时不被去重掩盖', async () => {
+      const profile = ['0000000801', '重复行学生', '本科生', '2026', '0000000901'];
+      const batch = await uploadImport(
+        teacher,
+        workbook([
+          { number: 2, values: profile },
+          { number: 3, values: profile, extra: { F: '多余列' } },
+        ]),
+      );
+      assert.equal(batch.status, 'invalid');
+      assert.equal(batch.row_count, 2);
+      assert.equal(batch.created_count, 1);
+      assert.equal(batch.skipped_count, 0);
+      assert.equal(batch.error_count, 1);
+      const preview = (await teacher.request('/admin/student-imports/' + batch.id + '/rows')).data;
+      const byNumber = new Map(preview.items.map((row) => [row.row_number, row]));
+      assert.equal(byNumber.get(2).action, 'create');
+      assert.equal(byNumber.get(3).action, 'error');
+      assert(
+        byNumber.get(3).errors.some((error) => error.code === 'unknown_column' && error.field === 'F'),
+      );
+      assert.equal(byNumber.get(3).raw_values.F, '多余列');
+      const blocked = await teacher.write(
+        'POST',
+        '/admin/student-imports/' + batch.id + '/commit',
+        commitBody(batch),
+      );
+      assert.equal(blocked.status, 409);
+      assert.equal(blocked.code, 'invalid_state');
     });
 
     await t.test('确认后新账号启用、以学号后六位首次登录并强制改密', async () => {
@@ -859,6 +890,42 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       await leaving.signIn('0000000001', 'student-new-pass1');
       assert.equal((await leaving.request('/auth/logout', { method: 'POST' })).status, 200);
       assert.equal((await leaving.request('/admin/students')).status, 401);
+    });
+
+    await t.test('服务启动时恢复已受理但未完成校验的批次', async () => {
+      const bytes = workbook([{ number: 2, values: ['0000000901', '重启恢复学生', '', '', ''] }]);
+      const teacherAccount = await db.account.findUniqueOrThrow({ where: { username: 'demo.teacher' } });
+      const stuck = await db.studentImportBatch.create({
+        data: {
+          status: 'validating',
+          version: 1,
+          source_hash: createHash('sha256').update(bytes).digest('hex'),
+          source_name: '重启恢复.xlsx',
+          source_data: new Uint8Array(bytes),
+          created_by: teacherAccount.id,
+        },
+      });
+      const recoveryApp = await createApp();
+      await recoveryApp.listen(0, '127.0.0.1');
+      try {
+        let result;
+        for (let attempt = 0; attempt < 200; attempt++) {
+          result = (await teacher.request('/admin/student-imports/' + stuck.id)).data;
+          if (result.status !== 'validating') break;
+          await sleep(25);
+        }
+        assert.equal(result.status, 'ready');
+        assert.equal(result.created_count, 1);
+        const committed = await teacher.write(
+          'POST',
+          '/admin/student-imports/' + stuck.id + '/commit',
+          commitBody(result),
+        );
+        assert.equal(committed.status, 200);
+        assert.equal(committed.data.status, 'committed');
+      } finally {
+        await recoveryApp.close();
+      }
     });
 
   } finally {
