@@ -194,6 +194,25 @@ export class ReviewController {
               changed_fields,
             })),
           });
+          // 与业务写入同事务登记待发送事件：键按审核唯一，重复审批不会重复投递。
+          await tx.notificationEvent.createMany({
+            data: [
+              {
+                event_type: 'activity_changed',
+                event_key: `activity_change:${id}`,
+                activity_id: row.id,
+                resource_id: id,
+                source_revision: r.revision,
+                payload: {
+                  review_id: id,
+                  revision: r.revision,
+                  changed_fields,
+                  recipients: recipients.map((p) => p.student_id),
+                },
+              },
+            ],
+            skipDuplicates: true,
+          });
         }
       }
       return result;

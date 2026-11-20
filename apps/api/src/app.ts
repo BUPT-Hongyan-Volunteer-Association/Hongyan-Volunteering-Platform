@@ -24,6 +24,9 @@ import { Database } from './database.js';
 import { PublicController } from './activities/public.controller.js';
 import { RegistrationController } from './registrations/registration.controller.js';
 import { ManagedController } from './activities/managed.controller.js';
+import { NoticeController } from './notices/notice.controller.js';
+import { NoticeWorker } from './notices/notice.worker.js';
+import { Clock } from './notices/clock.js';
 
 @Catch()
 class HttpErrorFilter implements ExceptionFilter {
@@ -59,8 +62,9 @@ class HttpErrorFilter implements ExceptionFilter {
     DraftController,
     ReviewController,
     RegistrationController,
+    NoticeController,
   ],
-  providers: [Database, Workflow, SessionService, SessionGuard],
+  providers: [Database, Workflow, SessionService, SessionGuard, Clock, NoticeWorker],
 })
 class AppModule {}
 
