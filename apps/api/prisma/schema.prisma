@@ -51,6 +51,7 @@ model Account {
 
 model Student {
   registrations Registration[]
+  receipts      NoticeReceipt[]
   id            String         @id @default(uuid()) @db.Uuid
   account_id    String         @unique @db.Uuid
   student_no    String         @unique @db.Char(10)
@@ -225,4 +226,63 @@ model ActivityChangeEvent {
 
   @@id([review_id, student_id])
   @@map("activity_change_event")
+}
+
+// 站内通知。receipts 保存发送时的接收人快照，补发不修改历史接收人。
+model Notice {
+  id                  String          @id @default(uuid()) @db.Uuid
+  version             Int             @default(1)
+  activity_id         String          @db.Uuid
+  title               String
+  body                String
+  requires_ack        Boolean         @default(true)
+  notice_kind         String
+  information_version Int             @default(1)
+  source_notice_id    String?         @db.Uuid
+  supersedes_id       String?         @db.Uuid
+  is_current          Boolean         @default(true)
+  published_by        String?         @db.Uuid
+  published_at        DateTime        @default(now()) @db.Timestamptz(3)
+  created_at          DateTime        @default(now()) @db.Timestamptz(3)
+  updated_at          DateTime        @updatedAt @db.Timestamptz(3)
+  receipts            NoticeReceipt[]
+
+  @@index([activity_id, notice_kind, is_current])
+  @@map("notice")
+}
+
+model NoticeReceipt {
+  notice_id       String    @db.Uuid
+  student_id      String    @db.Uuid
+  read_at         DateTime? @db.Timestamptz(3)
+  acknowledged_at DateTime? @db.Timestamptz(3)
+  created_at      DateTime  @default(now()) @db.Timestamptz(3)
+  notice          Notice    @relation(fields: [notice_id], references: [id], onDelete: Cascade)
+  student         Student   @relation(fields: [student_id], references: [id])
+
+  @@id([notice_id, student_id])
+  @@index([student_id])
+  @@map("notice_receipt")
+}
+
+// 业务事务写入的待发送事件。event_key 保证同一业务事件与接收人只入队一次。
+model NotificationEvent {
+  id              String    @id @default(uuid()) @db.Uuid
+  version         Int       @default(1)
+  event_type      String
+  event_key       String    @unique
+  activity_id     String?   @db.Uuid
+  resource_id     String?   @db.Uuid
+  source_revision Int?
+  payload         Json
+  status          String    @default("pending")
+  attempt_count   Int       @default(0)
+  last_error      String?
+  next_retry_at   DateTime? @db.Timestamptz(3)
+  delivered_at    DateTime? @db.Timestamptz(3)
+  created_at      DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at      DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@index([status, next_retry_at])
+  @@map("notification_event")
 }
