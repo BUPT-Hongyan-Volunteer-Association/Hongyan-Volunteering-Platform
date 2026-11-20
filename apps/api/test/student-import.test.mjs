@@ -566,6 +566,102 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       assert.equal((await student.request('/admin/students')).status, 403);
     });
 
+    await t.test('SQL 注入文本按名单内容处理，不改变查询结构', async () => {
+      const students = await db.student.count();
+      const accounts = await db.account.count();
+      const injected = workbook([
+        {
+          number: 2,
+          values: ["0000000001' OR '1'='1", "注入姓名'); DROP TABLE student;--", '', '', ''],
+        },
+        {
+          number: 3,
+          values: ['0000000003', "x' OR 1=1 --", '', '', "0000000001' OR '1'='1"],
+        },
+      ]);
+      const batch = await uploadImport(teacher, injected, '注入.xlsx');
+      assert.equal(batch.status, 'invalid');
+      const preview = (await teacher.request('/admin/student-imports/' + batch.id + '/rows')).data;
+      assert.equal(preview.items.length, 2);
+      assert.equal(
+        preview.items[0].raw_values.student_no,
+        "0000000001' OR '1'='1",
+      );
+      assert(
+        preview.items[0].errors.some((error) => error.field === 'student_no' && error.code === 'format'),
+      );
+      assert(preview.items[1].errors.some((error) => error.field === 'class_name'));
+      // 表仍存在、数据量未变，说明注入文本没有进入 SQL 结构
+      assert.equal(await db.student.count(), students);
+      assert.equal(await db.account.count(), accounts);
+      const byQuery = await teacher.request(
+        '/admin/students?q=' + encodeURIComponent("' OR 1=1 --"),
+      );
+      assert.equal(byQuery.status, 200);
+      assert.equal(byQuery.data.total, 0);
+      const byCohort = await teacher.request(
+        '/admin/students?cohort=' + encodeURIComponent("' OR 1=1 --"),
+      );
+      assert.equal(byCohort.status, 200);
+      assert.equal(byCohort.data.total, 0);
+      for (const bad of ["1' OR '1'='1", '1;DROP TABLE student']) {
+        const response = await teacher.request(
+          '/admin/student-imports/' + encodeURIComponent(bad),
+        );
+        assert.equal(response.status, 400);
+      }
+      assert.equal((await teacher.request('/admin/students')).status, 200);
+    });
+
+    await t.test('畸形或压缩炸弹式工作簿按结构错误快速拒绝，不退化为二次复杂度', async () => {
+      const namespace =
+        'xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"';
+      const unclosedRows = buildWorkbook({
+        sheets: [
+          {
+            name: '学生建档',
+            xml:
+              '<?xml version="1.0" encoding="utf-8"?><x:worksheet ' +
+              namespace +
+              '><x:sheetData>' +
+              '<x:row>'.repeat(200_000) +
+              '</x:sheetData></x:worksheet>',
+          },
+        ],
+        prefix: true,
+      });
+      const started = Date.now();
+      const rowsBatch = await uploadImport(teacher, unclosedRows, '畸形行.xlsx');
+      const elapsed = Date.now() - started;
+      assert.equal(rowsBatch.status, 'invalid');
+      assert.match(rowsBatch.error_message, /XML 结构不完整|工作簿/);
+      assert.ok(elapsed < 5_000, '畸形行工作簿处理耗时 ' + elapsed + 'ms');
+
+      const unclosedCells = buildWorkbook({
+        sheets: [
+          {
+            name: '学生建档',
+            xml:
+              '<?xml version="1.0" encoding="utf-8"?><x:worksheet ' +
+              namespace +
+              '><x:sheetData><x:row r="1"><x:c r="A1" t="str"><x:v>学号</x:v></x:c>' +
+              '<x:c r="A2"><x:c r="A3">'.repeat(200_000) +
+              '</x:row></x:sheetData></x:worksheet>',
+          },
+        ],
+        prefix: true,
+      });
+      const startedCells = Date.now();
+      const cellsBatch = await uploadImport(teacher, unclosedCells, '畸形单元格.xlsx');
+      const elapsedCells = Date.now() - startedCells;
+      assert.equal(cellsBatch.status, 'invalid');
+      assert.ok(elapsedCells < 5_000, '畸形单元格工作簿处理耗时 ' + elapsedCells + 'ms');
+
+      // 服务在畸形输入后仍正常响应
+      assert.equal((await teacher.request('/admin/students')).status, 200);
+      assert.equal((await teacher.request('/admin/student-imports/' + rowsBatch.id)).status, 200);
+    });
+
     await t.test('5,000 条非空数据行可校验，表格范围外与空行按规则处理', async () => {
       const rows = Array.from({ length: 5_000 }, (_, index) => ({
         number: index + 2,

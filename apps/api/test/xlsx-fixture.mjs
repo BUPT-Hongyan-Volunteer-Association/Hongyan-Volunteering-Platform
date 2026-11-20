@@ -121,6 +121,7 @@ export function buildWorkbook({ sheets, prefix = true, sharedStrings = false, co
     throw new Error('不支持的测试单元格：' + JSON.stringify(spec));
   };
   const sheetXml = (sheet) => {
+    if (sheet.xml !== undefined) return sheet.xml;
     const rows = sheet.rows
       .map(
         (row) =>

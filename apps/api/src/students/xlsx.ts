@@ -57,13 +57,14 @@ function readZipEntry(buffer: Buffer, wanted: string) {
   const entries = zipEntries(buffer);
   const entry = entries.get(wanted);
   if (!entry) throw new XlsxContentError('工作簿缺少必要的部件：' + wanted);
-  if (buffer.readUInt32LE(entry.local) !== 0x04034b50)
+  if (entry.local + 30 > buffer.length || buffer.readUInt32LE(entry.local) !== 0x04034b50)
     throw new XlsxContentError('工作簿压缩目录已损坏');
   const nameLength = buffer.readUInt16LE(entry.local + 26);
   const extraLength = buffer.readUInt16LE(entry.local + 28);
   const start = entry.local + 30 + nameLength + extraLength;
   const data = buffer.subarray(start, start + entry.compressed);
-  if (data.length !== entry.compressed) throw new XlsxContentError('工作簿内容被截断');
+  if (start > buffer.length || data.length !== entry.compressed)
+    throw new XlsxContentError('工作簿内容被截断');
   if (entry.uncompressed === 0) return Buffer.alloc(0);
   let output: Buffer;
   if (entry.method === 0) output = Buffer.from(data);
@@ -100,6 +101,7 @@ function zipEntries(buffer: Buffer) {
     const local = buffer.readUInt32LE(offset + 42);
     if (compressed === 0xffffffff || uncompressed === 0xffffffff || local === 0xffffffff)
       throw new XlsxContentError('不支持 ZIP64 工作簿');
+    if (offset + 46 + nameLength > buffer.length) throw new XlsxContentError('工作簿目录已损坏');
     const name = buffer.toString('utf8', offset + 46, offset + 46 + nameLength);
     offset += 46 + nameLength + extraLength + commentLength;
     if (flags & 1) throw new XlsxContentError('工作簿已加密，无法读取');
@@ -150,11 +152,130 @@ function decodeEntities(value: string) {
   });
 }
 
+const tagPattern = /^(?:[A-Za-z0-9_]+:)?([A-Za-z0-9_]+)/;
+
+interface Element {
+  attributes: string;
+  body: string;
+  end: number;
+}
+
+function malformed(): never {
+  throw new XlsxContentError('工作簿 XML 结构不完整');
+}
+
+/** 跳过一个注释或处理指令，返回其后的位置；不是这类标记时返回 -1。 */
+function skipMarkup(source: string, start: number) {
+  if (source.startsWith('<!--', start)) {
+    const end = source.indexOf('-->', start + 4);
+    if (end < 0) malformed();
+    return end + 3;
+  }
+  if (source.startsWith('<?', start)) {
+    const end = source.indexOf('?>', start + 2);
+    if (end < 0) malformed();
+    return end + 2;
+  }
+  if (source.startsWith('<![CDATA[', start)) {
+    const end = source.indexOf(']]>', start + 9);
+    if (end < 0) malformed();
+    return end + 3;
+  }
+  return -1;
+}
+
+/**
+ * 线性扫描指定闭合标签。游标只向后移动，不对同一段内容反复回溯，
+ * 因此畸形 XML（大量未闭合标签）也不会退化为二次复杂度。
+ */
+function closingTag(source: string, from: number, name: string) {
+  let cursor = from;
+  while (true) {
+    const start = source.indexOf('</', cursor);
+    if (start < 0) return null;
+    const match = tagPattern.exec(source.slice(start + 2, start + 42));
+    if (!match) {
+      cursor = start + 2;
+      continue;
+    }
+    const end = source.indexOf('>', start);
+    if (end < 0) return null;
+    if (match[1] === name) return { start, end: end + 1 };
+    cursor = end + 1;
+  }
+}
+
+/** 线性查找下一个指定元素（跳过注释、处理指令与其他标签）。 */
+function nextElement(source: string, from: number, name: string): Element | null {
+  let cursor = from;
+  while (true) {
+    const start = source.indexOf('<', cursor);
+    if (start < 0) return null;
+    const skipped = skipMarkup(source, start);
+    if (skipped >= 0) {
+      cursor = skipped;
+      continue;
+    }
+    const match = tagPattern.exec(source.slice(start + 1, start + 41));
+    if (!match || match[1] !== name) {
+      cursor = start + 1;
+      continue;
+    }
+    const end = source.indexOf('>', start);
+    if (end < 0) malformed();
+    const selfClosing = source[end - 1] === '/';
+    const attributes = source.slice(start + 1 + match[0].length, selfClosing ? end - 1 : end);
+    if (selfClosing) return { attributes, body: '', end: end + 1 };
+    const close = closingTag(source, end + 1, name);
+    if (!close) malformed();
+    return { attributes, body: source.slice(end + 1, close.start), end: close.end };
+  }
+}
+
 function texts(fragment: string) {
   let value = '';
-  const pattern = /<(?:[A-Za-z0-9_]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?t>/g;
-  for (const run of fragment.matchAll(pattern)) value += decodeEntities(run[1]);
+  let cursor = 0;
+  let element = nextElement(fragment, cursor, 't');
+  while (element) {
+    value += decodeEntities(element.body);
+    cursor = element.end;
+    element = nextElement(fragment, cursor, 't');
+  }
   return value;
+}
+
+/** 共享文本条目：拼接全部 <t> 文本，跳过注音 <rPh> 块。 */
+function sharedStringText(source: string) {
+  let value = '';
+  let cursor = 0;
+  while (true) {
+    const start = source.indexOf('<', cursor);
+    if (start < 0) return value;
+    const skipped = skipMarkup(source, start);
+    if (skipped >= 0) {
+      cursor = skipped;
+      continue;
+    }
+    const match = tagPattern.exec(source.slice(start + 1, start + 41));
+    if (!match) {
+      cursor = start + 1;
+      continue;
+    }
+    if (match[1] === 'rPh') {
+      const element = nextElement(source, start, 'rPh');
+      if (!element) return value;
+      cursor = element.end;
+      continue;
+    }
+    if (match[1] === 't') {
+      const element = nextElement(source, start, 't');
+      if (!element) return value;
+      value += decodeEntities(element.body);
+      cursor = element.end;
+      continue;
+    }
+    cursor = start + 1;
+  }
 }
 
 function sharedStrings(files: ReturnType<typeof archive>) {
@@ -164,11 +285,14 @@ function sharedStrings(files: ReturnType<typeof archive>) {
   } catch {
     return [];
   }
-  source = source.replace(/<(?:[A-Za-z0-9_]+:)?si\b[^>]*\/>/g, '');
-  source = source.replace(/<(?:[A-Za-z0-9_]+:)?rPh\b[\s\S]*?<\/(?:[A-Za-z0-9_]+:)?rPh>/g, '');
   const values: string[] = [];
-  const pattern = /<(?:[A-Za-z0-9_]+:)?si\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?si>/g;
-  for (const item of source.matchAll(pattern)) values.push(texts(item[1]));
+  let cursor = 0;
+  let item = nextElement(source, cursor, 'si');
+  while (item) {
+    values.push(sharedStringText(item.body));
+    cursor = item.end;
+    item = nextElement(source, cursor, 'si');
+  }
   return values;
 }
 
@@ -186,18 +310,27 @@ function workbookSheets(files: ReturnType<typeof archive>): WorkbookSheet[] {
     rels = '';
   }
   const targets = new Map<string, string>();
-  for (const item of rels.matchAll(/<(?:[A-Za-z0-9_]+:)?Relationship\b([^>]*?)\/?>/g)) {
-    const id = attribute(item[1], 'Id');
-    const target = attribute(item[1], 'Target');
+  let cursor = 0;
+  let relationship = nextElement(rels, cursor, 'Relationship');
+  while (relationship) {
+    const id = attribute(relationship.attributes, 'Id');
+    const target = attribute(relationship.attributes, 'Target');
     if (id && target) targets.set(id, target);
+    cursor = relationship.end;
+    relationship = nextElement(rels, cursor, 'Relationship');
   }
   const sheets: WorkbookSheet[] = [];
-  for (const item of book.matchAll(/<(?:[A-Za-z0-9_]+:)?sheet\b([^>]*?)\/?>/g)) {
-    const name = attribute(item[1], 'name');
-    const id = attribute(item[1], 'r:id') ?? attribute(item[1], 'id');
-    if (!name) continue;
-    const target = id ? targets.get(id) : undefined;
-    sheets.push({ name, target: resolveTarget(target, sheets.length) });
+  cursor = 0;
+  let sheet = nextElement(book, cursor, 'sheet');
+  while (sheet) {
+    const name = attribute(sheet.attributes, 'name');
+    const id = attribute(sheet.attributes, 'r:id') ?? attribute(sheet.attributes, 'id');
+    if (name) {
+      const target = id ? targets.get(id) : undefined;
+      sheets.push({ name, target: resolveTarget(target, sheets.length) });
+    }
+    cursor = sheet.end;
+    sheet = nextElement(book, cursor, 'sheet');
   }
   return sheets;
 }
@@ -209,57 +342,60 @@ function resolveTarget(target: string | undefined, index: number) {
   return 'xl/' + normalized;
 }
 
-function cellFrom(cell: string, attributes: string, rowNumber: number, index: number, shared: string[]) {
+function cellFrom(
+  body: string,
+  attributes: string,
+  rowNumber: number,
+  index: number,
+  shared: string[],
+): SheetCell | null {
   const ref = attribute(attributes, 'r') ?? '';
   const column = columnIndex(ref.match(/^[A-Z]+/)?.[0] ?? '') ?? index;
   const type = attribute(attributes, 't');
-  const formulaMatch =
-    /<(?:[A-Za-z0-9_]+:)?f\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?f>/.exec(cell) ??
-    /<(?:[A-Za-z0-9_]+:)?f\b[^>]*\/>/.exec(cell);
-  const value = /<(?:[A-Za-z0-9_]+:)?v\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?v>/.exec(cell);
-  const inline = /<(?:[A-Za-z0-9_]+:)?is\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?is>/.exec(cell);
-  const result: SheetCell = { column, ref: ref || columnName(column) + rowNumber, type: 'text', text: '' };
-  if (formulaMatch) {
-    const formula = formulaMatch[1] ?? '';
-    result.type = 'formula';
-    result.text = '=' + decodeEntities(formula);
-    return result;
-  }
-  if (inline) {
-    result.text = texts(inline[1]);
-    return result;
-  }
-  if (value === null) return null;
-  const raw = decodeEntities(value[1]);
+  const formula = nextElement(body, 0, 'f');
+  if (formula)
+    return {
+      column,
+      ref: ref || columnName(column) + rowNumber,
+      type: 'formula',
+      text: '=' + decodeEntities(formula.body),
+    };
+  const inline = nextElement(body, 0, 'is');
+  if (inline)
+    return { column, ref: ref || columnName(column) + rowNumber, type: 'text', text: texts(inline.body) };
+  const value = nextElement(body, 0, 'v');
+  if (!value) return null;
+  const raw = decodeEntities(value.body);
+  const cell: SheetCell = { column, ref: ref || columnName(column) + rowNumber, type: 'text', text: raw };
   switch (type) {
     case 's': {
       const entry = shared[Number(raw)];
       if (entry === undefined) throw new XlsxContentError('工作簿共享文本索引无效');
-      result.text = entry;
-      return result;
+      cell.text = entry;
+      return cell;
     }
     case 'inlineStr':
-      result.text = raw;
-      return result;
+      cell.text = raw;
+      return cell;
     case 'str':
-      result.text = raw;
-      return result;
+      cell.text = raw;
+      return cell;
     case 'b':
-      result.type = 'boolean';
-      result.text = raw === '1' ? 'TRUE' : 'FALSE';
-      return result;
+      cell.type = 'boolean';
+      cell.text = raw === '1' ? 'TRUE' : 'FALSE';
+      return cell;
     case 'e':
-      result.type = 'error';
-      result.text = raw;
-      return result;
+      cell.type = 'error';
+      cell.text = raw;
+      return cell;
     case 'd':
-      result.type = 'date';
-      result.text = raw;
-      return result;
+      cell.type = 'date';
+      cell.text = raw;
+      return cell;
     default:
-      result.type = 'number';
-      result.text = raw;
-      return result;
+      cell.type = 'number';
+      cell.text = raw;
+      return cell;
   }
 }
 
@@ -290,25 +426,34 @@ export function readXlsxSheet(buffer: Buffer, name: string): Sheet {
   const shared = sharedStrings(files);
   const rows: SheetRow[] = [];
   let truncated = false;
-  const rowPattern = /<(?:[A-Za-z0-9_]+:)?row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?row>)/g;
-  for (const match of source.matchAll(rowPattern)) {
-    const attributes = match[1];
-    const body = match[2] ?? '';
-    const number = Number(attribute(attributes, 'r') ?? rows.length + 1);
-    if (!Number.isSafeInteger(number) || number < 1) continue;
+  let previousNumber = 0;
+  let cursor = 0;
+  let row = nextElement(source, cursor, 'row');
+  while (row) {
+    const parsedNumber = Number(attribute(row.attributes, 'r') ?? previousNumber + 1);
+    const number =
+      Number.isSafeInteger(parsedNumber) && parsedNumber > 0 ? parsedNumber : previousNumber + 1;
     const cells: SheetCell[] = [];
     let position = 0;
-    for (const cell of body.matchAll(/<(?:[A-Za-z0-9_]+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?c>)/g)) {
-      const parsed = cellFrom(cell[2] ?? '', cell[1], number, position, shared);
+    let cellCursor = 0;
+    let cell = nextElement(row.body, cellCursor, 'c');
+    while (cell) {
+      const parsed = cellFrom(cell.body, cell.attributes, number, position, shared);
       position = parsed ? parsed.column + 1 : position + 1;
       if (parsed && parsed.text !== '') cells.push(parsed);
+      cellCursor = cell.end;
+      cell = nextElement(row.body, cellCursor, 'c');
     }
-    if (!cells.length) continue;
-    rows.push({ number, cells });
-    if (rows.length > maxSheetRows) {
-      truncated = true;
-      break;
+    if (cells.length) {
+      rows.push({ number, cells });
+      if (rows.length > maxSheetRows) {
+        truncated = true;
+        break;
+      }
     }
+    previousNumber = number;
+    cursor = row.end;
+    row = nextElement(source, cursor, 'row');
   }
   return { name, rows, truncated };
 }
