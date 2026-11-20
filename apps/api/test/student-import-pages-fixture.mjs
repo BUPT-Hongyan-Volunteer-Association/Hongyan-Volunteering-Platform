@@ -22,14 +22,14 @@ export async function checkStudentImportPages(page, admin, { fits }) {
   await page.getByRole('navigation', { name: '后台导航' }).getByRole('link', { name: '建档导入', exact: true }).click();
   await page.waitForURL('**/manage/imports');
   await page.getByRole('heading', { name: '建档导入' }).waitFor();
+  await page.getByRole('button', { name: '选择或拖入学生建档模板' }).waitFor();
 
-  // 相同资料的第二行在 F 列多填一项：预览必须保留该行错误并阻止确认
+  // 相同资料的第二行在 G 列多填一项：预览必须保留该行错误并阻止确认
   await page.getByLabel('名单文件', { exact: true }).setInputFiles({
     name: '含错误名单.xlsx',
     buffer: invalid,
     mimeType,
   });
-  await button('上传并预览').click();
   await chip('内容有误').waitFor();
   const errorRow = page.locator('tr[data-row="3"]');
   await errorRow.waitFor();
@@ -45,7 +45,6 @@ export async function checkStudentImportPages(page, admin, { fits }) {
     buffer: fixed,
     mimeType,
   });
-  await button('上传并预览').click();
   await chip('待确认').waitFor();
   await button('确认建档').click();
   await chip('已建档').waitFor();

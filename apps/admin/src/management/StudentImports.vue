@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Pager from '@hongyan/ui/Pager.vue';
+import UiIcon from '@hongyan/ui/UiIcon.vue';
 import {
   commitStudentImport,
   createCommand,
@@ -30,8 +31,9 @@ const actionLabels = {
   skip_identical: '重复跳过',
   error: '错误',
 } as const;
-const file = ref<File>();
+const picker = ref<HTMLInputElement>();
 const chosenName = ref('');
+const dragging = ref(false);
 const batch = ref<StudentImport>();
 const rows = ref<StudentImportRow[]>([]);
 const rowTotal = ref(0);
@@ -106,26 +108,36 @@ function schedulePoll() {
     if (current) void loadBatch(current.id, { quiet: true });
   }, 800);
 }
-function choose(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const next = input.files?.[0];
+function openPicker() {
+  if (!busy.value) picker.value?.click();
+}
+function acceptFile(next: File | undefined) {
   error.value = '';
-  if (!next) {
-    file.value = undefined;
-    chosenName.value = '';
-    return;
-  }
+  if (!next || busy.value) return;
   if (!/\.xlsx$/i.test(next.name) || next.size > 5_242_880) {
     error.value = '请选择不超过 5 MB 的 .xlsx 学生建档模板。';
-    input.value = '';
     return;
   }
-  file.value = next;
   chosenName.value = next.name;
+  void uploadFile(next);
 }
-async function upload() {
-  const source = file.value;
-  if (!source || busy.value) return;
+function choose(event: Event) {
+  const input = event.target as HTMLInputElement;
+  acceptFile(input.files?.[0]);
+  input.value = '';
+}
+function drop(event: DragEvent) {
+  dragging.value = false;
+  acceptFile(event.dataTransfer?.files?.[0]);
+}
+function dragOver() {
+  if (!busy.value) dragging.value = true;
+}
+function dragLeave() {
+  dragging.value = false;
+}
+async function uploadFile(source: File) {
+  if (busy.value) return;
   busy.value = true;
   error.value = '';
   notice.value = '';
@@ -142,7 +154,6 @@ async function upload() {
     });
     command.confirmed();
     if (disposed) return;
-    file.value = undefined;
     chosenName.value = '';
     notice.value = '文件已受理，正在校验…';
     await router.replace({ path: '/manage/imports/' + result.data.data.id });
@@ -232,18 +243,31 @@ watch(
     </div>
     <a class="button" :href="templateUrl" download="学生建档导入模板_v1.4.xlsx">下载空白模板</a>
   </div>
-  <form class="preview-form" @submit.prevent="upload">
-    <label>名单文件
-      <input type="file" accept=".xlsx" @change="choose" />
-    </label>
-    <p class="hint">
-      使用学生建档模板 v1.4，仅接受 .xlsx、5 MB（5,242,880 字节）、5,000 条非空数据。工作表「学生建档」，六列表头（含学院）。
-    </p>
-    <button class="primary" type="submit" :disabled="busy || !file">
-      {{ busy ? '正在上传…' : '上传并预览' }}
-    </button>
-    <p v-if="chosenName" class="hint">已选择：{{ chosenName }}</p>
-  </form>
+  <input
+    ref="picker"
+    class="file-input"
+    type="file"
+    accept=".xlsx"
+    aria-label="名单文件"
+    @change="choose"
+  />
+  <div
+    class="dropzone"
+    :class="{ dragging, busy }"
+    role="button"
+    tabindex="0"
+    aria-label="选择或拖入学生建档模板"
+    @click="openPicker"
+    @keydown.enter.prevent="openPicker"
+    @keydown.space.prevent="openPicker"
+    @dragover.prevent="dragOver"
+    @dragleave.prevent="dragLeave"
+    @drop.prevent="drop"
+  >
+    <UiIcon name="Upload" />
+    <p>{{ busy ? '正在上传…' : dragging ? '松开即上传' : '拖拽文件到此处，或点击选择' }}</p>
+    <small v-if="chosenName">{{ chosenName }}</small>
+  </div>
   <p v-if="error" role="alert">{{ error }} <button type="button" @click="batchId && loadBatch(batchId)">重试读取</button></p>
   <p v-if="notice" role="status" class="notice">{{ notice }}</p>
   <p v-if="loading && !batch" role="status">正在读取批次…</p>
@@ -332,6 +356,60 @@ watch(
 .hint {
   color: var(--muted);
   font-size: 13px;
+}
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.dropzone {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 42px 20px;
+  margin: 4px 0 18px;
+  border: 1.5px dashed var(--field-line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.14s, background-color 0.14s;
+}
+.dropzone:hover,
+.dropzone:focus-visible {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+.dropzone.dragging {
+  border-color: var(--brand);
+  border-style: solid;
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+.dropzone.busy {
+  cursor: progress;
+  opacity: 0.85;
+}
+.dropzone .ui-icon {
+  width: 28px;
+  height: 28px;
+}
+.dropzone p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+}
+.dropzone small {
+  color: var(--muted);
+}
+@media (max-width: 700px) {
+  .dropzone {
+    padding: 30px 14px;
+  }
 }
 .batch-summary {
   margin-top: 24px;
