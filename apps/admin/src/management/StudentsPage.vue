@@ -9,10 +9,10 @@ const route = useRoute(),
   router = useRouter();
 const size = 20;
 const search = ref('');
-const cohort = ref('');
 const rows = ref<Student[]>([]);
 const total = ref(0);
 const gradeOptions = ref<string[]>([]);
+const cohortOptions = ref<string[]>([]);
 const loading = ref(false);
 const error = ref('');
 let serial = 0;
@@ -30,6 +30,11 @@ const statusOptions = [
   { value: 'inactive', label: '停用' },
 ] as const;
 const selectedGrade = computed(() => String(route.query.grade ?? 'all'));
+const selectedCohort = computed(() => String(route.query.cohort ?? 'all'));
+const cohortChoices = computed(() => [
+  { value: 'all', label: '全部级部' },
+  ...cohortOptions.value.map((cohort) => ({ value: cohort, label: cohort })),
+]);
 const gradeChoices = computed(() => [
   { value: 'all', label: '全部年级' },
   ...gradeOptions.value.map((grade) => ({ value: grade, label: grade + '级' })),
@@ -44,7 +49,7 @@ async function load() {
       await listStudents({
         query: {
           ...(route.query.q ? { q: String(route.query.q) } : {}),
-          ...(route.query.cohort ? { cohort: String(route.query.cohort) } : {}),
+          ...(selectedCohort.value !== 'all' ? { cohort: selectedCohort.value } : {}),
           ...(selectedGrade.value !== 'all' ? { grade: selectedGrade.value } : {}),
           ...(status.value !== 'all' ? { status: status.value } : {}),
           page: page.value,
@@ -57,6 +62,7 @@ async function load() {
     rows.value = result.items;
     total.value = result.total;
     gradeOptions.value = result.grade_options;
+    cohortOptions.value = result.cohort_options;
   } catch (reason) {
     if (current === serial) error.value = reason instanceof Error ? reason.message : '读取学生档案失败';
   } finally {
@@ -67,7 +73,6 @@ watch(
   () => route.query,
   () => {
     search.value = String(route.query.q ?? '');
-    cohort.value = String(route.query.cohort ?? '');
     return load();
   },
   { immediate: true },
@@ -76,11 +81,16 @@ function apply() {
   void router.push({
     query: {
       ...(search.value.trim() ? { q: search.value.trim() } : {}),
-      ...(cohort.value.trim() ? { cohort: cohort.value.trim() } : {}),
+      ...(selectedCohort.value !== 'all' ? { cohort: selectedCohort.value } : {}),
       ...(selectedGrade.value !== 'all' ? { grade: selectedGrade.value } : {}),
       ...(status.value !== 'all' ? { status: status.value } : {}),
       page: 1,
     },
+  });
+}
+function setCohort(value: string) {
+  void router.push({
+    query: { ...route.query, ...(value === 'all' ? { cohort: undefined } : { cohort: value }), page: 1 },
   });
 }
 function setGrade(value: string) {
@@ -107,7 +117,9 @@ function goPage(next: number) {
   </div>
   <form class="filters" @submit.prevent="apply">
     <label>学号或姓名<input v-model="search" type="search" placeholder="输入学号或姓名" /></label>
-    <label>级部<input v-model="cohort" type="search" placeholder="按级部筛选" /></label>
+    <label class="filter-select">级部
+      <UiSelect :model-value="selectedCohort" label="级部" :options="cohortChoices" @update:model-value="setCohort" />
+    </label>
     <label class="filter-select">年级
       <UiSelect :model-value="selectedGrade" label="年级" :options="gradeChoices" @update:model-value="setGrade" />
     </label>

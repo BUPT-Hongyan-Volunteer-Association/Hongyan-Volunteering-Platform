@@ -602,6 +602,11 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const cohort = (await teacher.request('/admin/students?cohort=' + encodeURIComponent('本科生'))).data;
       assert(cohort.items.some((item) => item.student_no === '0000000201'));
       assert(cohort.items.every((item) => item.cohort === '本科生'));
+      assert(cohort.cohort_options.includes('本科生'));
+      assert(cohort.cohort_options.every((value) => value.length > 0));
+      const grade = (await teacher.request('/admin/students?grade=2026&page_size=100')).data;
+      assert(grade.grade_options.every((value) => /^[0-9]{4}$/.test(value)));
+      assert(grade.cohort_options.includes('本科生'));
       const active = (await teacher.request('/admin/students?status=active&page_size=100')).data;
       assert(active.items.every((item) => item.status === 'active'));
       const inactive = (await teacher.request('/admin/students?status=inactive')).data;

@@ -496,6 +496,15 @@ export class StudentImportService implements OnApplicationBootstrap {
         const grade_options = gradeRows
           .map((row) => row.grade)
           .filter((value): value is string => !!value);
+        const cohortRows = await tx.student.findMany({
+          where: { cohort: { not: null } },
+          select: { cohort: true },
+          distinct: ['cohort'],
+          orderBy: { cohort: 'asc' },
+        });
+        const cohort_options = cohortRows
+          .map((row) => row.cohort)
+          .filter((value): value is string => !!value);
         const items =
           skip < total
             ? await tx.student.findMany({
@@ -506,7 +515,14 @@ export class StudentImportService implements OnApplicationBootstrap {
                 take: page_size,
               })
             : [];
-        return { items: items.map(studentView), page, page_size, total, grade_options };
+        return {
+          items: items.map(studentView),
+          page,
+          page_size,
+          total,
+          grade_options,
+          cohort_options,
+        };
       },
       { isolationLevel: 'RepeatableRead' },
     );
