@@ -9,6 +9,8 @@
     "build": "tsc",
     "dev": "tsc && node --env-file=.env dist/main.js",
     "test:accounts": "node --test test/demo-accounts.test.mjs",
+    "test:hour-workbook": "tsc && node --test test/hour-workbook.test.mjs",
+    "test:hour-preview": "tsc && node --test test/hour-preview.test.mjs",
     "test:flow": "tsc && node --env-file=.env --test test/activity-flow.test.mjs",
     "test:notice": "tsc && node --env-file=.env --test test/notice-flow.test.mjs",
     "db:seed": "node --env-file=.env scripts/seed.mjs",
@@ -24,13 +26,17 @@
     "ajv-formats": "3.0.1",
     "cookie": "1.1.1",
     "dotenv": "17.2.3",
+    "fflate": "0.8.3",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
-    "yaml": "2.9.1"
+    "saxes": "6.0.0",
+    "yaml": "2.9.1",
+    "yauzl": "3.4.0"
   },
   "devDependencies": {
     "@hongyan/contracts": "workspace:*",
     "@types/express": "5.0.6",
+    "@types/yauzl": "3.4.0",
     "prisma": "7.10.1"
   }
 }

@@ -11,7 +11,7 @@ export class PublicController {
   @Get() async list(@Req() req: SessionRequest, @Query() q: Record<string, string>) {
     if (q.review_status !== undefined || q.owner_account_id !== undefined) denied();
     if (q.scope && !['public', 'mine'].includes(q.scope)) invalid('scope', '公开查询范围无效');
-    const id = req.actor.student?.id ?? '00000000-0000-0000-0000-000000000000';
+    const studentId = req.actor.student?.id;
     const statuses = q.status
       ? [q.status]
       : q.scope === 'mine'
@@ -21,31 +21,31 @@ export class PublicController {
       published_revision: { not: null },
       status: { in: statuses.filter((s) => ['published', 'completed', 'cancelled'].includes(s)) },
       ...(q.scope === 'mine' && {
-        registrations: { some: { student_id: id, status: 'accepted' } },
+        registrations: { some: { student_id: studentId ?? { in: [] }, status: 'accepted' } },
       }),
     };
-    return envelope(await activityPage(this.db, where, 'public', q, req.actor.student?.id));
+    return envelope(await activityPage(this.db, where, 'public', q, studentId));
   }
   @Get(':id') async detail(
     @Req() req: SessionRequest,
-    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
-    const row = await this.db.activity.findFirst({
-      where: {
-        id,
-        published_revision: { not: null },
-        status: { in: ['published', 'cancelled', 'completed'] },
-      },
-      include: {
-        ...includeView,
-        registrations: {
-          where: { student_id: req.actor.student?.id ?? '00000000-0000-0000-0000-000000000000' },
-          select: { status: true },
+    const studentId = req.actor.student?.id;
+    return this.db.$transaction(async (tx) => {
+      const row = await tx.activity.findFirst({
+        where: { id, status: { in: ['published', 'cancelled', 'completed'] } },
+        include: {
+          members: includeView.members,
+          registrations: studentId ? { where: { student_id: studentId }, select: { status: true } } : false,
         },
-      },
-    });
-    const activity = row && project(row, 'public-detail', new Date());
-    if (!activity) invisible();
-    return envelope(activity);
+      });
+      if (!row || row.published_revision === null) invisible();
+      const revision = await tx.activityRevision.findUnique({
+        where: { activity_id_revision: { activity_id: id, revision: row.published_revision } },
+      });
+      if (!revision) invisible();
+      const view = project({ ...row, revisions: [revision], reviews: [] }, 'public-detail', new Date());
+      return envelope(view ?? invisible());
+    }, { isolationLevel: 'RepeatableRead' });
   }
 }

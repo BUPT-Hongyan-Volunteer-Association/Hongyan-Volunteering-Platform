@@ -50,6 +50,7 @@ model Account {
 }
 
 model Student {
+  hour_records HourRecord[]
   registrations Registration[]
   receipts      NoticeReceipt[]
   id            String         @id @default(uuid()) @db.Uuid
@@ -81,6 +82,9 @@ model LoginWindow {
 }
 
 model Activity {
+  hour_batches HourImportBatch[]
+  hour_files   HourImportFile[]
+  hour_records HourRecord[]
   reviews            ActivityReview[]
   registrations      Registration[]
   notices            Notice[]
@@ -289,4 +293,76 @@ model NotificationEvent {
 
   @@index([status, next_retry_at])
   @@map("notification_event")
+}
+
+model HourImportFile {
+  id           String   @id @default(uuid()) @db.Uuid
+  activity_id  String   @db.Uuid
+  name         String
+  purpose      String
+  size         Int
+  contents     Bytes
+  created_at   DateTime @default(now()) @db.Timestamptz(3)
+  activity     Activity @relation(fields: [activity_id], references: [id])
+  sources      HourImportBatch[] @relation("HourSource")
+  reports      HourImportBatch[] @relation("HourReport")
+
+  @@map("hour_import_file")
+}
+
+model HourImportBatch {
+  id             String   @id @default(uuid()) @db.Uuid
+  activity_id    String   @db.Uuid
+  source_file_id String   @db.Uuid
+  report_file_id String?  @db.Uuid
+  submitted_by   String   @db.Uuid
+  validation_by  String   @db.Uuid
+  mode           String
+  status         String   @default("validating")
+  version        Int      @default(1)
+  retry_count    Int      @default(0)
+  created_at     DateTime @default(now()) @db.Timestamptz(3)
+  updated_at     DateTime @updatedAt @db.Timestamptz(3)
+  metadata       Json
+  summary        Json
+  activity       Activity @relation(fields: [activity_id], references: [id])
+  source         HourImportFile @relation("HourSource", fields: [source_file_id], references: [id])
+  report         HourImportFile? @relation("HourReport", fields: [report_file_id], references: [id])
+  rows           HourImportRow[]
+
+  @@index([activity_id, created_at, id])
+  @@index([status, created_at])
+  @@map("hour_import_batch")
+}
+
+model HourImportRow {
+  batch_id    String @db.Uuid
+  row_number  Int
+  action      String
+  needs_review Boolean
+  detail      Json
+  batch       HourImportBatch @relation(fields: [batch_id], references: [id], onDelete: Cascade)
+
+  @@id([batch_id, row_number])
+  @@map("hour_import_row")
+}
+
+model HourRecord {
+  id                       String   @id @default(uuid()) @db.Uuid
+  student_id               String   @db.Uuid
+  activity_id              String   @db.Uuid
+  service_date             DateTime @db.Date
+  version                  Int
+  status                   String
+  hours                    Decimal  @db.Decimal(4, 1)
+  origin_schedule_revision Int
+  misconduct_reported      String
+  misconduct_version       Int
+  misconduct_fact          String?
+  reusable_facts           String[] @default([])
+  student                  Student  @relation(fields: [student_id], references: [id])
+  activity                 Activity @relation(fields: [activity_id], references: [id])
+
+  @@unique([student_id, service_date, activity_id])
+  @@map("hour_record")
 }

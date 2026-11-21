@@ -118,7 +118,7 @@ onUnmounted(() => {
       <RouterLink
         v-for="[path, label] in sections.slice(0, 4)"
         :key="path"
-        :class="{ current: route.params.area === path }"
+        :class="{ current: route.params.area === path || (path === 'batches' && ['hour-batches','hour-batch'].includes(String(route.name))) }"
         :to="{ path: base + '/' + path, query: sourceQuery }"
         >{{ label }}</RouterLink
       >
@@ -141,14 +141,15 @@ onUnmounted(() => {
     <RouterView v-if="route.name !== 'managed-overview'" v-slot="{ Component }">
       <component
         :is="Component"
+        v-on="['hour-batches','hour-batch'].includes(String(route.name)) ? { denied: refresh } : {}"
         v-bind="
           route.name === 'organizer-section'
-            ? { activityCode: activity.activity_code }
+            ? {}
             : route.name === 'activity-edit'
               ? { writesPaused: verifying || !!error, snapshot: detail, onLoaded: showDetail }
               : { writesPaused: verifying || !!error }
         "
-        :key="base"
+        :key="route.name === 'hour-batch' ? base + '/' + route.params.item : base"
       />
     </RouterView>
     <section v-else>

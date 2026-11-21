@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { createApp } from '../dist/app.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { Database } from '../dist/database.js';
+import { checkHourPreview, prepareHourPreviewFixture } from './hour-preview-fixture.mjs';
+import { checkHourHttp } from './hour-http-fixture.mjs';
 
 function browser(base) {
   let cookie = '',
@@ -40,7 +42,10 @@ function browser(base) {
     }
   }
   const write = (method, path, body, key = randomUUID()) => request(path, { method, body, key });
-  return { request, signIn, write };
+  const raw = (path, options = {}) => fetch(base + path, { ...options, headers: {
+    Cookie:cookie, 'X-CSRF-Token':csrf, ...options.headers,
+  } });
+  return { request, signIn, write, raw };
 }
 
 test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持一致', async (t) => {
@@ -104,7 +109,13 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       data: { activity_id: id, student_id: participant.id, status: 'accepted' },
     });
     await t.test('待审、驳回和批准的公开可见性', async () => {
-      const old = (await publicDetail()).data.schedule_revision;
+      const approvedActivity = (await managed()).activity;
+      const old = approvedActivity.schedule_revision;
+      const unchanged = await edit({});
+      assert.equal(unchanged.status, 200);
+      assert.equal(unchanged.data.version, approvedActivity.version);
+      assert.equal(unchanged.data.schedule_revision, old);
+      assert.equal(unchanged.data.revision_state, 'approved');
       assert.equal((await edit({ location: 'B' })).status, 200);
       let r = await submit();
       assert(
@@ -226,6 +237,11 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal((await member.request('/auth/logout', { method: 'POST' })).status, 200);
       assert.equal((await member.request('/me')).status, 401);
       await dual.signIn('demo.dual', staffPassword);
+      assert.deepEqual((await dual.request('/activities?scope=mine&page=2')).data,
+        { items: [], total: 0, page: 2, page_size: 20 });
+      const publicView = (await dual.request('/activities/' + id)).data;
+      assert.equal(publicView.id, id);
+      assert(!Object.hasOwn(publicView, 'group_join_instructions'));
       const item = (await dual.write('POST', '/organizer/activities', sample.revisions[0].content))
         .data;
       const submitted = (
@@ -407,6 +423,11 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal(await db.registration.count({ where: { activity_id: id, status: 'accepted' } }), 2);
       assert.equal(await db.registrationDecisionEvent.count({ where: { activity_id: id } }), 1);
     });
+
+    const fixture = await prepareHourPreviewFixture(db, sample);
+    await t.test('混合工作簿重复预览保持逐行结果和正式时长一致', () => checkHourPreview(db, fixture));
+    await t.test('独立库混合工作簿：HTTP 上传、报告、权限回收和失败重试均不入账', () =>
+      checkHourHttp(db, fixture, { owner, other, student, teacher }));
   } finally {
     await app?.close();
   }
