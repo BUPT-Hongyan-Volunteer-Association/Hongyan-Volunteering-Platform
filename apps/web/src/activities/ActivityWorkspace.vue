@@ -141,7 +141,7 @@ onUnmounted(() => {
     <RouterView v-if="route.name !== 'managed-overview'" v-slot="{ Component }">
       <component
         :is="Component"
-        v-on="['hour-batches','hour-batch'].includes(String(route.name)) ? { denied: refresh } : {}"
+        v-on="['activity-attendance', 'hour-batches', 'hour-batch'].includes(String(route.name)) ? { denied: refresh } : {}"
         v-bind="
           ['organizer-section', 'activity-notices'].includes(String(route.name))
             ? {}

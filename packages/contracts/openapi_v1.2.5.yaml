@@ -4,7 +4,7 @@ info:
   version: 1.2.5
   description: 2026-11-18 PRD v1.3.4配套规格，尚未实现。沿用/api/v1，本次校订后按本文件重新生成客户端。确认学生初始密码为学号后六位，首次登录强制改密。学号和班级均为十位数字，建档不含在校状态。时长以录入单为准，整数部分最多三位、最多一位小数。本轮聚焦平台搭建与功能实现，暂不考虑部署维护。业务字段、枚举及错误码使用snake_case，自动限制固定off。
     沿用：时长模板末列是否有违纪情况，时长与违规核实合并审批。规则未确定时正常审核时长，处罚固定未启用。按表头识别七列与兼容六列，不仅依赖文件名或版本号。
-  x-document-revision: 2026-11-21-r4
+  x-document-revision: 2026-11-21-r5
 servers:
 - url: /api/v1
   description: 同源相对路径，不指向已部署服务
@@ -1816,12 +1816,7 @@ paths:
       - reviewer
       - tech_admin
       parameters:
-      - name: scope
-        in: query
-        description: 负责人工作区显式使用managed，仅限当前活动成员。all须有有效后台授权。省略时兼任负责人默认使用managed。
-        schema:
-          type: string
-          enum: [managed, all]
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -1958,12 +1953,7 @@ paths:
       - reviewer
       - tech_admin
       parameters:
-      - name: scope
-        in: query
-        description: 负责人工作区显式使用managed，仅限当前活动成员。all须有有效后台授权。省略时兼任负责人默认使用managed。
-        schema:
-          type: string
-          enum: [managed, all]
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -2253,7 +2243,8 @@ paths:
   /organizer/activities/{id}/attendance:
     get:
       operationId: list_attendance
-      summary: 查询人工参与情况
+      summary: 查询现场异常记录
+      description: 按服务日期倒序分页，total 统计筛选后的有效异常记录。正常签到沿用原流程。
       tags:
       - 报名
       x-requirement: FR02
@@ -2264,6 +2255,7 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -2313,6 +2305,77 @@ paths:
                 required:
                 - data
                 - request_id
+    post:
+      operationId: record_attendance_batch
+      summary: 批量登记现场异常
+      description: 同组使用相同的服务日期、类型和说明。按已批准安排核对北京时间服务日期。报名人员使用本活动名单的 student_ids，未报名参加按 unregistered_students 的学号和姓名精确匹配。任一项已登记时返回 409，整组回滚。
+      tags:
+      - 报名
+      x-requirement: FR02
+      x-acceptance:
+      - AC09
+      x-roles:
+      - organizer
+      - reviewer
+      - tech_admin
+      parameters:
+      - $ref: '#/components/parameters/workspace_scope'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/csrf'
+      - $ref: '#/components/parameters/idempotency'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 同日已有记录返回 attendance_already_recorded，幂等键冲突返回 conflict。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      recorded_count:
+                        type: integer
+                        minimum: 1
+                    additionalProperties: false
+                    required:
+                    - recorded_count
+                  request_id:
+                    type: string
+                    format: uuid
+                additionalProperties: false
+                required:
+                - data
+                - request_id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/attendance_batch_input'
   /organizer/activities/{id}/notices:
     post:
       operationId: publish_notice
@@ -5641,8 +5704,8 @@ paths:
   /organizer/activities/{id}/attendance/{student_id}/{service_date}:
     put:
       operationId: record_attendance
-      summary: 记录实际参与情况
-      description: 初建expected_version为0。活动、学生、service_date唯一。负责人根据群内当次参与名单记录事实，同日多时段在说明中汇总，不因整期录取推定每周到场或缺席。不自动生成时长、违纪或资格限制。未报名补录须说明原因。服务日期须对应活动已批准安排。
+      summary: 登记或修改单条现场异常
+      description: 首次登记报名人员时 expected_version 为 0，服务日期须对应已批准安排。修改时使用当前版本，未报名参加的首次补录通过 record_attendance_batch 核对学号和姓名。同日多时段在说明中汇总。现场事实独立于报名、时长及正式异常审核。
       tags:
       - 报名
       x-requirement: FR02
@@ -5653,6 +5716,7 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -5714,6 +5778,82 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/attendance_input'
+    delete:
+      operationId: withdraw_attendance
+      summary: 撤销一条现场异常记录
+      description: 使用当前版本撤销。撤销后从查询及异常统计移除，重新登记时延续该记录的版本号。
+      tags:
+      - 报名
+      x-requirement: FR02
+      x-acceptance:
+      - AC09
+      x-roles:
+      - organizer
+      - reviewer
+      - tech_admin
+      parameters:
+      - $ref: '#/components/parameters/workspace_scope'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: student_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: service_date
+        in: path
+        required: true
+        schema:
+          type: string
+          format: date
+      - $ref: '#/components/parameters/csrf'
+      - $ref: '#/components/parameters/idempotency'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 版本或幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/action_result'
+                  request_id:
+                    type: string
+                    format: uuid
+                additionalProperties: false
+                required:
+                - data
+                - request_id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/version_action'
   /organizer/activities/{id}/revisions:
     get:
       operationId: list_activity_revisions
@@ -8612,6 +8752,59 @@ components:
       - activity_id
       - reason
       - status
+    attendance_status:
+      type: string
+      enum:
+      - late
+      - absent
+      - excused
+      - other
+      - unregistered_participation
+    attendance_student_identity:
+      type: object
+      properties:
+        student_no:
+          type: string
+          pattern: '^[0-9]{10}$'
+        student_name:
+          type: string
+          minLength: 1
+      additionalProperties: false
+      required:
+      - student_no
+      - student_name
+    attendance_batch_input:
+      type: object
+      properties:
+        service_date:
+          type: string
+          format: date
+        status:
+          $ref: '#/components/schemas/attendance_status'
+        reason:
+          type: string
+          description: 自定义或未报名参加时必填。
+          maxLength: 1000
+        student_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        unregistered_students:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/attendance_student_identity'
+      oneOf:
+      - required: [student_ids]
+      - required: [unregistered_students]
+      additionalProperties: false
+      required:
+      - service_date
+      - status
     attendance_input:
       type: object
       properties:
@@ -8619,15 +8812,10 @@ components:
           type: integer
           minimum: 0
         status:
-          type: string
-          enum:
-          - unrecorded
-          - present
-          - late
-          - absent
-          - excused
+          $ref: '#/components/schemas/attendance_status'
         reason:
           type: string
+          description: 自定义或未报名参加时必填。
           maxLength: 1000
       additionalProperties: false
       required:
@@ -8654,14 +8842,13 @@ components:
         student_id:
           type: string
           format: uuid
-        status:
+        student_name:
           type: string
-          enum:
-          - unrecorded
-          - present
-          - late
-          - absent
-          - excused
+        student_no:
+          type: string
+          pattern: '^[0-9]{10}$'
+        status:
+          $ref: '#/components/schemas/attendance_status'
         reason:
           type: string
         service_date:
@@ -8674,6 +8861,8 @@ components:
       - version
       - activity_id
       - student_id
+      - student_name
+      - student_no
       - status
       - service_date
     notice_input:
@@ -11907,6 +12096,13 @@ components:
           registration_closes_at: {type: string, format: date-time}
           capacity: {type: integer, minimum: 1, maximum: 10000}
   parameters:
+    workspace_scope:
+      name: scope
+      in: query
+      description: 负责人工作区显式使用managed，仅限当前活动成员。all须有有效后台授权。省略时兼任负责人默认使用managed。
+      schema:
+        type: string
+        enum: [managed, all]
     notice_id:
       name: notice_id
       in: query
@@ -12039,6 +12235,7 @@ x-error-codes:
   target_key_conflict: 修复目标业务键已使用或同组目标重复，整组不生效。
   warning_review_required: 批准时警告快照已变化，返回最新快照供审核后重试。
   notice_not_found: 未找到当前活动的集合源通知。
+  attendance_already_recorded: 所选人员在服务日期已有现场记录，整批未登记。
   conflict: 请求与已有状态或幂等内容冲突。
 x-implementation-state: specification_only
 x-timeline-interaction:

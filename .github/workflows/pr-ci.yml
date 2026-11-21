@@ -43,4 +43,4 @@ jobs:
       - run: pnpm db:generate
       - run: pnpm typecheck
       - run: pnpm --filter @hongyan/api build
-      - run: pnpm --filter @hongyan/api exec node --test test/hour-workbook.test.mjs test/hour-preview.test.mjs test/activity-flow.test.mjs test/notice-flow.test.mjs
+      - run: pnpm --filter @hongyan/api exec node --test test/hour-workbook.test.mjs test/hour-preview.test.mjs test/activity-flow.test.mjs test/notice-flow.test.mjs test/attendance-flow.test.mjs

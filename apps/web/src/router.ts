@@ -3,6 +3,7 @@ import PublicActivities from './activities/PublicActivities.vue';
 import ManagedActivities from './activities/ManagedActivities.vue';
 import ActivityEditor from './activities/ActivityEditor.vue';
 import OrganizerSection from './activities/OrganizerSection.vue';
+import AttendanceRecords from './attendance/AttendanceRecords.vue';
 import HourBatches from './hours/HourBatches.vue';
 import HourBatchDetail from './hours/HourBatchDetail.vue';
 import ActivityWorkspace from './activities/ActivityWorkspace.vue';
@@ -27,13 +28,14 @@ export const router = createRouter({
       meta: { organizer: true, profile: true },
       children: [
         {
-          path: ':area(requests|attendance|appeals|corrections|incidents)/:item?',
+          path: ':area(requests|appeals|corrections|incidents)/:item?',
           name: 'organizer-section',
           component: OrganizerSection,
         },
         { path: 'edit', name: 'activity-edit', component: ActivityEditor },
         { path: 'notices/:item?', name: 'activity-notices', component: ActivityNotices, meta: { area: 'notices' } },
         { path: 'roster', name: 'roster', component: Roster },
+        { path: 'attendance', name: 'activity-attendance', component: AttendanceRecords, meta: { area: 'attendance' } },
         { path: 'batches', name: 'hour-batches', component: HourBatches, meta: { area: 'batches' } },
         { path: 'batches/:item', name: 'hour-batch', component: HourBatchDetail, meta: { area: 'batches' } },
       ],

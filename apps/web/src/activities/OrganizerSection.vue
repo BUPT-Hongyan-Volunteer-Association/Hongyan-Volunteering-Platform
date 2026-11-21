@@ -4,29 +4,18 @@ import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import PreviewRecords from '@hongyan/ui/PreviewRecords.vue';
 import { requests } from '../registrations/requests';
-import { attendance } from '../notices/organizer';
 import { appeals, corrections } from '../hours/organizer';
 import { incidents } from '../incidents/organizer';
 
 const route = useRoute();
 const sections = {
   requests: { title: '退出与恢复', records: requests },
-  attendance: { title: '现场人员记录', records: attendance },
   appeals: { title: '漏记反馈', records: appeals },
   corrections: { title: '错账修复组', records: corrections },
   incidents: { title: '异常上报', records: incidents },
 };
 const section = computed(() => route.params.area as keyof typeof sections);
-const date = ref('');
-const serviceDates = [
-  ...new Set(attendance.map((row) => row.fields.find(([label]) => label === '服务日期')![1])),
-];
 const feedback = ref('');
-const records = computed(() => {
-  const list = sections[section.value].records;
-  if (section.value !== 'attendance' || !date.value) return list;
-  return list.filter((r) => r.fields.some(([k, v]) => k === '服务日期' && v === date.value));
-});
 watch(
   [section, () => route.params.item, () => route.params.id],
   () => {
@@ -37,22 +26,12 @@ watch(
 <template>
   <PreviewRecords
     :title="sections[section].title"
-    :records="records"
-    :table-heading="section === 'attendance' ? '姓名' : section === 'appeals' ? '反馈' : undefined"
+    :records="sections[section].records"
+    :table-heading="section === 'appeals' ? '反馈' : undefined"
     :status-heading="section === 'appeals' ? '状态' : undefined"
     :base="'/managed/' + route.params.id + '/' + section"
     :selected="String(route.params.item || '')"
   >
-    <template #filters>
-      <label v-if="section === 'attendance'"
-        >服务日期
-        <UiSelect
-          label="服务日期"
-          :model-value="date"
-          :options="[{ value: '', label: '所有日期' }, ...serviceDates]"
-          @update:model-value="date = $event"
-      /></label>
-    </template>
     <template #detail="{ record }">
       <button
         v-if="section === 'requests' && record.status === '待处理'"

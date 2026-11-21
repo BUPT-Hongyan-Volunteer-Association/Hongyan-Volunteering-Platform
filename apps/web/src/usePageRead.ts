@@ -20,12 +20,17 @@ export function usePageRead<T>(
     loading = ref(false);
   let active: AbortController | undefined;
   let disposed = false;
-  async function refresh(clear = true) {
+  function clear() {
+    active?.abort();
+    data.value = undefined;
+    loading.value = false;
+  }
+  async function refresh(clearData = true) {
     if (disposed) return;
     active?.abort();
     const current = new AbortController();
     active = current;
-    if (clear) data.value = undefined;
+    if (clearData) data.value = undefined;
     loading.value = true;
     error.value = '';
     try {
@@ -46,5 +51,5 @@ export function usePageRead<T>(
     disposed = true;
     active?.abort();
   });
-  return { data, error, loading, refresh };
+  return { data, error, loading, refresh, clear };
 }
