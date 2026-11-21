@@ -1,15 +1,10 @@
-import type { ActivitySchedule, FieldError, HourRow, HourWarning } from '@hongyan/contracts/types';
+import type { ActivitySchedule, FieldError, HourMisconductReview, HourRow, HourWarning } from '@hongyan/contracts/types';
 import { invalid } from '../http.js';
+import { dayKey, factKey, indexHistory, recordKey, tenths, type HourHistory } from './ledger-data.js';
 import { beijingDay, hours, hourTenths, normalizeFact, scheduleCoverage, serviceDate } from './values.js';
+import { hourWarnings } from './warnings.js';
 import type { HourInputRow } from './workbook.js';
 
-type Flag = NonNullable<HourRow['misconduct_reported']>;
-export interface HourHistory {
-  id: string; version: number; activity_id: string; student_id: string; service_date: string;
-  status: 'current' | 'voided'; hours: string; origin_schedule_revision: number;
-  misconduct_reported: Flag; misconduct_fact?: string; misconduct_version: number;
-  reusable_facts?: readonly string[];
-}
 interface RegistrationState {
   status: string; submitted_at: Date; changed_at?: Date | null;
 }
@@ -18,6 +13,7 @@ export interface HourSnapshot {
   students: readonly { id: string; student_no: string; name: string; registration: readonly RegistrationState[] }[];
   approved_schedules: readonly { revision: number; schedule: ActivitySchedule }[];
   history: readonly HourHistory[];
+  fact_reviews?: ReadonlyMap<string, HourMisconductReview>;
 }
 export interface PreviewOptions { mode: 'new' | 'correction'; schedule_revision?: number; now: Date }
 type PreviewRow = Omit<HourRow, 'action' | 'errors' | 'warnings'> & {
@@ -50,6 +46,7 @@ function inspect({ row_number, errors = [], ...input }: HourInputRow, system: '1
   else {
     row.student_no = studentNo;
     if (!student) fail(row, 'student_no', '找不到该学生档案');
+    else row.student_id = student.id;
   }
   row.student_name = text(input.student_name);
   if (!row.student_name || (student && student.name !== row.student_name)) fail(row,'student_name','姓名为空或与档案不一致');
@@ -84,28 +81,13 @@ function inspect({ row_number, errors = [], ...input }: HourInputRow, system: '1
   return { row, student, key, comparison, day, value, fact };
 }
 
-function indexHistory(snapshot: HourSnapshot) {
-  const existing = new Map<string, { record: HourHistory; effective: number }>();
-  const daily = new Map<string, number>();
-  for (const record of snapshot.history) {
-    const key = record.student_id + '/' + record.service_date;
-    const amount = record.status === 'voided' ? 0 : hourTenths({ type: 'number', value: record.hours });
-    if (amount === null) throw Error('历史有效时长不符合契约');
-    daily.set(key, (daily.get(key) ?? 0) + amount);
-    if (record.activity_id === snapshot.activity_id) {
-      existing.set(key, { record, effective: amount });
-    }
-  }
-  return { existing, daily };
-}
-
 export function previewHourRows(book: { rows: readonly HourInputRow[]; date_system: '1900' | '1904' },
   snapshot: HourSnapshot, options: PreviewOptions) {
   if (options.mode === 'correction' && options.schedule_revision !== undefined) invalid('schedule_revision','更正批次不能指定新安排');
   const selected = options.schedule_revision ?? snapshot.published_revision;
   const students = new Map(snapshot.students.map((student) => [student.student_no, student]));
   const today = beijingDay(options.now), coverage = scheduleCoverage(snapshot.approved_schedules);
-  const { existing, daily } = indexHistory(snapshot);
+  const { existing, daily } = indexHistory(snapshot.history);
   const inputs = book.rows.map((input) => inspect(input, book.date_system, today, snapshot.activity_code, students));
   type Compared = keyof typeof inputs[number]['comparison'];
   const groups = new Map<string, {
@@ -126,7 +108,9 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
     }
     if (!key || !student || !day) continue;
     const group = groups.get(key)!;
-    const prior = existing.get(key), record = prior?.record, previous = prior?.effective ?? 0;
+    const identity = { student_id: student.id, activity_id: snapshot.activity_id, service_date: day };
+    const record = existing.get(recordKey(identity));
+    const previous = record?.status === 'current' ? tenths(record.hours) : 0;
     const revision = record?.origin_schedule_revision ?? selected;
     const duration = coverage(revision, day);
     if (duration === 0) fail(row,'service_date','服务日期不在适用的获批安排内');
@@ -139,7 +123,8 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
     row.previous_hours = hours(previous);
     row.misconduct_version = record?.misconduct_version ?? 0;
     const reported = row.misconduct_reported === 'reported';
-    row.misconduct_requires_review = reported
+    if (reported) row.misconduct_review = snapshot.fact_reviews?.get(factKey(identity, fact));
+    row.misconduct_requires_review = reported && !row.misconduct_review
       && !record?.reusable_facts?.some((old) => normalizeFact(old) === fact);
     for (const field of group.conflicts) fail(row,field,'同学生、活动和服务日期的记录在此字段冲突');
     if (group.conflicts.size) continue;
@@ -160,13 +145,8 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
     else row.action = 'skip_identical';
     const delta = row.action === 'skip_identical' ? 0 : value - previous;
     if (row.action !== 'skip_identical' && duration !== 0) {
-      const projected = (daily.get(key) ?? 0) + delta;
-      const warn = (code: HourWarning['code'], message: string, amount: Partial<HourWarning>) =>
-        row.warnings.push({ warning_id: [code, student.id, day, row.row_number].join(':'),
-          code, student_id: student.id, service_date: day, row_numbers: [row.row_number],
-          message, ...(fact && { explanation: fact }), ...amount });
-      if (duration !== null && value * 360000 > duration) warn('exceeds_planned_hours','预计时长超过当天计划覆盖时长',{ planned_hours: String(duration / 3600000) });
-      if (projected > 240) warn('daily_total_exceeds_24','该学生跨活动当日预计超过 24 小时',{ projected_daily_hours: hours(projected) });
+      row.warnings = hourWarnings(student.id, day, row.row_number, value, duration,
+        (daily.get(dayKey(identity)) ?? 0) + delta, fact);
       if (row.warnings.length && !fact && !row.errors.some((error) => error.field === 'remark')) fail(row,'remark','时长警告须填写说明');
     }
     if (row.errors.length) row.action = 'error';

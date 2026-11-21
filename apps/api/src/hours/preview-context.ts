@@ -4,7 +4,7 @@ import { managedScope } from '../activities/read.js';
 import type { Tx } from '../activities/workflow.js';
 import { invisible } from '../http.js';
 import { previewHourRows, type PreviewOptions } from './preview.js';
-import { readHistory } from './batch-data.js';
+import { readHistory, readFactReviews } from './ledger-data.js';
 import { parseHourWorkbook } from './workbook.js';
 import { serviceDate } from './values.js';
 
@@ -36,6 +36,7 @@ export async function previewActivityHours(
     const service_date = serviceDate(input.service_date, book.date_system);
     if (student_id && service_date) keys.set(student_id + '/' + service_date, { student_id, service_date });
   }
+  const days = [...keys.values()];
   const preview = previewHourRows(book, {
     activity_id: activityId, activity_code: activity.activity_code, published_revision: activity.published_revision,
     approved_schedules: activity.revisions.map(({ revision, content }) =>
@@ -44,7 +45,8 @@ export async function previewActivityHours(
       id, student_no, name: account.display_name,
       registration: registrations[0]?.history.length ? registrations[0].history : registrations,
     })),
-    history: await readHistory(tx, [...keys.values()]),
+    history: await readHistory(tx, days),
+    fact_reviews: await readFactReviews(tx, days),
   }, options);
   return { ...preview, template_structure: book.template_structure };
 }

@@ -2,9 +2,10 @@ import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy }
 import type { FieldError } from '@hongyan/contracts/types';
 import { Database } from '../database.js';
 import { BusinessError, denied } from '../http.js';
-import { json, stable, type Tx } from '../activities/workflow.js';
+import { json, type Tx } from '../activities/workflow.js';
 import { previewActivityHours } from './preview-context.js';
-import { digest, emptySummary, type SourceInfo } from './batch-data.js';
+import { emptySummary, type SourceInfo } from './batch-data.js';
+import { warningSnapshot } from './warnings.js';
 import { errorWorkbook } from './error-report.js';
 
 @Injectable()
@@ -52,6 +53,7 @@ export class HourValidationWorker implements OnApplicationBootstrap, OnModuleDes
   }
   private async validate(tx: Tx, id: string) {
     const batch = await tx.hourImportBatch.findUniqueOrThrow({ where: { id }, include: { source: true } });
+    if (!batch.source) throw new Error('导入批次缺少源文件');
     const info = batch.metadata as unknown as SourceInfo;
     const account = await tx.account.findUnique({ where: { id: batch.validation_by, active: true, must_change_password: false },
       include: { roles: { where: { OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }] } } } });
@@ -70,7 +72,7 @@ export class HourValidationWorker implements OnApplicationBootstrap, OnModuleDes
         })) });
       }
       errors = rows.flatMap((row) => row.errors);
-      summary = { ...summaryFields, warning_snapshot_hash: digest(stable(summaryFields.warnings)),
+      summary = { ...summaryFields, ...warningSnapshot(summaryFields.warnings),
         ...(errors.length && { error_message: '请按错误报告修正后重新上传。' }) };
     } catch (error) {
       if (!(error instanceof BusinessError) || error.getStatus() !== 422) throw error;

@@ -4,7 +4,7 @@ import { useRouter, useRoute } from 'vue-router';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { createCommand, listActivityRevisions, uploadHourBatch, type HourBatch } from '@hongyan/contracts';
 import templateUrl from '../../../../packages/contracts/templates/志愿时长录入模板_v1.5.xlsx?url';
-import { beijing, message, noAccess, useHourRead } from './display';
+import { beijing, message, noAccess, useHourRead } from '@hongyan/ui/hourDisplay';
 
 const props = defineProps<{ activityId:string; writesPaused:boolean; previous?:HourBatch }>();
 const emit = defineEmits<{ denied:[] }>();

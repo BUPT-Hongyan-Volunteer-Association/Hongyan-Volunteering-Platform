@@ -23,7 +23,15 @@
     "./ServiceCalendar.vue": "./src/ServiceCalendar.vue",
     "./RecordSummaryList.vue": "./src/RecordSummaryList.vue",
     "./RecordTable.vue": "./src/RecordTable.vue",
-    "./RecordWorkspace.vue": "./src/RecordWorkspace.vue"
+    "./RecordWorkspace.vue": "./src/RecordWorkspace.vue",
+    "./usePageRead": "./src/usePageRead.ts",
+    "./hourDisplay": "./src/hourDisplay.ts",
+    "./ActivityChoice.vue": "./src/ActivityChoice.vue",
+    "./HourWarnings.vue": "./src/HourWarnings.vue",
+    "./HourLedger.vue": "./src/HourLedger.vue",
+    "./HourCorrectionGroups.vue": "./src/HourCorrectionGroups.vue",
+    "./HourAppeals.vue": "./src/HourAppeals.vue",
+    "./HourIncidents.vue": "./src/HourIncidents.vue"
   },
   "dependencies": {
     "@element-plus/icons-vue": "2.3.2",

@@ -133,6 +133,7 @@ function goPage(next: number) {
             <th scope="col">班级</th>
             <th scope="col">学院</th>
             <th scope="col">账号状态</th>
+            <th scope="col">时长</th>
           </tr>
         </thead>
         <tbody>
@@ -148,6 +149,7 @@ function goPage(next: number) {
                 {{ student.status === 'active' ? '启用' : '停用' }}
               </span>
             </td>
+            <td><RouterLink :to="{ path: '/manage/students/' + student.id + '/hours', query: { name: student.name } }">查看时长</RouterLink></td>
           </tr>
         </tbody>
       </table>

@@ -14,7 +14,7 @@ import UiIcon from '@hongyan/ui/UiIcon.vue';
 import RecordSummaryList from '@hongyan/ui/RecordSummaryList.vue';
 import RecordWorkspace from '@hongyan/ui/RecordWorkspace.vue';
 import { localDateTime } from '@hongyan/ui/activityDisplay';
-import { message, noAccess, pageNumber, usePageRead } from '../usePageRead';
+import { message, noAccess, pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 
 const route = useRoute(),
   router = useRouter();

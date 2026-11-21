@@ -7,8 +7,9 @@ export class BusinessError extends HttpException {
     code: string,
     message: string,
     details?: { field: string; row?: number; code: string; message: string }[],
+    context?: object,
   ) {
-    super({ code, message, ...(details && { details }) }, status);
+    super({ code, message, ...(details && { details }), ...(context && { context }) }, status);
   }
 }
 export function invalid(field: string, message: string): never {

@@ -7,7 +7,7 @@ import Pager from '@hongyan/ui/Pager.vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { localDateTime } from '@hongyan/ui/activityDisplay';
-import { pageNumber, usePageRead } from '../usePageRead';
+import { pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 
 const route = useRoute(),
   router = useRouter();

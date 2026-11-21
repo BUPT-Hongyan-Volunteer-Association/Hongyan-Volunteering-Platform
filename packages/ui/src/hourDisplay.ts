@@ -1,5 +1,5 @@
 import type { HourBatch, HourRow } from '@hongyan/contracts';
-export { message, noAccess, usePageRead as useHourRead } from '../usePageRead';
+export { message, noAccess, usePageRead as useHourRead } from './usePageRead';
 
 export const statuses: Record<HourBatch['status'], string> = {
   validating: '校验中', invalid: '内容有误', ready: '校验完成', failed: '系统校验失败',
@@ -8,6 +8,8 @@ export const statuses: Record<HourBatch['status'], string> = {
 export const actions: Record<HourRow['action'], string> = {
   add: '新增', skip_identical: '重复跳过', correct: '更正', void: '撤销', review_only: '仅更新违纪信息', error: '错误',
 };
+export const modes: Record<HourBatch['mode'], string> = { new: '新增', correction: '更正', void: '撤销' };
+export const misconductLabels = { reported: '有', none: '无', not_provided: '未提供' };
 export const fields: Record<string,string> = { student_no:'学号', student_name:'姓名', activity_code:'活动编号',
   service_date:'服务日期', credited_hours:'认证时长', remark:'备注', misconduct_reported:'是否有违纪情况', file:'工作簿' };
 export const signed = (value?: string) => value === undefined ? '—' : Number(value) > 0 ? '+' + value : value;

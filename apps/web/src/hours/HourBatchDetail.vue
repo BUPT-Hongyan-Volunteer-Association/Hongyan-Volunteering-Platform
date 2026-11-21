@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { onScopeDispose, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { ApiError, createCommand, downloadEvidence, getHourBatch, getHourImportErrorReport, retryHourBatchValidation } from '@hongyan/contracts';
+import { ApiError, createCommand, downloadEvidence, getHourBatch, getHourImportErrorReport, retryHourBatchValidation, submitHourBatch } from '@hongyan/contracts';
 import HourRows from './HourRows.vue';
 import HourUpload from './HourUpload.vue';
-import { beijing, message, noAccess, signed, statuses, useHourRead } from './display';
+import { beijing, message, modes, noAccess, signed, statuses, useHourRead } from '@hongyan/ui/hourDisplay';
 
 const props = defineProps<{ writesPaused:boolean }>();
 const emit = defineEmits<{ denied:[] }>();
 const rows = ref<InstanceType<typeof HourRows>>();
 const route = useRoute(), activityId = String(route.params.id), id = String(route.params.item);
 const retryCommand = createCommand(), busy = ref(false), feedback = ref(''), problem = ref(''), replacing = ref(false);
+const submitCommand = createCommand();
 let alive = true;
 onScopeDispose(() => { alive = false; });
 const {data:batch,error,loading,refresh} = useHourRead(() => id, async (signal) => {
@@ -23,6 +24,28 @@ watch(batch,(current,_,cleanup) => {
   const timer = window.setTimeout(() => void refresh(false),1000);
   cleanup(() => clearTimeout(timer));
 });
+async function submit() {
+  const current = batch.value;
+  if (props.writesPaused || busy.value || current?.status !== 'ready' || !current.source_hash || !current.valid_count) return;
+  const body = { expected_version: current.version, source_hash: current.source_hash };
+  busy.value = true; problem.value = ''; feedback.value = '';
+  try {
+    const { data } = await submitHourBatch({ path: { id }, body,
+      headers: submitCommand.headers('submit_hour_batch', id, body), throwOnError: true });
+    submitCommand.confirmed();
+    if (alive) {
+      batch.value = data.data;
+      feedback.value = '批次已提交审核。';
+    }
+  } catch (reason) {
+    if (!alive) return;
+    problem.value = message(reason);
+    if (noAccess(reason) || reason instanceof ApiError && reason.status === 409) {
+      submitCommand.confirmed();
+      await refresh();
+    }
+  } finally { if (alive) busy.value = false; }
+}
 async function retry() {
   if (props.writesPaused || busy.value || batch.value?.status !== 'failed') return;
   busy.value = true; feedback.value = ''; problem.value = '';
@@ -59,8 +82,9 @@ async function download(report: boolean) {
     <p v-else-if="!batch && loading" role="status">正在读取批次…</p>
     <template v-if="batch">
       <header><h2>{{ batch.source_file_name ?? '时长批次详情' }}</h2><span class="state-chip" role="status">{{ statuses[batch.status] }}</span></header>
-      <p class="meta">{{ batch.batch_code }} · {{ beijing(batch.created_at) }}（北京时间） · {{ batch.mode === 'new' ? '新增' : batch.mode === 'correction' ? '更正' : '撤销' }}</p>
+      <p class="meta">{{ batch.batch_code }} · {{ beijing(batch.submitted_at ?? batch.created_at) }}（北京时间） · {{ modes[batch.mode] }}</p>
       <p v-if="batch.source_description">批次说明：{{ batch.source_description }}</p>
+      <p v-if="batch.decision_reason">审核意见：{{ batch.decision_reason }}</p>
       <p v-if="batch.previous_batch_id"><RouterLink :to="{name:'hour-batch',params:{id:activityId,item:batch.previous_batch_id},query:route.query}">查看修正前批次</RouterLink></p>
       <p v-if="batch.status === 'validating'" role="status">正在校验工作簿，此页会自动更新。</p>
       <p v-if="batch.error_message" class="notice">
@@ -70,11 +94,13 @@ async function download(report: boolean) {
         </button>
       </p>
       <div class="tools">
+        <button v-if="batch.status === 'ready'" class="primary" :disabled="busy || writesPaused || !batch.valid_count" @click="submit">提交审核</button>
         <button v-if="batch.status === 'invalid'" class="primary" :disabled="busy || writesPaused" @click="download(true)">下载错误报告</button>
         <button v-if="batch.status === 'invalid'" :disabled="busy || writesPaused" @click="replacing=!replacing">{{ replacing ? '收起上传表单' : '修正后重传' }}</button>
         <button v-if="batch.status === 'failed'" class="primary" :disabled="busy || writesPaused" @click="retry">重试原批次</button>
         <button v-if="batch.source_file_id" :disabled="busy || writesPaused" @click="download(false)">下载原工作簿</button>
       </div>
+      <p v-if="batch.status === 'ready' && !batch.valid_count">本批均为重复记录，无需送审。</p>
       <p v-if="problem" role="alert">{{ problem }}</p>
       <KeepAlive v-if="batch.status === 'invalid'">
         <HourUpload v-if="replacing" :activity-id="activityId" :previous="batch" :writes-paused="writesPaused" @denied="refresh()" />
@@ -83,7 +109,7 @@ async function download(report: boolean) {
         <strong>全批预计差额：{{ signed(batch.projected_delta_hours) }} 小时</strong>
         <span>共 {{ batch.row_count }} 行 · 有效 {{ batch.valid_count }} · 跳过 {{ batch.skipped_count }} · 错误 {{ batch.error_count }}</span>
         <span>时长警告 {{ batch.warnings.length }} 条 · 违纪待核实 {{ batch.misconduct_review_required_count ?? 0 }} 行</span>
-        <small>预览不计入学生时长。</small>
+        <small v-if="batch.status === 'pending_review'">待审核，批准后生效。</small>
       </div>
       <HourRows v-if="batch.row_count" ref="rows" :batch-id="id" @denied="refresh()" />
     </template>

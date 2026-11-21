@@ -27,7 +27,7 @@ export async function prepareHourPreviewFixture(db, sample) {
   const students = await db.student.findMany({ include: { account: true }, orderBy: { student_no: 'asc' }, take: 3 });
   const activityId = await db.$transaction(async (tx) => {
     const owner = students[1].account_id;
-    const future = sample.revisions[0].content;
+    const future = { ...sample.revisions[0].content, title: '时长导入预览样本' };
     const past = { ...future, schedule: { schedule_type:'continuous',starts_at:date+'T08:00:00+08:00',ends_at:date+'T16:00:00+08:00' } };
     const submitted_at = new Date(date+'T07:00:00+08:00');
     const activity = await tx.activity.create({ data: {

@@ -135,11 +135,15 @@ export async function checkHourPages(page, web, db, sampleId, { pickOption, fits
   await text('全批预计差额：+3.2 小时').waitFor();
   await text('当前条件共 2 行').waitFor();
   assert.equal(await page.getByRole('cell', { name: '未提供', exact: true }).count(), 2);
-  await db.activityMember.delete({ where: { activity_id_account_id: {
+  const removedMember = await db.activityMember.delete({ where: { activity_id_account_id: {
     activity_id: fixture.activityId, account_id: fixture.ownerId,
   } } });
-  await page.getByLabel('只看违纪待核实行').check();
-  await page.locator('.hour-detail').waitFor({ state: 'detached' });
-  await page.getByRole('alert').first().waitFor();
-  assert.equal(await button('下载原工作簿').count(), 0);
+  try {
+    await page.getByLabel('只看违纪待核实行').check();
+    await page.locator('.hour-detail').waitFor({ state: 'detached' });
+    await page.getByRole('alert').first().waitFor();
+    assert.equal(await button('下载原工作簿').count(), 0);
+  } finally {
+    await db.activityMember.create({ data: removedMember });
+  }
 }

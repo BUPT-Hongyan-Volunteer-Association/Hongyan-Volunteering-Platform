@@ -40,4 +40,8 @@
 
 时长工作簿解析测试用 `pnpm --filter @hongyan/api test:hour-workbook`，逐行预览测试用 `pnpm --filter @hongyan/api test:hour-preview`。两者均可在本地离线运行。
 
+正式时长流程用 `pnpm --filter @hongyan/api test:hour-ledger` 在独立库验证。活动台账、本人查账和后台按学生查账共用 `readHourLedger`。供导出模块接入时，在同一个 `RepeatableRead` 事务中传入当前操作者、查询范围和日期／历史筛选，省略分页以读取全量。导出作业查询和领取可用 `authorizeHourLedger` 按当前身份复核范围权限。 真实导出文件的生成与领取由 #18 接入。[时长读取与授权](apps/api/src/hours/read-ledger.ts)
+
+写入事务通过公共审计入口保存 `audit_event`，查询时将 `before` 和 `after` 的 JSON 值按契约序列化为字符串。 [公共审计入口](apps/api/src/audit.ts)
+
 [工程协作约定](AGENTS.md) · [界面规范](DESIGN.md) · [共享 UI 组件](packages/ui/README.md) · [三端运行示例](docs/ui-samples/README.md) · [接口契约与导入模板](packages/contracts/)

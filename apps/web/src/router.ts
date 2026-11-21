@@ -10,7 +10,6 @@ import ActivityWorkspace from './activities/ActivityWorkspace.vue';
 import MyRegistrations from './registrations/MyRegistrations.vue';
 import Roster from './registrations/Roster.vue';
 import PersonalPage from './PersonalPage.vue';
-import StudentRecords from './personal/StudentRecords.vue';
 import ActivityNotices from './notices/ActivityNotices.vue';
 import MyNotices from './notices/MyNotices.vue';
 import SchedulePage from '@hongyan/ui/SchedulePage.vue';
@@ -28,7 +27,7 @@ export const router = createRouter({
       meta: { organizer: true, profile: true },
       children: [
         {
-          path: ':area(requests|appeals|corrections|incidents)/:item?',
+          path: ':area(requests)/:item?',
           name: 'organizer-section',
           component: OrganizerSection,
         },
@@ -38,6 +37,10 @@ export const router = createRouter({
         { path: 'attendance', name: 'activity-attendance', component: AttendanceRecords, meta: { area: 'attendance' } },
         { path: 'batches', name: 'hour-batches', component: HourBatches, meta: { area: 'batches' } },
         { path: 'batches/:item', name: 'hour-batch', component: HourBatchDetail, meta: { area: 'batches' } },
+        { path: 'hours', name: 'activity-hours', component: () => import('./hours/ActivityHours.vue'), meta: { area: 'hours' } },
+        { path: 'corrections/:item?', name: 'activity-hour-corrections', component: () => import('@hongyan/ui/HourCorrectionGroups.vue'), meta: { area: 'corrections' } },
+        { path: 'appeals/:item?', name: 'activity-hour-appeals', component: () => import('@hongyan/ui/HourAppeals.vue'), props: { mode: 'organizer' }, meta: { area: 'appeals' } },
+        { path: 'incidents', name: 'activity-hour-incidents', component: () => import('@hongyan/ui/HourIncidents.vue'), props: { mode: 'organizer' }, meta: { area: 'incidents' } },
       ],
     },
     {
@@ -79,13 +82,13 @@ export const router = createRouter({
     {
       path: '/mine/hours/:item?',
       name: 'hours',
-      component: StudentRecords,
+      component: () => import('./hours/MyHours.vue'),
       meta: { personal: true },
     },
     {
       path: '/mine/feedback/:item?',
       name: 'feedback',
-      component: StudentRecords,
+      component: () => import('./hours/MyFeedback.vue'),
       meta: { personal: true },
     },
   ],

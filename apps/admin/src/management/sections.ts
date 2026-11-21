@@ -4,66 +4,9 @@ interface AdminSection {
   records: PreviewRecord[];
 }
 export const sections = {
-  corrections: {
-    title: '错账修复组',
-    records: [
-      {
-        id: 'G2026-003',
-        title: '服务日期更正',
-        status: '待审核',
-        fields: [
-          ['源记录', 'L-021 · 林同学 · 11 月 14 日 · 2.0 小时'],
-          ['目标记录', '林同学 · 11 月 15 日 · 2.0 小时'],
-          ['申请原因', '服务日期误录'],
-          ['批准后', '整组撤旧建新，个人累计差额 0.0 小时'],
-        ],
-      },
-    ],
-  },
-  incidents: {
-    title: '异常复核',
-    records: [
-      {
-        id: 'I2026-014',
-        title: '到场情况',
-        status: '待核实',
-        fields: [
-          ['学生', '周同学'],
-          ['服务日期', '2026-11-14'],
-          ['报告事实', '签到时间比集合时间晚十分钟'],
-          ['证据', '合成签到说明，原件仅限审核'],
-          ['学生可见副本', '待审核发布'],
-          ['处罚', '未启用'],
-        ],
-      },
-    ],
-  },
-  appeals: {
-    title: '申诉与更正',
-    records: [
-      {
-        id: 'A2026-012',
-        title: '漏记反馈',
-        status: '处理中',
-        fields: [
-          ['申请人', '周同学'],
-          ['服务日期', '2026-11-15'],
-          ['本人说明', '资料整理时长未显示'],
-          ['关联结果', '待批准入账后核对本人当前记录'],
-        ],
-      },
-      {
-        id: 'A2026-014',
-        title: '异常申诉',
-        status: '待受理',
-        fields: [
-          ['关联事实', '11 月 14 日迟到十分钟'],
-          ['本人说明', '本人已提前联系负责人，请复核签到说明。'],
-          ['办理进度', '等待老师核查签到说明'],
-        ],
-      },
-    ],
-  },
+  corrections: { title: '错账修复组', records: [] },
+  incidents: { title: '异常复核', records: [] },
+  appeals: { title: '申诉与更正', records: [] },
   students: { title: '学生档案', records: [] },
   imports: { title: '建档导入', records: [] },
   accounts: {
@@ -125,4 +68,4 @@ export const sections = {
   },
 } satisfies Record<string, AdminSection>;
 export type SectionKey = keyof typeof sections;
-export const sectionKeys = Object.keys(sections) as SectionKey[];
+export const previewSectionKeys = ['accounts', 'failures', 'audit'] as const;

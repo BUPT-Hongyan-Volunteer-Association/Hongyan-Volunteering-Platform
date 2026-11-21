@@ -58,6 +58,7 @@ model Account {
 }
 
 model Student {
+  hour_appeals HourAppeal[]
   attendance    AttendanceRecord[]
   hour_records HourRecord[]
   registrations Registration[]
@@ -137,6 +138,8 @@ model LoginWindow {
 }
 
 model Activity {
+  hour_appeals HourAppeal[]
+  hour_correction_groups HourCorrectionGroupActivity[]
   attendance   AttendanceRecord[]
   group_images ActivityGroupImage[]
   hour_batches HourImportBatch[]
@@ -398,7 +401,7 @@ model HourImportFile {
 model HourImportBatch {
   id             String   @id @default(uuid()) @db.Uuid
   activity_id    String   @db.Uuid
-  source_file_id String   @db.Uuid
+  source_file_id String?  @db.Uuid
   report_file_id String?  @db.Uuid
   submitted_by   String   @db.Uuid
   validation_by  String   @db.Uuid
@@ -406,12 +409,17 @@ model HourImportBatch {
   status         String   @default("validating")
   version        Int      @default(1)
   retry_count    Int      @default(0)
+  void_record_id String?  @db.Uuid
+  submitted_at   DateTime? @db.Timestamptz(3)
+  reviewed_at    DateTime? @db.Timestamptz(3)
+  reviewed_by    String?  @db.Uuid
+  decision_reason String?
   created_at     DateTime @default(now()) @db.Timestamptz(3)
   updated_at     DateTime @updatedAt @db.Timestamptz(3)
   metadata       Json
   summary        Json
   activity       Activity @relation(fields: [activity_id], references: [id])
-  source         HourImportFile @relation("HourSource", fields: [source_file_id], references: [id])
+  source         HourImportFile? @relation("HourSource", fields: [source_file_id], references: [id], onDelete: Restrict)
   report         HourImportFile? @relation("HourReport", fields: [report_file_id], references: [id])
   rows           HourImportRow[]
 
@@ -445,11 +453,144 @@ model HourRecord {
   misconduct_version       Int
   misconduct_fact          String?
   reusable_facts           String[] @default([])
+  batch_id                 String?  @db.Uuid
+  supersedes_record_id     String?  @db.Uuid
+  voided_by_batch_id       String?  @db.Uuid
+  correction_group_id      String?  @db.Uuid
+  voided_by_group_id       String?  @db.Uuid
+  remark                   String?
+  reviewed_at              DateTime? @db.Timestamptz(3)
+  created_at               DateTime? @db.Timestamptz(3)
+  updated_at               DateTime? @db.Timestamptz(3)
   student                  Student  @relation(fields: [student_id], references: [id])
   activity                 Activity @relation(fields: [activity_id], references: [id])
 
-  @@unique([student_id, service_date, activity_id])
+  // 部分唯一索引由迁移维护，每个业务键最多一个 current。
+  @@index([student_id, service_date, activity_id])
+  @@index([activity_id, service_date])
   @@map("hour_record")
+}
+
+model HourLedgerLock {
+  key String @id
+
+  @@map("hour_ledger_lock")
+}
+
+model Incident {
+  id                String    @id @default(uuid()) @db.Uuid
+  version           Int       @default(1)
+  activity_id       String    @db.Uuid
+  student_id        String    @db.Uuid
+  service_date      DateTime  @db.Date
+  occurred_at       DateTime? @db.Timestamptz(3)
+  facts             String
+  status            String
+  source_type       String
+  source_batch_id   String?   @db.Uuid
+  source_row_number Int?
+  submitted_by      String    @db.Uuid
+  reviewed_by       String?   @db.Uuid
+  review_reason     String?
+  revoked_at        DateTime? @db.Timestamptz(3)
+  created_at        DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at        DateTime  @updatedAt @db.Timestamptz(3)
+  hour_reviews      HourFactReview[]
+
+  @@index([activity_id, student_id, service_date])
+  @@index([student_id, status, created_at])
+  @@map("incident")
+}
+
+model HourFactReview {
+  id           String   @id @default(uuid()) @db.Uuid
+  activity_id  String   @db.Uuid
+  student_id   String   @db.Uuid
+  service_date DateTime @db.Date
+  fact         String
+  result       Json
+  incident_id  String?  @db.Uuid
+  incident     Incident? @relation(fields: [incident_id], references: [id], onDelete: Restrict)
+  created_at   DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([student_id, service_date, activity_id])
+  @@map("hour_fact_review")
+}
+
+model AuditEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  actor_id      String   @db.Uuid
+  action        String
+  resource_type String
+  resource_id   String   @db.Uuid
+  reason        String?
+  before        Json?
+  after         Json?
+  created_at    DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([actor_id, created_at])
+  @@index([resource_id, created_at])
+  @@index([created_at])
+  @@map("audit_event")
+}
+
+model HourCorrectionGroup {
+  id                    String   @id @default(uuid()) @db.Uuid
+  version               Int      @default(1)
+  status                String   @default("pending_review")
+  reason                String
+  submitted_by          String   @db.Uuid
+  reviewed_by           String?  @db.Uuid
+  reviewed_at           DateTime? @db.Timestamptz(3)
+  decision_reason       String?
+  appeal_id             String?  @db.Uuid
+  items                 Json
+  source_record_ids     String[] @db.Uuid
+  warnings              Json
+  warning_snapshot_hash String
+  created_at            DateTime @default(now()) @db.Timestamptz(3)
+  activities            HourCorrectionGroupActivity[]
+
+  @@index([status, created_at])
+  @@index([source_record_ids], type: Gin)
+  @@map("hour_correction_group")
+}
+
+model HourCorrectionGroupActivity {
+  group_id    String @db.Uuid
+  activity_id String @db.Uuid
+  group       HourCorrectionGroup @relation(fields: [group_id], references: [id])
+  activity    Activity @relation(fields: [activity_id], references: [id])
+
+  @@id([group_id, activity_id])
+  @@index([activity_id])
+  @@map("hour_correction_group_activity")
+}
+
+model HourAppeal {
+  id                     String    @id @default(uuid()) @db.Uuid
+  version                Int       @default(1)
+  student_id             String    @db.Uuid
+  activity_id            String    @db.Uuid
+  target_type            String
+  target_id              String?   @db.Uuid
+  service_date           DateTime  @db.Date
+  requested_hours        Decimal?  @db.Decimal(4, 1)
+  description            String
+  status                 String    @default("pending")
+  resolution             String?
+  correction_batch_id    String?   @db.Uuid
+  correction_group_id    String?   @db.Uuid
+  result_hour_record_ids String[]  @default([]) @db.Uuid
+  created_at             DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at             DateTime  @updatedAt @db.Timestamptz(3)
+  student                Student   @relation(fields: [student_id], references: [id])
+  activity               Activity  @relation(fields: [activity_id], references: [id])
+
+  @@index([student_id, created_at])
+  @@index([activity_id, status, created_at])
+  @@index([status, created_at])
+  @@map("hour_appeal")
 }
 model ActivityGroupImage {
   id          String   @id @db.Uuid

@@ -31,6 +31,10 @@ import { NoticeController } from './notices/notice.controller.js';
 import { NoticeWorker } from './notices/notice.worker.js';
 import { HourBatchesController, HourUploadScope } from './hours/batches.controller.js';
 import { HourValidationWorker } from './hours/validation-worker.js';
+import { HourLedgerController } from './hours/ledger.controller.js';
+import { HourCorrectionsController } from './hours/corrections.controller.js';
+import { HourIncidentsController } from './hours/incidents.controller.js';
+import { HourAppealsController } from './hours/appeals.controller.js';
 import { StudentController } from './students/student.controller.js';
 import { StudentImportService } from './students/import.service.js';
 import { StaffGuard } from './students/staff.guard.js';
@@ -89,6 +93,10 @@ class HttpErrorFilter implements ExceptionFilter {
     AttendanceController,
     NoticeController,
     HourBatchesController,
+    HourLedgerController,
+    HourCorrectionsController,
+    HourIncidentsController,
+    HourAppealsController,
     StudentController,
   ],
   providers: [
@@ -110,6 +118,16 @@ export async function createApp() {
   app.use((req: SessionRequest, _res: Response, next: NextFunction) => {
     req.receivedAt = new Date();
     next();
+  });
+  app.useBodyParser('json', {
+    limit: '64mb',
+    type: req => !!req.headers['content-type']?.startsWith('application/json') && req.method === 'POST' &&
+      /^\/api\/v1\/admin\/hour-imports\/[a-f0-9-]+\/decision\/?(?:\?|$)/i.test(req.url ?? ''),
+  });
+  app.useBodyParser('json', {
+    limit: '4mb',
+    type: req => !!req.headers['content-type']?.startsWith('application/json') && req.method === 'POST' &&
+      /^\/api\/v1\/organizer\/hour-correction-groups\/?(?:\?|$)/i.test(req.url ?? ''),
   });
   app.useBodyParser('json', {
     limit: '7mb',

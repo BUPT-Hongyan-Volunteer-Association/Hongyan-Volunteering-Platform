@@ -4,7 +4,7 @@ info:
   version: 1.2.5
   description: 2026-11-18 PRD v1.3.4配套规格，尚未实现。沿用/api/v1，本次校订后按本文件重新生成客户端。确认学生初始密码为学号后六位，首次登录强制改密。学号和班级均为十位数字，建档不含在校状态。时长以录入单为准，整数部分最多三位、最多一位小数。本轮聚焦平台搭建与功能实现，暂不考虑部署维护。业务字段、枚举及错误码使用snake_case，自动限制固定off。
     沿用：时长模板末列是否有违纪情况，时长与违规核实合并审批。规则未确定时正常审核时长，处罚固定未启用。按表头识别七列与兼容六列，不仅依赖文件名或版本号。
-  x-document-revision: 2026-11-21-r5
+  x-document-revision: 2026-11-21-r6
 servers:
 - url: /api/v1
   description: 同源相对路径，不指向已部署服务
@@ -3135,6 +3135,7 @@ paths:
           - add
           - skip_identical
           - correct
+          - review_only
           - void
           - error
       - $ref: '#/components/parameters/page'
@@ -3375,6 +3376,7 @@ paths:
           - pending_review
           - approved
           - rejected
+          - failed
       - name: activity_id
         in: query
         required: false
@@ -4502,6 +4504,16 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - name: activity_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: service_date
+        in: query
+        schema:
+          type: string
+          format: date
       - name: status
         in: query
         required: false
@@ -4816,6 +4828,7 @@ paths:
       - student
       - organizer
       parameters:
+      - $ref: '#/components/parameters/appeal_id'
       - $ref: '#/components/parameters/page'
       - $ref: '#/components/parameters/page_size'
       responses:
@@ -4866,6 +4879,12 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - $ref: '#/components/parameters/appeal_id'
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum: [pending, in_review, resolved, rejected]
       - $ref: '#/components/parameters/page'
       - $ref: '#/components/parameters/page_size'
       responses:
@@ -7027,6 +7046,7 @@ paths:
       - AC08
       x-roles: *id001
       parameters:
+      - $ref: '#/components/parameters/appeal_id'
       - name: id
         in: path
         required: true
@@ -9006,6 +9026,10 @@ components:
         row_number:
           type: integer
           minimum: 2
+        student_id:
+          type: string
+          format: uuid
+          description: 校验时绑定的学生档案，只随受控批次明细返回。
         student_no:
           type: string
           description: 十位数字，按文本传输并保留前导零。
@@ -9863,6 +9887,15 @@ components:
     appeal:
       type: object
       properties:
+        activity_title:
+          type: string
+        student_no:
+          type: string
+          pattern: ^[0-9]{10}$
+          description: 仅有权处理者的列表返回。
+        student_name:
+          type: string
+          description: 仅有权处理者的列表返回。
         id:
           type: string
           format: uuid
@@ -11584,6 +11617,9 @@ components:
         target_activity_id:
           type: string
           format: uuid
+        target_activity_title:
+          type: string
+          description: 修复组提交时保存的目标获批活动名称。
         target_service_date:
           type: string
           format: date
@@ -12096,6 +12132,12 @@ components:
           registration_closes_at: {type: string, format: date-time}
           capacity: {type: integer, minimum: 1, maximum: 10000}
   parameters:
+    appeal_id:
+      name: appeal_id
+      in: query
+      schema:
+        type: string
+        format: uuid
     workspace_scope:
       name: scope
       in: query

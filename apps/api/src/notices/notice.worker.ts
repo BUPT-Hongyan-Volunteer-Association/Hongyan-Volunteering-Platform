@@ -4,6 +4,7 @@ import type { Notice, NotificationEvent } from '../generated/prisma/client.js';
 import type { Tx } from '../activities/workflow.js';
 import { Database } from '../database.js';
 import { changeNoticeBody } from './notice.js';
+import { hourNoticeKind, hourPublication } from '../hours/events.js';
 
 // 失败后按分钟退避：第 1–5 次失败分别等待 1/2/5/15/30 分钟，第 6 次失败转为人工处理。
 const retryDelaysMinutes = [1, 2, 5, 15, 30];
@@ -153,16 +154,18 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
     now: Date,
   ) {
     const change = event.event_type === 'activity_changed';
-    if (!change && event.event_type !== 'registration_decided')
+    const hour = hourNoticeKind(event.event_type);
+    if (!change && !hour && event.event_type !== 'registration_decided')
       throw new DeliveryError('未知的通知事件类型');
-    const notice_kind = change ? 'change' : 'result';
+    const notice_kind = hour ?? (change ? 'change' : 'result');
     const previous = await tx.notice.findFirst({
       where: { activity_id, notice_kind },
       orderBy: { information_version: 'desc' },
     });
-    const publication = change
+    const publication = hour ? await hourPublication(tx, event, published) : change
       ? await changePublication(tx, event, activity_id, published, previous)
       : await resultPublication(tx, event, activity_id, published);
+    if (hour && !publication) throw new DeliveryError('时长通知缺少正文或接收人');
     if (!publication) return 'superseded';
 
     if (change && previous?.is_current) {
@@ -178,6 +181,7 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
           ...content,
           activity_id,
           notice_kind,
+          ...(hour && { requires_ack: false }),
           source_event_id: event.id,
           published_at: now,
           information_version: (previous?.information_version ?? 0) + 1,

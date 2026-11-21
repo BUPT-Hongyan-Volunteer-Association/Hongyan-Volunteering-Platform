@@ -29,12 +29,6 @@ const actions = computed(() => {
         : ['授予负责人角色', '重置学生凭证'];
     case 'failures':
       return ['重试原事件'];
-    case 'incidents':
-      return ['核实属实', '核实不成立'];
-    case 'corrections':
-      return ['批准整组', '驳回整组'];
-    case 'appeals':
-      return route.params.item === 'A2026-014' ? ['开始核查', '驳回申请'] : ['驳回申请'];
     default:
       return [];
   }
