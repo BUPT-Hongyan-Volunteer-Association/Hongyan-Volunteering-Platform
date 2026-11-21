@@ -6,8 +6,10 @@ import { launchBrowser } from '../scripts/browser.mjs';
 import { preview } from 'vite';
 import { createApp } from '../dist/app.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
+import { NoticeWorker } from '../dist/notices/notice.worker.js';
 import { Database } from '../dist/database.js';
 import { checkHourPages } from './hour-pages-fixture.mjs';
+import { checkStudentImportPages } from './student-import-pages-fixture.mjs';
 
 const link = (page, name) => page.getByRole('link', { name, exact: true });
 const button = (page, name) => page.getByRole('button', { name, exact: true });
@@ -125,6 +127,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
     browser = await launchBrowser({ headless: true });
     const student = await signIn(browser, web, '0000000001', password, 390);
     const owner = await signIn(browser, web, '0000000002', password, 390);
+    const helper = await signIn(browser, web, '0000000004', password, 390);
     const teacher = await signIn(browser, admin, 'demo.teacher', password, 1440);
     const tech = await signIn(browser, admin, 'demo.admin', adminPassword, 1440);
     const db = api.get(Database);
@@ -228,6 +231,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           if (!(await link(owner, tab).isVisible()))
             await owner.getByText('更多', { exact: true }).click();
           await link(owner, tab).click();
+          if (tab === '通知与回执') {
+            await visible(owner.getByText(/本活动还没有发出过通知/));
+            await fits(owner);
+            continue;
+          }
           if (tab === '时长批次') {
             await visible(owner.getByText('本活动还没有上传批次。'));
             assert.ok(await button(owner, '上传并预览').isDisabled());
@@ -260,8 +268,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           '错账修复组',
           '异常复核',
           '申诉与更正',
-          '学生档案',
-          '建档导入',
           '账号与角色',
           '通知失败队列',
           '审计记录',
@@ -281,6 +287,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         await visible(teacher.locator(width === 390 ? '.schedule-list' : '.chart-scroll'));
         await fits(teacher);
       }
+    });
+
+    await t.test('老师从后台导入学生名单并在学生档案中查到新学生', async () => {
+      await checkStudentImportPages(teacher, admin, { fits, pickOption, db });
     });
 
     await t.test('时间轴保留筛选、分钟比例和当前线，并按角色定位时段', async () => {
@@ -352,7 +362,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(teacher.getByText('本人已提前联系负责人，请复核签到说明。'));
     });
 
-    await t.test('三端同一活动的公开地点仅在批准后由 A 变为 B', async () => {
+    await t.test('公开地点获批后更新，学生确认变更，负责人可刷新回执', async () => {
       await student.goto(web);
       await link(student, '校园服务甲').click();
       const location = student.locator('dd').filter({ hasText: '沙河 · 活动室' });
@@ -387,6 +397,54 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await link(student, '校园服务甲').click();
       await visible(location);
       assert.equal(await location.innerText(), '沙河 · 活动室 B');
+
+      // 种子名单中 0000000004 已录取，0000000001 尚未报名。
+      await api.get(NoticeWorker).drain();
+      await helper.goto(web + '/activities/' + first.id);
+      await link(helper, '去查看并确认').click();
+      assert.equal(new URL(helper.url()).searchParams.get('activity_id'), first.id);
+      await helper.setViewportSize({ width: 1440, height: 900 });
+      await link(helper, '全部 1').click();
+      const inbox = helper.locator('.summary-list');
+      await visible(inbox.getByText(/活动地点：活动室 A → 活动室 B/));
+      await capture(helper, 'notice-summary');
+      const readingWidth = (await inbox.boundingBox()).width;
+      await helper.setViewportSize({ width: 1920, height: 1080 });
+      assert.equal((await inbox.boundingBox()).width, readingWidth);
+      await fits(helper);
+      await link(helper, '未读 1').click();
+      const search = helper.getByRole('searchbox', { name: '搜索通知' });
+      await search.fill('不存在的地点');
+      await visible(helper.getByText('暂无匹配通知。'));
+      await search.fill('活动室 B');
+      await visible(inbox.getByText(/活动地点：活动室 A → 活动室 B/));
+      await search.fill('');
+      await link(helper, '全部 1').click();
+      await helper.getByRole('link', { name: /校园服务甲安排有调整/ }).click();
+      await visible(helper.getByText(/活动地点：活动室 A → 活动室 B/));
+      await owner.goto(web + '/managed/' + first.id);
+      await link(owner, '通知与回执').click();
+      await owner.getByRole('link', { name: /校园服务甲安排有调整/ }).click();
+      await pickOption(owner, '回执范围', '全部接收人');
+      const receipt = owner.getByRole('row').filter({ hasText: '0000000004' });
+      await visible(receipt.getByText('已读未确认', { exact: true }));
+      assert.ok(await owner.locator('.record-list-pane').isVisible());
+      await owner.setViewportSize({ width: 390, height: 844 });
+      assert.equal(await owner.locator('.record-list-pane').isVisible(), false);
+      await fits(owner);
+      await link(helper, '查看活动详情').click();
+      await link(helper, '返回通知详情').click();
+      await link(helper, '返回通知').click();
+      await link(helper, '待确认 1').click();
+      await visible(link(helper, '未读 0'));
+      await button(helper, '确认收到').click();
+      await visible(helper.getByText('已确认收到，负责人可在回执里看到。'));
+      await visible(link(helper, '待确认 0'));
+      await visible(helper.getByText('没有待确认的通知。'));
+      await button(owner, '刷新回执').click();
+      await visible(receipt.getByText('已确认', { exact: true }));
+      await fits(owner);
+      await fits(helper);
     });
 
     // Persist the roster fixture in this disposable DB. The browser uses the normal API.
@@ -403,31 +461,12 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         } } } },
       } });
     }
-    await t.test('名单批量预览、回执和账号示例不会发送业务写请求', async () => {
+    await t.test('名单批量预览和账号示例不会发送业务写请求', async () => {
       const writes = [];
       const collect = (r) => {
         if (r.url().includes('/api/v1/') && r.method() !== 'GET') writes.push(r.method());
       };
-      await student.goto(web);
-      for (const p of [student, owner, tech]) p.on('request', collect);
-      await link(student, '通知').click();
-      await student.setViewportSize({ width: 1440, height: 900 });
-      await visible(student.getByText('11 月 21 日请到一层服务台集合。'));
-      await capture(student, 'notice-summary');
-      const list = student.locator('.summary-list');
-      const desktopWidth = (await list.boundingBox()).width;
-      await student.setViewportSize({ width: 1920, height: 1080 });
-      assert.equal((await list.boundingBox()).width, desktopWidth);
-      await fits(student);
-      await link(student, '未读 1').click();
-      assert.equal(await student.locator('.summary-list li').count(), 1);
-      await student.getByRole('searchbox', { name: '搜索通知' }).fill('不存在');
-      await visible(student.getByText('暂无匹配通知。'));
-      await student.getByRole('searchbox', { name: '搜索通知' }).fill('');
-      await link(student, '全部 3').click();
-      await visible(student.getByText('你的整项活动报名已录取。'));
-      await button(student, '预览确认回执').click();
-      await visible(student.getByText(/正式提交待接入/));
+      for (const p of [owner, tech]) p.on('request', collect);
       await owner.goto(web + '/managed/' + first.id + '/roster');
       await owner.getByLabel('选择本页').check();
       await visible(owner.getByText(/已选 5 人/));
@@ -438,7 +477,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await button(tech, '预览操作').click();
       await visible(tech.getByText(/停用独立后台账号尚未提交/));
       assert.deepEqual(writes, []);
-      for (const p of [student, owner, tech]) p.off('request', collect);
+      for (const p of [owner, tech]) p.off('request', collect);
     });
 
     await t.test('编辑中恢复焦点和网络后保留输入，后台核验失败时暂停保存', async () => {
@@ -547,7 +586,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
     });
 
     await t.test('切换活动清空名单选择，回收成员后移除已显示内容', async () => {
-      const helper = await signIn(browser, web, '0000000004', password, 390);
       const second = await db.activity.findUniqueOrThrow({
         where: { activity_code: 'P2026-0002' },
       });

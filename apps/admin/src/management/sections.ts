@@ -64,38 +64,8 @@ export const sections = {
       },
     ],
   },
-  students: {
-    title: '学生档案',
-    records: [
-      {
-        id: 'S0123',
-        title: '0000000123 · 林同学',
-        status: '账号启用',
-        fields: [
-          ['学号', '0000000123'],
-          ['姓名', '林同学'],
-          ['级部', '本科生'],
-          ['年级', '2026'],
-          ['班级', '0000000201'],
-        ],
-      },
-    ],
-  },
-  imports: {
-    title: '建档导入',
-    records: [
-      {
-        id: 'ST2026-001',
-        title: '秋季名单',
-        status: '待确认',
-        fields: [
-          ['文件', '学生建档导入模板_v1.3.xlsx'],
-          ['工作表', '学生建档'],
-          ['校验结果', '1 行通过，待确认建档'],
-        ],
-      },
-    ],
-  },
+  students: { title: '学生档案', records: [] },
+  imports: { title: '建档导入', records: [] },
   accounts: {
     title: '账号与角色',
     records: [

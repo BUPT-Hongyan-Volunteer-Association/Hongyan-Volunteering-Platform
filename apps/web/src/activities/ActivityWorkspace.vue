@@ -118,7 +118,7 @@ onUnmounted(() => {
       <RouterLink
         v-for="[path, label] in sections.slice(0, 4)"
         :key="path"
-        :class="{ current: route.params.area === path || (path === 'batches' && ['hour-batches','hour-batch'].includes(String(route.name))) }"
+        :class="{ current: (route.params.area ?? route.meta.area) === path }"
         :to="{ path: base + '/' + path, query: sourceQuery }"
         >{{ label }}</RouterLink
       >
@@ -143,7 +143,7 @@ onUnmounted(() => {
         :is="Component"
         v-on="['hour-batches','hour-batch'].includes(String(route.name)) ? { denied: refresh } : {}"
         v-bind="
-          route.name === 'organizer-section'
+          ['organizer-section', 'activity-notices'].includes(String(route.name))
             ? {}
             : route.name === 'activity-edit'
               ? { writesPaused: verifying || !!error, snapshot: detail, onLoaded: showDetail }

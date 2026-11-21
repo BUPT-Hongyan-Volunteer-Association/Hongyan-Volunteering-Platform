@@ -1,21 +1,5 @@
 import type { PreviewRecord } from '@hongyan/ui/preview';
-export const notices: PreviewRecord[] = [
-  {
-    id: 'meeting-02',
-    title: '集合通知',
-    status: '当前有效',
-    fields: [
-      ['信息版本', '2'],
-      ['集合说明', '请于 09:15 到一层服务台集合。'],
-      ['发送日期', '2026-11-17'],
-    ],
-  },
-];
-export const receipts = [
-  { name: '林同学', status: '已确认' },
-  { name: '周同学', status: '已读未确认' },
-  { name: '许同学', status: '未读' },
-];
+// 通知与回执已接入真实接口（见 ./ActivityNotices.vue），这里只保留尚未接入的到场记录示例。
 export const attendance: PreviewRecord[] = [
   {
     id: 'nov14-lin',

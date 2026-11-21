@@ -8,7 +8,7 @@ import { validateSchedule } from './schedule.js';
 
 const source = parse(
   readFileSync(
-    new URL('../../../../packages/contracts/openapi_v1.2.4.yaml', import.meta.url),
+    new URL('../../../../packages/contracts/openapi_v1.2.5.yaml', import.meta.url),
     'utf8',
   ),
 );

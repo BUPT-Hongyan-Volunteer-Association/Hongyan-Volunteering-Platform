@@ -27,7 +27,7 @@ function preview() {
 }
 </script>
 <template>
-  <RouterLink v-if="section === 'feedback' || section === 'hours'" class="back-link" to="/mine"
+  <RouterLink class="back-link" to="/mine"
     ><UiIcon name="ArrowLeft" />返回我的</RouterLink
   >
   <PreviewRecords

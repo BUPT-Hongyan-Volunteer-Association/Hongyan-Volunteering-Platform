@@ -5,9 +5,11 @@ import { activityTypes as types, localDateTime as date } from '@hongyan/ui/activ
 import {
   applyForActivity,
   createCommand,
+  listMyNotices,
   type Activity,
   type Registration,
 } from '@hongyan/contracts';
+import { usePageRead } from '../usePageRead';
 import { registrationLabels } from '../registrations/labels';
 const props = defineProps<{
   activity: Activity;
@@ -65,7 +67,19 @@ const registrationReturn =
   /^\/registrations(?:\/[a-f0-9-]+)?(?:\?|$)/i.test(registrationPath)
     ? registrationPath
     : undefined;
+const noticePath = window.history.state?.noticeReturn;
+const noticeReturn = typeof noticePath === 'string' && /^\/notices\/[a-f0-9-]+(?:\?|$)/i.test(noticePath)
+  ? noticePath : undefined;
 const contact = ref<HTMLDialogElement>();
+const { data: pendingNotices } = usePageRead(
+  () => props.showRegistrations && props.activity.id,
+  async (signal) => props.showRegistrations
+    ? (await listMyNotices({
+        query: { activity_id: props.activity.id, unacknowledged_only: true, page_size: 1 },
+        signal, throwOnError: true,
+      })).data.data.total
+    : 0,
+);
 const phases = {
   open: '报名中',
   not_open: '尚未开放',
@@ -84,13 +98,18 @@ const conditions: [keyof Activity, string, IconName][] = [
   <article class="activity-detail">
     <div class="detail-top">
       <RouterLink
-        :to="registrationReturn || scheduleReturn || { path: '/', query: $route.query }"
+        :to="noticeReturn || registrationReturn || scheduleReturn || { path: '/', query: $route.query }"
         :aria-label="
-          registrationReturn ? (/^\/registrations\//.test(registrationReturn) ? '返回报名详情' : '返回我的报名') : scheduleReturn ? '返回日程' : '返回活动列表'
+          noticeReturn ? '返回通知详情' : registrationReturn ? (/^\/registrations\//.test(registrationReturn) ? '返回报名详情' : '返回我的报名') : scheduleReturn ? '返回日程' : '返回活动列表'
         "
         ><UiIcon name="ArrowLeft" />活动详情</RouterLink
       ><RouterLink v-if="showRegistrations" to="/registrations">我的报名</RouterLink>
     </div>
+    <p v-if="pendingNotices" class="notice-callout">
+      <UiIcon name="Bell" />
+      本活动有 {{ pendingNotices }} 条通知待确认，
+      <RouterLink :to="{ path: '/notices', query: { pending: '1', activity_id: activity.id } }">去查看并确认</RouterLink>
+    </p>
     <div class="detail-columns">
       <div class="detail-intro">
         <div class="page-actions">
@@ -427,5 +446,18 @@ dialog button {
   .detail-footer:not(:has(.contact-btn)) {
     grid-template-columns: 1fr;
   }
+}
+.notice-callout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin: 0 0 16px;
+  border: 1px solid var(--line, #dfe5ef);
+  border-radius: var(--radius, 8px);
+  background: var(--surface-muted, #f5f8ff);
+}
+.notice-callout a {
+  text-decoration: underline;
 }
 </style>

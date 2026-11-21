@@ -4,14 +4,13 @@ import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import PreviewRecords from '@hongyan/ui/PreviewRecords.vue';
 import { requests } from '../registrations/requests';
-import { notices, receipts, attendance } from '../notices/organizer';
+import { attendance } from '../notices/organizer';
 import { appeals, corrections } from '../hours/organizer';
 import { incidents } from '../incidents/organizer';
 
 const route = useRoute();
 const sections = {
   requests: { title: '退出与恢复', records: requests },
-  notices: { title: '通知与回执', records: notices },
   attendance: { title: '现场人员记录', records: attendance },
   appeals: { title: '漏记反馈', records: appeals },
   corrections: { title: '错账修复组', records: corrections },
@@ -22,7 +21,6 @@ const date = ref('');
 const serviceDates = [
   ...new Set(attendance.map((row) => row.fields.find(([label]) => label === '服务日期')![1])),
 ];
-const receiptFilter = ref('待跟进');
 const feedback = ref('');
 const records = computed(() => {
   const list = sections[section.value].records;
@@ -33,7 +31,6 @@ watch(
   [section, () => route.params.item, () => route.params.id],
   () => {
     feedback.value = '';
-    receiptFilter.value = '待跟进';
   },
 );
 </script>
@@ -57,23 +54,6 @@ watch(
       /></label>
     </template>
     <template #detail="{ record }">
-      <template v-if="section === 'notices'">
-        <h3>接收人回执</h3>
-        <label
-          >回执名单
-          <UiSelect label="回执名单" v-model="receiptFilter" :options="['待跟进', '已确认']"
-        /></label>
-        <ul>
-          <li
-            v-for="r in receipts.filter(
-              (r) => (r.status === '已确认') === (receiptFilter === '已确认'),
-            )"
-            :key="r.name"
-          >
-            {{ r.name }} · {{ r.status }}
-          </li>
-        </ul>
-      </template>
       <button
         v-if="section === 'requests' && record.status === '待处理'"
         @click="feedback = '示例申请尚待接入，处理决定未提交。'"

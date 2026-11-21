@@ -8,7 +8,8 @@ defineProps<{ records: T[] }>();
     <li v-for="row in records" :key="row.id" :class="{ unread: row.unread }">
       <div class="summary-name">
         <div class="page-title">
-          <strong>{{ row.title }}</strong
+          <strong
+            ><slot name="title" :row="row">{{ row.title }}</slot></strong
           ><span class="state-chip" :class="{ neutral: !row.unread }">{{ row.status }}</span>
         </div>
         <small v-if="row.context">{{ row.context }}</small>
@@ -38,11 +39,14 @@ defineProps<{ records: T[] }>();
   position: relative;
   overflow-wrap: anywhere;
 }
-.unread::before {
+.summary-name {
+  position: relative;
+}
+.unread .summary-name::before {
   content: '';
   position: absolute;
-  left: 8px;
-  top: 24px;
+  left: -18px;
+  top: 8px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -56,6 +60,9 @@ time {
 .summary-name small {
   display: block;
   margin-top: 3px;
+}
+.summary-body > span {
+  white-space: pre-line;
 }
 .summary-body {
   display: flex;

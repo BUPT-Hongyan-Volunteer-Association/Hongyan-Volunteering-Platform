@@ -7,7 +7,7 @@
     "./types": "./src/generated/types.gen.ts"
   },
   "scripts": {
-    "generate": "openapi-ts -i openapi_v1.2.4.yaml -o src/generated",
+    "generate": "openapi-ts -i openapi_v1.2.5.yaml -o src/generated",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {

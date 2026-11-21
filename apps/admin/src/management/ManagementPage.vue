@@ -27,10 +27,6 @@ const actions = computed(() => {
           ? ['停用独立后台账号', '重置后台凭证']
           : []
         : ['授予负责人角色', '重置学生凭证'];
-    case 'students':
-      return ['修正学生档案', '停用学生账号'];
-    case 'imports':
-      return ['确认建档'];
     case 'failures':
       return ['重试原事件'];
     case 'incidents':
@@ -64,27 +60,6 @@ watch(
     :selected="String(route.params.item || '')"
   >
     <template #detail>
-      <div v-if="key === 'imports'" class="scroll-table">
-        <table>
-          <caption>
-            原表第 2 行
-          </caption>
-          <thead>
-            <tr>
-              <th v-for="col in ['学号', '姓名', '级部', '年级', '班级']" :key="col">{{ col }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <th>0000000123</th>
-              <td>林同学</td>
-              <td>本科生</td>
-              <td>2026</td>
-              <td>0000000201</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
       <form
         v-if="actions.length"
         class="preview-form management-form"
