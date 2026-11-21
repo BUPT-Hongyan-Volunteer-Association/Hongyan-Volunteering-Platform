@@ -375,6 +375,181 @@ test('地点变更按事件投递站内通知，回执、催办与失败重试�
       assert.equal(await db.noticeReceipt.count({ where: { notice_id: notice.id } }), 1);
     });
 
+    await t.test('两次修订只覆盖部分字段时，未被覆盖的提醒仍然送达', async () => {
+      const made = await owner.write('POST', '/organizer/activities', {
+        ...sample.revisions[0].content,
+        title: '部分覆盖',
+        location: '甲',
+        meeting_point: '一号门',
+      });
+      assert.equal(made.status, 201);
+      const own = '/organizer/activities/' + made.data.id;
+      const ownVersion = async () => (await owner.request(own)).data.activity.version;
+      const ownAmend = async (fields) => {
+        const patched = await owner.write('PATCH', own, {
+          ...fields,
+          expected_version: await ownVersion(),
+        });
+        assert.equal(patched.status, 200);
+        const r = await owner.write('POST', own + '/submit', {
+          expected_version: await ownVersion(),
+        });
+        assert.equal((await decide(r.data)).status, 200);
+      };
+      const firstSubmit = await owner.write('POST', own + '/submit', {
+        expected_version: await ownVersion(),
+      });
+      assert.equal((await decide(firstSubmit.data)).status, 200);
+      const s1 = await studentRow('0000000001');
+      await db.registration.create({
+        data: { activity_id: made.data.id, student_id: s1.id, status: 'accepted' },
+      });
+      // 第一次同时改地点和集合点，第二次只改地点：两次都获批后才投递。
+      await ownAmend({ location: '乙', meeting_point: '二号门' });
+      await ownAmend({ location: '丙' });
+      await drain();
+      const notice = await db.notice.findFirstOrThrow({
+        where: { activity_id: made.data.id, is_current: true },
+      });
+      assert.match(notice.body, /活动地点：甲 → 丙/);
+      assert.match(notice.body, /集合地点：一号门 → 二号门/);
+      // 历史版本保留：第一条被第二条取代，但学生只看得到当前这一条。
+      assert.equal(await db.notice.count({ where: { activity_id: made.data.id, is_current: true } }), 1);
+    });
+
+    await t.test('旧事件补发不会挤掉较新的待确认提醒', async () => {
+      const made = await owner.write('POST', '/organizer/activities', {
+        ...sample.revisions[0].content,
+        title: '乱序投递',
+        location: '甲',
+        meeting_point: '一号门',
+      });
+      assert.equal(made.status, 201);
+      const own = '/organizer/activities/' + made.data.id;
+      const ownVersion = async () => (await owner.request(own)).data.activity.version;
+      const ownAmend = async (fields) => {
+        const patched = await owner.write('PATCH', own, {
+          ...fields,
+          expected_version: await ownVersion(),
+        });
+        assert.equal(patched.status, 200);
+        const r = await owner.write('POST', own + '/submit', {
+          expected_version: await ownVersion(),
+        });
+        assert.equal((await decide(r.data)).status, 200);
+      };
+      const firstSubmit = await owner.write('POST', own + '/submit', {
+        expected_version: await ownVersion(),
+      });
+      assert.equal((await decide(firstSubmit.data)).status, 200);
+      const s1 = await studentRow('0000000001');
+      await db.registration.create({
+        data: { activity_id: made.data.id, student_id: s1.id, status: 'accepted' },
+      });
+      const deliver = worker.deliver;
+      worker.deliver = async () => {
+        throw new Error('这条事件先失败');
+      };
+      try {
+        await ownAmend({ location: '乙' });
+        await drain();
+      } finally {
+        worker.deliver = deliver;
+      }
+      // 较新的修订先送达：只改集合点。
+      await ownAmend({ meeting_point: '二号门' });
+      await drain();
+      const newer = await db.notice.findFirstOrThrow({
+        where: { activity_id: made.data.id, is_current: true },
+      });
+      assert.match(newer.body, /集合地点：一号门 → 二号门/);
+      // 旧事件补发后，较新的提醒不能从待确认里消失：要么被覆盖、要么合并进去。
+      clock.advance(30 * 60 * 1000);
+      await drain();
+      const old = await db.notificationEvent.findFirstOrThrow({
+        where: { activity_id: made.data.id, event_type: 'activity_changed' },
+        orderBy: { created_at: 'asc' },
+      });
+      assert.ok(['delivered', 'superseded'].includes(old.status));
+      const current = await db.notice.findFirstOrThrow({
+        where: { activity_id: made.data.id, is_current: true },
+      });
+      assert.equal(current.is_current, true);
+      assert.match(current.body, /集合地点：一号门 → 二号门/);
+      if (old.status === 'delivered') {
+        // 合并：地点变更也在同一条提醒里，学生不会被要求确认一份缺信息的新版本。
+        assert.match(current.body, /活动地点：甲 → 乙/);
+        assert.notEqual(current.id, newer.id);
+      } else {
+        assert.equal(current.id, newer.id);
+      }
+      const pending = await student.request(
+        '/me/notices?unacknowledged_only=true&activity_id=' + made.data.id,
+      );
+      assert.equal(pending.data.items.length, 1);
+    });
+
+    await t.test('租约过期后旧消费者报错不会把已投递的事件改回待发送', async () => {
+      const made = await owner.write('POST', '/organizer/activities', {
+        ...sample.revisions[0].content,
+        title: '租约回写',
+        location: '甲',
+      });
+      assert.equal(made.status, 201);
+      const own = '/organizer/activities/' + made.data.id;
+      const ownVersion = async () => (await owner.request(own)).data.activity.version;
+      const submitted = await owner.write('POST', own + '/submit', {
+        expected_version: await ownVersion(),
+      });
+      assert.equal(submitted.status, 201);
+      assert.equal((await decide(submitted.data)).status, 200);
+      const s1 = await studentRow('0000000001');
+      await db.registration.create({
+        data: { activity_id: made.data.id, student_id: s1.id, status: 'accepted' },
+      });
+      assert.equal(
+        (await owner.write('PATCH', own, { location: '乙', expected_version: await ownVersion() }))
+          .status,
+        200,
+      );
+      const second = await owner.write('POST', own + '/submit', {
+        expected_version: await ownVersion(),
+      });
+      assert.equal((await decide(second.data)).status, 200);
+
+      let release = () => {};
+      const gate = new Promise((resolve) => {
+        release = resolve;
+      });
+      const slow = worker.deliver;
+      worker.deliver = async () => {
+        await gate;
+        throw new Error('旧消费者报错');
+      };
+      try {
+        const original = worker.drain(clock.now());
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        // 租约到期，另一个消费者接管并投递成功。
+        clock.advance(61 * 1000);
+        const rival = new NoticeWorker(db, clock);
+        await rival.drain(clock.now());
+        const event = await db.notificationEvent.findFirstOrThrow({
+          where: { activity_id: made.data.id },
+        });
+        assert.equal(event.status, 'delivered');
+        release();
+        await original;
+        const after = await db.notificationEvent.findUniqueOrThrow({ where: { id: event.id } });
+        assert.equal(after.status, 'delivered');
+        assert.equal(
+          await db.notice.count({ where: { activity_id: made.data.id } }),
+          1,
+        );
+      } finally {
+        worker.deliver = slow;
+      }
+    });
+
   } finally {
     delete process.env.NOTICE_WORKER;
     await app?.close();
@@ -450,6 +625,13 @@ test('录取结果单独成通知，敏感字段不落正文，人工重试校�
         where: { activity_id: id, event_type: 'registration_decided' },
       });
       assert.equal(event.status, 'pending');
+      // 队列条目沿用原决定事件 ID，并保留报名与决定版本，便于重试和追溯。
+      const decision = await db.registrationDecisionEvent.findFirstOrThrow({
+        where: { registration_id: applied.data.id },
+      });
+      assert.equal(event.id, decision.event_id);
+      assert.equal(event.resource_id, applied.data.id);
+      assert.equal(event.payload.registration_version, decision.registration_version);
       await drain();
       const notice = await db.notice.findFirstOrThrow({
         where: { activity_id: id, notice_kind: 'result' },
@@ -457,7 +639,13 @@ test('录取结果单独成通知，敏感字段不落正文，人工重试校�
       assert.match(notice.body, /已被录取/);
       assert.match(notice.body, /材料齐全/);
       assert.equal(notice.requires_ack, true);
+      assert.equal(notice.source_event_id, decision.event_id);
       assert.equal(await db.noticeReceipt.count({ where: { notice_id: notice.id } }), 1);
+      // 投递后 resource_id 仍是报名 ID，不会被改写成通知 ID。
+      assert.equal(
+        (await db.notificationEvent.findUniqueOrThrow({ where: { id: event.id } })).resource_id,
+        applied.data.id,
+      );
       const inbox = await student.request('/me/notices?notice_kind=result');
       assert.equal(inbox.status, 200);
       assert.equal(inbox.data.total, 1);

@@ -249,6 +249,10 @@ model Notice {
   published_by        String?         @db.Uuid
   // 一次业务事件最多产出一条通知，重试与并发投递都靠它兜底。
   source_event_id     String?         @unique @db.Uuid
+  // 提醒覆盖的版本区间：base_revision 是学生上次被告知的版本，source_revision 是这次通知的依据版本。
+  // 迟到的事件按区间重算正文，既能补齐漏发的字段，也不会把更新的提醒顶掉。
+  base_revision       Int?
+  source_revision     Int?
   published_at        DateTime        @default(now()) @db.Timestamptz(3)
   created_at          DateTime        @default(now()) @db.Timestamptz(3)
   updated_at          DateTime        @updatedAt @db.Timestamptz(3)

@@ -13,6 +13,8 @@ CREATE TABLE "notice" (
     "is_current" BOOLEAN NOT NULL DEFAULT true,
     "published_by" UUID,
     "source_event_id" UUID,
+    "base_revision" INTEGER,
+    "source_revision" INTEGER,
     "published_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,

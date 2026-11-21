@@ -24,27 +24,11 @@ import {
   wrongState,
 } from './workflow.js';
 import { content, validate } from './validation.js';
+import { notifiedFields as notifiedFieldList } from '../notices/notice.js';
 
-// 会通知到学生的字段。新增字段时同步 notices/notice.ts 的 changeFieldLabels，
-// 否则正文只能回退成「活动信息」，学生看不出变了什么。
-const notifiedFields = new Set([
-  'schedule',
-  'registration_opens_at',
-  'registration_closes_at',
-  'result_expected_at',
-  'campus',
-  'location',
-  'meeting_point',
-  'transport_notes',
-  'capacity',
-  'eligibility_text',
-  'selection_text',
-  'group_join_instructions',
-  'hours_rule_text',
-  'expected_hours',
-  'expected_hours_basis',
-  'hours_import_expected_at',
-]);
+// 会通知到学生的字段直接引用通知模块的清单，新增字段只改一处，
+// 也保证"登记了什么变更"和"通知里写了什么"永远对得上。
+const notifiedFields = new Set<string>(notifiedFieldList);
 
 // Each review references a frozen revision and, for amendments, its previous public revision.
 async function snapshotsForReviews(tx: Tx, reviews: ActivityReview[]) {

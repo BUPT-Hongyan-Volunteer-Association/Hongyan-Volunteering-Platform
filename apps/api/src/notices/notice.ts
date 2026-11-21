@@ -5,7 +5,28 @@ import type {
   NotificationEvent as EventRow,
 } from '../generated/prisma/client.js';
 
-// 变更字段对学生的可读名称，键必须覆盖 activities/review.controller.ts 的 notifiedFields。
+// 会通知到学生的字段。顺序即正文里的展示顺序；activities/review.controller.ts 直接引用这份清单，
+// 避免"哪些字段要通知"和"字段中文名"两处各写一遍，加字段时只改这里。
+export const notifiedFields = [
+  'schedule',
+  'registration_opens_at',
+  'registration_closes_at',
+  'result_expected_at',
+  'campus',
+  'location',
+  'meeting_point',
+  'transport_notes',
+  'capacity',
+  'eligibility_text',
+  'selection_text',
+  'group_join_instructions',
+  'hours_rule_text',
+  'expected_hours',
+  'expected_hours_basis',
+  'hours_import_expected_at',
+] as const;
+
+// 变更字段对学生的可读名称，键必须覆盖上面的 notifiedFields。
 // 嵌套字段只取根键，避免把技术路径暴露给用户。
 const changeFieldLabels: Record<string, string> = {
   location: '活动地点',
@@ -100,6 +121,16 @@ function changeLines(fields: string[], before: unknown, after: unknown): string[
     lines.push(`${label}：${displayValue(read(before, root))} → ${displayValue(read(after, root))}`);
   }
   return lines;
+}
+
+// 两份修订快照之间真正变了的字段：只改标题不算变更，字段值真的变了才要提醒。
+// 用来按字段判断"这次变更是否已被后续修订覆盖"，避免整条通知被误作废。
+export function changedFields(before: unknown, after: unknown): string[] {
+  return notifiedFields.filter((field) => !sameValue(read(before, field), read(after, field)));
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 export function changeNoticeBody(fields: string[], before: unknown, after: unknown): string {
