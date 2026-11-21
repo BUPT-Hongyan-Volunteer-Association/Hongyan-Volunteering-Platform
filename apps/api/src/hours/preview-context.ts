@@ -1,4 +1,4 @@
-import type { ActivityInput } from '@hongyan/contracts/types';
+import type { ActivityPublicationContent } from '@hongyan/contracts/types';
 import type { Actor } from '../auth/session.guard.js';
 import { managedScope } from '../activities/read.js';
 import type { Tx } from '../activities/workflow.js';
@@ -39,7 +39,7 @@ export async function previewActivityHours(
   const preview = previewHourRows(book, {
     activity_id: activityId, activity_code: activity.activity_code, published_revision: activity.published_revision,
     approved_schedules: activity.revisions.map(({ revision, content }) =>
-      ({ revision, schedule: (content as unknown as ActivityInput).schedule })),
+      ({ revision, schedule: (content as unknown as ActivityPublicationContent).schedule })),
     students: students.map(({ id, student_no, account, registrations }) => ({
       id, student_no, name: account.display_name,
       registration: registrations[0]?.history.length ? registrations[0].history : registrations,

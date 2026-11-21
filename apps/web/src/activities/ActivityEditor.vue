@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import UiSelect from '@hongyan/ui/UiSelect.vue';
-import { ref, computed, watch } from 'vue';
+import ActivityDateField from '@hongyan/ui/ActivityDateField.vue';
+import { campusName, campuses } from '@hongyan/contracts/activity';
+import { ref, computed, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   ApiError,
@@ -10,8 +12,8 @@ import {
   submitActivity,
   withdrawActivityReview,
   createCommand,
-  type ActivityInput,
-  type ActivityDraftPatch,
+  type ActivityInputWritable as ActivityInput,
+  type ActivityDraftPatchWritable as ActivityDraftPatch,
   type ManagedActivityDetail,
   type ActivityRevision,
 } from '@hongyan/contracts';
@@ -19,7 +21,12 @@ import {
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import ActivityHistory from './ActivityHistory.vue';
 import { fieldGroups, activityFields as fields } from '@hongyan/ui/activityFields';
-import { revisionLabels } from '@hongyan/ui/activityDisplay';
+import {
+  revisionLabels,
+  localDate,
+  activityContacts,
+  resultDate,
+} from '@hongyan/ui/activityDisplay';
 
 const props = defineProps<{ writesPaused?: boolean; snapshot?: ManagedActivityDetail }>();
 const emit = defineEmits<{ loaded: [detail: ManagedActivityDetail] }>();
@@ -29,6 +36,26 @@ const route = useRoute(),
 const detail = ref<ManagedActivityDetail>(),
   form = ref<Record<string, string>>({}),
   base = ref<Record<string, string>>({});
+const contactRows = ref<string[]>(['']);
+const savedContacts = computed(() => activityContacts(detail.value?.working_snapshot.content));
+const contacts = computed(() => contactRows.value.map((value) => value.trim()).filter(Boolean));
+const contactsChanged = computed(
+  () =>
+    contacts.value.length !== savedContacts.value.length ||
+    contacts.value.some((value, index) => value !== savedContacts.value[index]),
+);
+function resetContacts(item?: ActivityRevision['content']) {
+  const values = activityContacts(item);
+  contactRows.value = values.length ? [...values] : [''];
+}
+async function changeContactRows(remove?: number) {
+  if (remove === undefined) contactRows.value.push('');
+  else contactRows.value.splice(remove, 1);
+  if (!contactRows.value.length) contactRows.value.push('');
+  await nextTick();
+  const index = Math.min(remove ?? contactRows.value.length - 1, contactRows.value.length - 1);
+  document.getElementById('activity-contact-' + index)?.focus();
+}
 const reason = ref(''),
   message = ref(''),
   confirmation = ref<{ id: string; text: string }>(),
@@ -37,33 +64,113 @@ const reason = ref(''),
   busy = ref(false),
   loading = ref(false),
   conflict = ref(false);
+watch(
+  () => ({ ...form.value }),
+  (values, previous) => {
+    if (!Object.keys(fieldErrors.value).length) return;
+    for (const [key] of fields) {
+      if (values[key] === previous[key]) continue;
+      delete fieldErrors.value[key];
+      if (key === 'group_qr_id' && values.group_qr_id)
+        delete fieldErrors.value.group_join_instructions;
+      if (key.startsWith('duration_')) delete fieldErrors.value.schedule;
+    }
+    if (!Object.keys(fieldErrors.value).length) message.value = '';
+  },
+);
+watch(contacts, () => {
+  if (fieldErrors.value.contacts) {
+    delete fieldErrors.value.contacts;
+    if (!Object.keys(fieldErrors.value).length) message.value = '';
+  }
+});
 const pending = computed(() => detail.value?.current_review?.status === 'pending');
 const readonly = computed(
   () =>
     !!pending.value ||
     ['cancelled', 'completed', 'archived'].includes(detail.value?.activity.status ?? '') ||
-    (detail.value?.working_snapshot.content.schedule.schedule_type &&
-      detail.value.working_snapshot.content.schedule.schedule_type !== 'continuous'),
+    ['weekly', 'custom'].includes(
+      detail.value?.working_snapshot.content.schedule?.schedule_type ?? '',
+    ),
 );
+const restore = ref<ActivityRevision['content']>();
+const imageLoading = ref(false);
+let imageRequest = 0;
+const options = [
+  { value: '', label: '请选择校区' },
+  ...campuses.map((value) => ({ value, label: value })),
+];
 function formValues(item?: ActivityRevision['content']) {
-  const props = {
+  const schedule = item?.schedule;
+  const dates =
+    schedule?.schedule_type === 'continuous'
+      ? {
+          duration_start_date: localDate(schedule.starts_at),
+          duration_end_date: localDate(schedule.ends_at),
+        }
+      : schedule;
+  const values: Record<string, unknown> = {
     ...item,
-    ...(item?.schedule.schedule_type === 'continuous' ? item.schedule : {}),
-  } as Record<string, unknown>;
+    ...dates,
+    result_expected_date: resultDate(item),
+    campus: campusName(item?.campus),
+    hours_import_date:
+      item?.hours_import_date ??
+      (item?.hours_import_expected_at && localDate(item.hours_import_expected_at)),
+  };
   return Object.fromEntries(
-    fields.map(([key, , type]) => {
-      const value = props[key];
-      return [
-        key,
-        type === 'datetime-local' && value
-          ? new Date(Date.parse(String(value)) + 8 * 3600000).toISOString().slice(0, 19)
-          : String(value ?? (key === 'capacity' ? 1 : '')),
-      ];
-    }),
+    fields
+      .filter(([key]) => key !== 'contacts')
+      .map(([key, , type]) => {
+        const v = values[key];
+        return [
+          key,
+          type === 'datetime-local' && v
+            ? new Date(Date.parse(String(v)) + 8 * 3600000).toISOString().slice(0, 16)
+            : String(v ?? ''),
+        ];
+      }),
   );
+}
+function requirement(key: string) {
+  if (['group_join_instructions', 'group_qr_id'].includes(key)) return '至少一项';
+  if (['expected_hours', 'eligibility_text', 'safety_notes'].includes(key)) return '选填';
+  if (key === 'expected_hours_basis') return form.value.expected_hours ? '必填' : '选填';
+  return '必填';
+}
+function selectImage(event: Event) {
+  const input = event.target as HTMLInputElement,
+    file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  const n = ++imageRequest;
+  imageLoading.value = false;
+  delete fieldErrors.value.group_qr_id;
+  if (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+    fieldErrors.value.group_qr_id = '请选择不超过 5 MB 的 PNG 或 JPEG 图片';
+    return;
+  }
+  imageLoading.value = true;
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (n === imageRequest) form.value.group_qr_id = String(reader.result);
+  };
+  reader.onerror = () => {
+    if (n === imageRequest) fieldErrors.value.group_qr_id = '读取失败，请重新选择图片';
+  };
+  reader.onloadend = () => {
+    if (n === imageRequest) imageLoading.value = false;
+  };
+  reader.readAsDataURL(file);
+}
+function restoreVersion(item: ActivityRevision['content']) {
+  restore.value = item;
+  resetContacts(item);
+  form.value = formValues(item);
 }
 let serial = 0;
 async function load(preserve = false, snapshot?: ManagedActivityDetail) {
+  const keepContacts = preserve && contactsChanged.value;
   const n = ++serial,
     local = Object.entries(form.value).filter(([k, v]) => v !== base.value[k]);
   loading.value = true;
@@ -79,7 +186,9 @@ async function load(preserve = false, snapshot?: ManagedActivityDetail) {
         : undefined);
     if (n !== serial) return;
     detail.value = data;
+    if (!preserve) restore.value = undefined;
     if (data && !snapshot) emit('loaded', data);
+    if (!keepContacts) resetContacts(data?.working_snapshot.content);
     base.value = formValues(data?.working_snapshot.content);
     form.value = { ...base.value, ...(preserve ? Object.fromEntries(local) : {}) };
   } catch (e) {
@@ -96,47 +205,87 @@ function report(e: unknown) {
   if (e instanceof ApiError) {
     conflict.value = e.status === 409;
     fieldErrors.value = Object.fromEntries(
-      (e.body?.details ?? []).map((d) => [d.field ?? '', d.message]),
+      (e.body?.details ?? []).map((d) => {
+        const field = d.field?.replace(/^schedule\./, '') ?? '';
+        if (field.startsWith('contacts.')) {
+          const filledRows = contactRows.value.flatMap((value, index) =>
+            value.trim() ? [index + 1] : [],
+          );
+          return [
+            'contacts',
+            '第 ' + filledRows[Number(field.split('.')[1])] + ' 项联系方式不能为空',
+          ];
+        }
+        return [field, d.message];
+      }),
     );
   }
 }
 function payload(partial: boolean) {
   const result: Record<string, unknown> = {},
     v = form.value;
-  for (const [k, , type] of fields) {
-    if (k === 'starts_at' || k === 'ends_at' || k.startsWith('expected_hours')) continue;
-    if ((partial && v[k] === base.value[k]) || (!v[k] && !partial)) continue;
-    result[k] =
-      type === 'datetime-local' && v[k]
-        ? new Date(v[k] + '+08:00').toISOString()
-        : type === 'number'
-          ? Number(v[k])
-          : v[k];
+  const source = restore.value;
+  const saved = detail.value?.working_snapshot.content;
+  if (contactsChanged.value) result.contacts = contacts.value;
+  for (const [key, , type] of fields) {
+    if (key === 'contacts' || key.startsWith('duration_')) continue;
+    const value = String(v[key] ?? '').trim();
+    if ((partial && v[key] === base.value[key]) || (!partial && !value)) continue;
+    if (key === 'group_qr_id' && value.startsWith('data:')) result.group_qr_upload = value;
+    else if (!value) result[key] = null;
+    else if (type === 'datetime-local') result[key] = new Date(value + '+08:00').toISOString();
+    else result[key] = type === 'number' ? Number(value) : value;
+    if (key === 'hours_import_date' && saved?.hours_import_expected_at)
+      result.hours_import_expected_at = null;
   }
-  if (!partial || v.starts_at !== base.value.starts_at || v.ends_at !== base.value.ends_at) {
-    if (!v.starts_at || !v.ends_at) throw Error('请填写完整的开始与结束时间');
-    result.schedule = {
-      schedule_type: 'continuous',
-      starts_at: new Date(v.starts_at + '+08:00').toISOString(),
-      ends_at: new Date(v.ends_at + '+08:00').toISOString(),
-    };
-  }
+  const start = v.duration_start_date,
+    end = v.duration_end_date;
+  const original = source && formValues(source);
+  const datesChanged =
+    start !== base.value.duration_start_date || end !== base.value.duration_end_date;
   if (
-    !partial ||
-    v.expected_hours !== base.value.expected_hours ||
-    v.expected_hours_basis !== base.value.expected_hours_basis
-  ) {
-    if (!!v.expected_hours !== !!v.expected_hours_basis) throw Error('预计时长和口径须成对填写');
-    if (v.expected_hours || partial) {
-      result.expected_hours = v.expected_hours || null;
-      result.expected_hours_basis = v.expected_hours_basis || null;
-    }
+    source?.schedule &&
+    original &&
+    start === original.duration_start_date &&
+    end === original.duration_end_date
+  )
+    result.schedule = source.schedule;
+  else if (datesChanged)
+    result.schedule = {
+      schedule_type: 'date_range',
+      ...(start && { duration_start_date: start }),
+      ...(end && { duration_end_date: end }),
+    };
+  if (source && original) {
+    for (const k of ['registration_opens_at', 'registration_closes_at'] as const)
+      if (v[k] === original[k] && source[k] !== saved?.[k]) result[k] = source[k] ?? null;
+    for (const k of ['selection_text', 'contact_text', 'hours_import_expected_at'] as const)
+      if (
+        saved?.[k] !== source[k] &&
+        !(k === 'hours_import_expected_at' && 'hours_import_date' in result)
+      )
+        result[k] = source[k] ?? null;
+  }
+  const converting =
+    saved?.schedule?.schedule_type === 'continuous' &&
+    (result.schedule as ActivityInput['schedule'])?.schedule_type === 'date_range';
+  if (converting) {
+    for (const key of ['registration_opens_at', 'registration_closes_at'] as const)
+      if (v[key]) result[key] = new Date(v[key] + '+08:00').toISOString();
+    if (v.hours_import_date) result.hours_import_date = v.hours_import_date;
+    if (saved.hours_import_expected_at) result.hours_import_expected_at = null;
   }
   return result;
 }
 const command = createCommand();
 async function run(action: 'save' | 'submit' | 'withdraw') {
-  if (busy.value || props.writesPaused || (action === 'save' && id.value && !dirty.value)) return;
+  if (
+    imageLoading.value ||
+    busy.value ||
+    props.writesPaused ||
+    (action === 'save' && id.value && !dirty.value)
+  )
+    return;
   busy.value = true;
   fieldErrors.value = {};
   confirmation.value = undefined;
@@ -188,6 +337,17 @@ async function run(action: 'save' | 'submit' | 'withdraw') {
   } catch (e) {
     if (id.value === target) {
       report(e);
+      if (Object.keys(fieldErrors.value).length) {
+        await nextTick();
+        // The fieldset becomes interactive when the request finishes.
+        requestAnimationFrame(() =>
+          document
+            .querySelector<HTMLElement>(
+              '.field-grid .invalid :is(input,textarea,button):not([disabled])',
+            )
+            ?.focus(),
+        );
+      }
       if (e instanceof ApiError && !e.body) message.value = '写入结果尚未确认，可用相同内容重试。';
     }
     return;
@@ -212,6 +372,8 @@ watch(
       confirmation.value = { id: id.value, text: '草稿已保存' };
       window.history.replaceState({ ...window.history.state, savedDraftId: null }, '');
     }
+    imageRequest++;
+    imageLoading.value = false;
     base.value = {};
     form.value = {};
     reason.value = '';
@@ -219,7 +381,12 @@ watch(
   },
   { immediate: true },
 );
-const dirty = computed(() => fields.some(([k]) => form.value[k] !== base.value[k]));
+const dirty = computed(
+  () =>
+    !!restore.value ||
+    contactsChanged.value ||
+    fields.some(([k]) => form.value[k] !== base.value[k]),
+);
 watch([() => props.snapshot, busy, loading], ([snapshot]) => {
   if (
     !snapshot ||
@@ -271,15 +438,23 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
           detail.current_review &&
           ['rejected', 'withdrawn'].includes(detail.current_review.status) &&
           detail.current_review.revision !== detail.working_snapshot.revision &&
-          detail.current_review.snapshot.content.schedule.schedule_type === 'continuous' &&
+          !['weekly', 'custom'].includes(
+            detail.current_review.snapshot.content.schedule?.schedule_type ?? '',
+          ) &&
           !readonly
         "
         :disabled="dirty || busy || writesPaused || conflict"
-        @click="form = formValues(detail.current_review.snapshot.content)"
+        @click="restoreVersion(detail.current_review.snapshot.content)"
       >
         使用版本 {{ detail.current_review.revision }} 的内容重新编辑
       </button>
     </div>
+    <p v-if="!readonly" class="editor-hint">填写标题即可保存草稿，送审前请补齐必填项。</p>
+    <ul v-if="Object.keys(fieldErrors).length" class="error-summary" aria-label="待修正字段">
+      <li v-for="[key, title] in fields.filter(([k]) => fieldErrors[k])" :key="key">
+        {{ title }} · {{ fieldErrors[key] }}
+      </li>
+    </ul>
     <form id="activity-form" class="activity-form" @submit.prevent="run('save')">
       <fieldset v-for="group in fieldGroups" :key="group.title" :disabled="!!readonly || busy">
         <legend>
@@ -287,40 +462,141 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
           <small v-if="group.icon === 'Calendar'">北京时间</small>
         </legend>
         <div class="field-grid">
-          <label
+          <div
             v-for="[key, title, type] in group.fields"
             :key="key"
-            :class="{ wide: type === 'textarea' }"
+            class="field"
+            :class="{ wide: type === 'textarea' || type === 'contacts', invalid: fieldErrors[key] }"
           >
-            <span>{{ title }}</span>
+            <label :for="type === 'contacts' ? 'activity-contact-0' : 'activity-' + key"
+              ><span>{{ title }}</span
+              ><small class="requirement">{{ requirement(key) }}</small></label
+            >
             <UiSelect
-              v-if="type === 'select'"
+              v-if="type === 'campus' || type === 'select'"
+              :id="'activity-' + key"
               :label="title"
               v-model="form[key]"
               :disabled="!!readonly || busy"
-              :options="[
-                { value: '', label: '选填' },
-                { value: 'per_occurrence', label: '单次' },
-                { value: 'whole_activity', label: '整期' },
-              ]"
+              :options="
+                type === 'campus'
+                  ? options
+                  : [
+                      { value: '', label: '请选择口径' },
+                      { value: 'per_occurrence', label: '单次' },
+                      { value: 'whole_activity', label: '整期' },
+                    ]
+              "
             />
+            <ActivityDateField
+              v-else-if="type === 'date' || type === 'datetime-local'"
+              :label="title"
+              v-model="form[key]"
+              :with-time="type === 'datetime-local'"
+              :disabled="!!readonly || busy"
+            />
+            <template v-else-if="type === 'contacts'">
+              <div v-for="(_, index) in contactRows" :key="index" class="contact-row">
+                <input
+                  :id="'activity-contact-' + index"
+                  v-model="contactRows[index]"
+                  :aria-label="'联系方式 ' + (index + 1)"
+                  :aria-invalid="!!fieldErrors.contacts"
+                  :aria-describedby="fieldErrors.contacts ? 'error-contacts' : undefined"
+                  autocomplete="off"
+                />
+                <button
+                  v-if="!readonly && contactRows.length > 1"
+                  type="button"
+                  class="quiet"
+                  :aria-label="'删除联系方式 ' + (index + 1)"
+                  @click="changeContactRows(index)"
+                >
+                  删除
+                </button>
+              </div>
+              <button
+                v-if="!readonly"
+                class="add-contact"
+                type="button"
+                @click="changeContactRows()"
+              >
+                新增联系方式
+              </button>
+            </template>
+            <template v-else-if="type === 'qr'">
+              <img
+                v-if="form[key]"
+                class="group-qr"
+                :src="
+                  form[key].startsWith('data:')
+                    ? form[key]
+                    : '/api/v1/activity-group-images/' + form[key]
+                "
+                alt="入群二维码预览"
+              />
+              <label v-if="!readonly" class="upload-qr">
+                <UiIcon name="Document" />{{ form[key] ? '更换二维码' : '上传二维码' }}
+                <input
+                  class="sr-only"
+                  :id="'activity-' + key"
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  :aria-label="title"
+                  @change="selectImage"
+                />
+              </label>
+              <small class="hint">PNG 或 JPEG，最多 5 MB。可与入群文字同时提供。</small>
+              <button
+                v-if="form[key] && !readonly"
+                type="button"
+                class="quiet"
+                @click="form[key] = ''"
+              >
+                移除二维码
+              </button>
+            </template>
             <textarea
               v-else-if="type === 'textarea'"
+              :id="'activity-' + key"
               v-model="form[key]"
               rows="2"
-              :aria-invalid="!!fieldErrors[key]"
-            />
-            <input
-              v-else
-              v-model="form[key]"
-              :type="type || 'text'"
-              :step="type === 'datetime-local' ? 1 : undefined"
+              :aria-label="title"
               :aria-invalid="!!fieldErrors[key]"
               :aria-describedby="fieldErrors[key] ? 'error-' + key : undefined"
             />
-            <small v-if="fieldErrors[key]" :id="'error-' + key">{{ fieldErrors[key] }}</small>
-          </label>
+            <input
+              v-else
+              :id="'activity-' + key"
+              v-model="form[key]"
+              :type="type || 'text'"
+              :placeholder="
+                key === 'group_join_instructions' ? '填写群号或入群说明，也可上传二维码' : undefined
+              "
+              :aria-label="title"
+              :aria-invalid="!!fieldErrors[key]"
+              :aria-describedby="fieldErrors[key] ? 'error-' + key : undefined"
+            />
+            <small
+              v-if="
+                key === 'contacts' && (restore || detail?.working_snapshot.content)?.contact_text
+              "
+              class="hint"
+              >原联系渠道　{{ (restore || detail?.working_snapshot.content)?.contact_text }}</small
+            >
+            <small v-if="fieldErrors[key]" :id="'error-' + key" role="alert">{{
+              fieldErrors[key]
+            }}</small>
+          </div>
         </div>
+        <p
+          v-if="
+            group.icon === 'User' && (restore || detail?.working_snapshot.content)?.selection_text
+          "
+          class="editor-hint"
+        >
+          原录取说明　{{ (restore || detail?.working_snapshot.content)?.selection_text }}
+        </p>
       </fieldset>
     </form>
     <div class="editor-actions">
@@ -330,7 +606,9 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
           type="submit"
           form="activity-form"
           :class="{ primary: !detail || dirty }"
-          :disabled="!!readonly || busy || writesPaused || conflict || (!!id && !dirty)"
+          :disabled="
+            !!readonly || imageLoading || busy || writesPaused || conflict || (!!id && !dirty)
+          "
         >
           <UiIcon name="Document" />保存草稿
         </button>
@@ -357,6 +635,20 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
   </template>
 </template>
 <style scoped>
+.contact-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: 36rem;
+}
+.contact-row input {
+  flex: 1;
+  min-width: 0;
+}
+.add-contact {
+  justify-self: start;
+}
+
 .version-strip {
   background: var(--surface);
   border-radius: var(--radius);
@@ -370,6 +662,31 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
   gap: 8px;
   margin: 4px 0;
   font-size: 14px;
+}
+.activity-form,
+.editor-actions,
+.editor-hint,
+.error-summary {
+  max-width: 64rem;
+}
+.field .upload-qr {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--field-line);
+  border-radius: 6px;
+  min-height: 42px;
+  padding: 0 14px;
+  color: var(--brand);
+  cursor: pointer;
+}
+.upload-qr:focus-within {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.field .quiet {
+  justify-self: start;
 }
 .activity-form fieldset {
   border: 0;
@@ -397,8 +714,10 @@ legend small {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px 20px;
 }
-.field-grid label {
+.field-grid .field {
   display: grid;
+  align-content: start;
+  min-width: 0;
   gap: 5px;
   font-size: 14px;
 }
@@ -407,6 +726,31 @@ legend small {
 }
 .field-grid small {
   color: var(--danger);
+}
+.field label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.field-grid .requirement,
+.field-grid .hint,
+.editor-hint {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.field-grid .group-qr {
+  width: 150px;
+  max-width: 100%;
+  height: auto;
+}
+.field-grid input[type='file'] {
+  max-width: 100%;
+  font-size: 13px;
+}
+.error-summary {
+  color: var(--danger);
+  font-size: 14px;
 }
 .field-grid [aria-invalid='true'] {
   border-color: var(--danger);

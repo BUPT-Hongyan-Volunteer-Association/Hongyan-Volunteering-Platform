@@ -25,6 +25,16 @@ test('活动时间按北京时间显示，入群信息只在正文里提示更�
   assert.doesNotMatch(body, /旧群号|新群号/);
 });
 
+test('旧结果时刻按北京时间比较，同类联系方式按顺序显示', () => {
+  const message = changeNoticeBody([
+    { phone: '13800000000', result_expected_at: '2026-11-24T21:30:00Z' },
+    { contacts: ['13800000000', '13900000000'], result_expected_date: '2026-11-26' },
+  ]);
+  assert.match(message, /2026-11-25 → 2026-11-26/);
+  assert.match(message, /联系方式：13800000000 → 13800000000、13900000000/);
+  assert.doesNotMatch(message, /21:30|05:30/);
+});
+
 test('站内通知、确认回执与事件队列', async (t) => {
   const staffPassword = randomUUID();
   let app;

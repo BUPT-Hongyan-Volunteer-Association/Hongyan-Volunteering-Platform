@@ -385,6 +385,132 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal(await db.registrationDecisionEvent.count({ where: { activity_id: id } }), 1);
     });
 
+    await t.test('按日活动从标题草稿到录取：报名分钟边界、校区筛选和版本图片权限', async (t) => {
+      const create = await owner.write('POST', '/organizer/activities', {
+        title: '双校区书籍整理',
+      });
+      assert.equal(create.status, 201);
+      const base = '/organizer/activities/' + create.data.id,
+        publicPath = '/activities/' + create.data.id;
+      assert.equal(create.data.starts_at, undefined);
+      const version = async () => (await owner.request(base)).data.activity.version;
+      const save = async (fields) =>
+        owner.write('PATCH', base, { ...fields, expected_version: await version() });
+      const send = async () =>
+        owner.write('POST', base + '/submit', { expected_version: await version() });
+      const missing = await send();
+      assert.equal(missing.status, 422);
+      for (const key of [
+        'description',
+        'transport_notes',
+        'duration_start_date',
+        'duration_end_date',
+        'contacts',
+        'result_expected_date',
+        'group_join_instructions',
+        'hours_import_date',
+      ])
+        assert.ok(
+          missing.details.some((d) => d.field === key),
+          key,
+        );
+      const invalidContacts = await save({ contacts: ['13800000000','  '] });
+      assert.equal(invalidContacts.status, 422);
+      assert.ok(invalidContacts.details.some(d => d.field === 'contacts.1'));
+      assert.equal((await save({result_expected_date:'2027-01-01T09:30:00+08:00'})).status,422);
+      assert.equal((await save({contacts:[], result_expected_date:'2025-05-01'})).status,200);
+      assert.ok((await send()).details.some(d => d.field === 'contacts'));
+      const png =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6kSAAAAAASUVORK5CYII=';
+      assert.equal((await save({ group_qr_upload: 'data:image/png;base64,eA==' })).status, 422);
+      const tooLarge =
+        'data:image/jpeg;base64,' + Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64');
+      assert.equal((await save({ group_qr_upload: tooLarge })).status, 422);
+      const at = (time) => '2025-05-01T' + time + '+08:00';
+      const saved = await save({
+        campus: '两个校区',
+        location: '图书馆',
+        description: '整理书籍',
+        beneficiaries: '师生',
+        meeting_point: '服务台',
+        transport_notes: '步行到馆',
+        capacity: 10,
+        contacts: ['13800000000', '志协办公室 A205', '13900000000'],
+        schedule: {
+          schedule_type: 'date_range',
+          duration_start_date: '2025-05-01',
+          duration_end_date: '2025-05-01',
+        },
+        registration_opens_at: at('09:00:00'),
+        registration_closes_at: at('09:30:00'),
+        result_expected_date: '2025-05-01',
+        group_qr_upload: png,
+        hours_rule_text: '以实到记录为准',
+        hours_import_date: '2025-05-05',
+      });
+      assert.equal(saved.status, 200);
+      const image = '/activity-group-images/' + saved.data.group_qr_id;
+      const review = await send();
+      assert.equal(review.status, 201);
+      assert.equal((await teacher.raw(image)).headers.get('content-type'), 'image/png');
+      assert.equal((await other.raw(image)).status, 404);
+      assert.equal((await decide(review.data, 'approved')).status, 200);
+      for (const campus of ['沙河', '西土城校区', '海淀校区']) {
+        const items = (
+          await student.request(
+            '/activities?q=' +
+              encodeURIComponent('双校区书籍整理') +
+              '&campus=' +
+              encodeURIComponent(campus),
+          )
+        ).data.items;
+        assert.equal(items.length, 1);
+        assert.equal(items[0].group_qr_id, undefined);
+        assert.deepEqual(items[0].contacts, ['13800000000', '志协办公室 A205', '13900000000']);
+        assert.equal(items[0].result_expected_date, '2025-05-01');
+        assert.equal(items[0].result_expected_at, undefined);
+      }
+      assert.equal((await student.request(publicPath)).data.group_qr_id, undefined);
+      t.mock.timers.enable({ apis: ['Date'], now: Date.parse(at('09:29:59')) });
+      const apply = (actor) => actor.write('POST', publicPath + '/registrations', {});
+      const a = await apply(student),
+        b = await apply(other);
+      assert.equal(a.status, 201);
+      assert.equal(b.status, 201);
+      t.mock.timers.setTime(Date.parse(at('09:30:00')));
+      assert.equal((await apply(student)).code, 'registration_closed');
+      const admit = (application) =>
+        owner.write('POST', '/organizer/registrations/' + application.data.id + '/decision', {
+          expected_version: application.data.version,
+          decision: 'accepted',
+        });
+      t.mock.timers.setTime(Date.parse(at('23:59:59')));
+      assert.equal((await admit(a)).status, 200);
+      assert.equal((await student.raw(image)).status, 200);
+      t.mock.timers.tick(1000);
+      assert.equal((await admit(b)).status, 409);
+      const replacement = await save({
+        group_qr_upload: png,
+        group_join_instructions: '书籍整理群',
+        eligibility_text: '自带手套',
+        safety_notes: '活动前培训',
+      });
+      const nextImage = '/activity-group-images/' + replacement.data.group_qr_id;
+      assert.notEqual(nextImage, image);
+      const next = await send();
+      assert.equal((await student.raw(nextImage)).status, 404);
+      assert.equal((await student.raw(image)).status, 200);
+      assert.equal((await decide(next.data, 'approved')).status, 200);
+      assert.equal((await student.raw(nextImage)).status, 200);
+      assert.equal((await student.raw(image)).status, 404);
+      assert.equal((await teacher.raw(image)).status, 200);
+      const cleared = await save({ group_qr_id: null, eligibility_text: null, safety_notes: null });
+      assert.equal(cleared.status, 200);
+      for (const key of ['group_qr_id', 'eligibility_text', 'safety_notes'])
+        assert.equal(cleared.data[key], undefined);
+      assert.equal((await send()).status, 201);
+    });
+
     const fixture = await prepareHourPreviewFixture(db, sample);
     await t.test('混合工作簿重复预览保持逐行结果和正式时长一致', () => checkHourPreview(db, fixture));
     await t.test('独立库混合工作簿：HTTP 上传、报告、权限回收和失败重试均不入账', () =>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import UiIcon, { type IconName } from '@hongyan/ui/UiIcon.vue';
-import { activityTypes as types, localDateTime as date } from '@hongyan/ui/activityDisplay';
+import { activityTypes as types, activityContacts, resultDate, serviceTime, localDateTime as date } from '@hongyan/ui/activityDisplay';
 import {
   applyForActivity,
   createCommand,
@@ -110,7 +110,7 @@ const conditions: [keyof Activity, string, IconName][] = [
       本活动有 {{ pendingNotices }} 条通知待确认，
       <RouterLink :to="{ path: '/notices', query: { pending: '1', activity_id: activity.id } }">去查看并确认</RouterLink>
     </p>
-    <div class="detail-columns">
+    <div v-if="activity.schedule" class="detail-columns">
       <div class="detail-intro">
         <div class="page-actions">
           <span class="state-chip">{{ types[activity.schedule.schedule_type] }}</span
@@ -124,7 +124,7 @@ const conditions: [keyof Activity, string, IconName][] = [
           <dd>{{ [activity.campus, activity.location].filter(Boolean).join(' · ') }}</dd>
         </dl>
         <dl class="facts">
-          <template v-if="activity.schedule.schedule_type !== 'continuous'"
+          <template v-if="['weekly', 'custom'].includes(activity.schedule.schedule_type) && 'duration_start_date' in activity.schedule"
             ><dt><UiIcon name="Calendar" />活动周期</dt>
             <dd>
               {{ activity.schedule.duration_start_date }} 至
@@ -151,7 +151,7 @@ const conditions: [keyof Activity, string, IconName][] = [
               {{ date(s.starts_at) }} 至 {{ date(s.ends_at) }}
             </div>
           </dd>
-          <dd v-else>{{ date(activity.starts_at) }} 至 {{ date(activity.ends_at) }}</dd>
+          <dd v-else>{{ serviceTime(activity) }}</dd>
           <template v-if="activity.registration_closes_at"
             ><dt><UiIcon name="Calendar" />报名截止</dt>
             <dd>
@@ -178,6 +178,7 @@ const conditions: [keyof Activity, string, IconName][] = [
         <section>
           <h2>集合与参与条件</h2>
           <dl class="conditions">
+            <template v-if="activity.group_qr_id"><dt>入群二维码</dt><dd><img width="180" style="max-width:100%" :src="'/api/v1/activity-group-images/' + activity.group_qr_id" alt="活动群二维码" /></dd></template>
             <template v-for="[key, label, icon] in conditions" :key="key">
               <template v-if="activity[key]"
                 ><dt><UiIcon :name="icon" />{{ label }}</dt>
@@ -200,7 +201,7 @@ const conditions: [keyof Activity, string, IconName][] = [
         <details
           v-if="
             activity.registration_opens_at ||
-            activity.result_expected_at ||
+            resultDate(activity) ||
             activity.selection_text ||
             activity.hours_rule_text
           "
@@ -211,6 +212,7 @@ const conditions: [keyof Activity, string, IconName][] = [
               ><dt>录取说明</dt>
               <dd>{{ activity.selection_text }}</dd></template
             >
+            <template v-if="activity.hours_import_date || activity.hours_import_expected_at"><dt>预计时长导入日期</dt><dd>{{ activity.hours_import_date || date(activity.hours_import_expected_at!).split(" ")[0] }}</dd></template>
             <template v-if="activity.hours_rule_text"
               ><dt>时长认定</dt>
               <dd>{{ activity.hours_rule_text }}</dd></template
@@ -219,9 +221,9 @@ const conditions: [keyof Activity, string, IconName][] = [
               ><dt>报名开放</dt>
               <dd>{{ date(activity.registration_opens_at) }}</dd></template
             >
-            <template v-if="activity.result_expected_at"
+            <template v-if="resultDate(activity)"
               ><dt>结果公布</dt>
-              <dd>{{ date(activity.result_expected_at) }}</dd></template
+              <dd>{{ resultDate(activity) }}</dd></template
             >
           </dl>
         </details>
@@ -237,13 +239,14 @@ const conditions: [keyof Activity, string, IconName][] = [
         v-else-if="!activity.my_registration_status && !canApply && activity.registration_phase"
         >{{ phases[activity.registration_phase] }}</small
       >
-      <button v-if="activity.contact_text" class="contact-btn" @click="contact?.showModal()">
+      <button v-if="activityContacts(activity).length || activity.contact_text" class="contact-btn" @click="contact?.showModal()">
         <UiIcon name="Message" />联系负责人
       </button>
     </footer>
     <dialog ref="contact" aria-labelledby="contact-title">
       <h2 id="contact-title">联系负责人</h2>
-      <p>{{ activity.contact_text }}</p>
+      <p v-for="(value,index) in activityContacts(activity)" :key="index">{{ value }}</p>
+      <p v-if="activity.contact_text">{{ activity.contact_text }}</p>
       <form method="dialog"><button autofocus>关闭</button></form>
     </dialog>
   </article>

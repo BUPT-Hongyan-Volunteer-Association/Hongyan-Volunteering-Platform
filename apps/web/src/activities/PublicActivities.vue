@@ -309,6 +309,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
           <li v-for="row in rows" :key="row.id">
             <time
               class="date-tile"
+              v-if="row.starts_at"
               :datetime="row.starts_at"
               :title="'首个服务日期 ' + localDate(row.starts_at)"
             >
@@ -339,7 +340,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
                 <span><UiIcon name="Clock" />{{ serviceTime(row) }}</span>
               </div>
               <div class="entry-foot">
-                <span>{{ activityTypes[row.schedule.schedule_type] }} · {{ row.capacity }} 人</span>
+                <span>{{ row.schedule && activityTypes[row.schedule.schedule_type] }} · {{ row.capacity }} 人</span>
                 <span v-if="row.registration_closes_at"
                   >报名截止 {{ localDateTime(row.registration_closes_at) }}</span
                 >

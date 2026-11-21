@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./activity": "./src/activity.ts",
     "./types": "./src/generated/types.gen.ts"
   },
   "scripts": {

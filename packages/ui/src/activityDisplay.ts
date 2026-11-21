@@ -1,6 +1,8 @@
+import { localDate } from '@hongyan/contracts/activity';
+export { localDate, activityContacts, resultDate } from '@hongyan/contracts/activity';
 import type { Activity } from '@hongyan/contracts';
 
-export const activityTypes = { continuous: '单次活动', weekly: '每周活动', custom: '多时段活动' };
+export const activityTypes = { date_range: '单次活动', continuous: '单次活动', weekly: '每周活动', custom: '多时段活动' };
 export const statusLabels = {
   draft: '草稿',
   pending_review: '待审核',
@@ -53,11 +55,12 @@ const monthDayClock = format({
 });
 export const localTime = (iso: string) => monthDayClock.format(new Date(iso));
 const clock = format({ hour: '2-digit', minute: '2-digit' });
-export const localDate = (value: string | number) =>
-  new Date(new Date(value).getTime() + 8 * 3600000).toISOString().slice(0, 10);
 export const localDateTime = (iso: string) => dateClock.format(new Date(iso));
 export function serviceTime(row: Activity) {
   const s = row.schedule;
+  if (!s || !row.starts_at || !row.ends_at) return '日期待定';
+  if (s.schedule_type === 'date_range') return s.duration_start_date === s.duration_end_date
+    ? s.duration_start_date : s.duration_start_date + ' 至 ' + s.duration_end_date;
   if (s.schedule_type === 'weekly' && s.weekly_slots.length === 1) {
     const slot = s.weekly_slots[0];
     return (

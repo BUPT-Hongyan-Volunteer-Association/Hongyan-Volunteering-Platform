@@ -44,13 +44,19 @@ export function serviceDate(raw: Raw, system: '1900' | '1904'): string | null {
 }
 
 export function scheduleCoverage(revisions: readonly { revision: number; schedule: ActivitySchedule }[]) {
-  const byRevision = new Map(revisions.map(({ revision, schedule }) => [revision, slots(schedule)]));
+  const byRevision = new Map(revisions.map(({ revision, schedule }) => [revision, { schedule, times: slots(schedule) }]));
   const cache = new Map<string, number>();
   return (revision: number | null, day: string) => {
     const key = revision + '/' + day;
     if (!cache.has(key)) {
       const start = Date.parse(day + 'T00:00:00+08:00');
-      const duration = (byRevision.get(revision ?? -1) ?? []).reduce((sum, slot) => sum + Math.max(0,
+      const plan = byRevision.get(revision ?? -1);
+      // 按日发布只提供日期覆盖，不提供计划服务小时数。
+      if (plan?.schedule.schedule_type === 'date_range') {
+        const { duration_start_date, duration_end_date } = plan.schedule;
+        return duration_start_date && duration_end_date && day >= duration_start_date && day <= duration_end_date ? null : 0;
+      }
+      const duration = (plan?.times ?? []).reduce((sum, slot) => sum + Math.max(0,
         Math.min(start + dayMs, Date.parse(slot.ends_at)) - Math.max(start, Date.parse(slot.starts_at))), 0);
       cache.set(key, duration);
     }

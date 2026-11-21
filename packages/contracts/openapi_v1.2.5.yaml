@@ -4,7 +4,7 @@ info:
   version: 1.2.5
   description: 2026-11-18 PRD v1.3.4配套规格，尚未实现。沿用/api/v1，本次校订后按本文件重新生成客户端。确认学生初始密码为学号后六位，首次登录强制改密。学号和班级均为十位数字，建档不含在校状态。时长以录入单为准，整数部分最多三位、最多一位小数。本轮聚焦平台搭建与功能实现，暂不考虑部署维护。业务字段、枚举及错误码使用snake_case，自动限制固定off。
     沿用：时长模板末列是否有违纪情况，时长与违规核实合并审批。规则未确定时正常审核时长，处罚固定未启用。按表头识别七列与兼容六列，不仅依赖文件名或版本号。
-  x-document-revision: 2026-11-21-r3
+  x-document-revision: 2026-11-21-r4
 servers:
 - url: /api/v1
   description: 同源相对路径，不指向已部署服务
@@ -618,7 +618,7 @@ paths:
     post:
       operationId: create_activity
       summary: 创建活动草稿
-      description: 创建者自动成为唯一owner。校验完整schedule，按北京时间计算最早开始与最晚结束。报名开放早于截止，截止不晚于首段开始。生成不复用的activity_code，容量为平台总录取名额。
+      description: 创建者自动成为唯一owner。有标题即可暂存，送审时校验完整内容。生成不复用的activity_code，容量为平台总录取名额。
       tags:
       - 活动
       x-requirement: FR01
@@ -671,6 +671,23 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/activity_input'
+  /activity-group-images/{id}:
+    get:
+      operationId: get_activity_group_image
+      summary: 读取有权查看的版本使用的入群二维码
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: PNG 或 JPEG 图片。禁止缓存。
+          content:
+            image/png: {schema: {type: string, format: binary}}
+            image/jpeg: {schema: {type: string, format: binary}}
+        '404':
+          $ref: '#/components/responses/NotFound'
   /organizer/activities/{id}:
     patch:
       operationId: update_activity_draft
@@ -797,7 +814,7 @@ paths:
       operationId: submit_activity
       summary: 提交活动版本审核
       description: 校验草稿完整性、活动版本与状态，只允许draft或published提交。首次提交活动进入pending_review，已发布活动保持published并挂接独立待审版本。同一活动同时只有一个pending审核。首次驳回或撤回回到draft，已发布活动驳回不影响公开内容。
-        普通招募送审和批准时，服务端按activity_publication_content复核保存的活动快照。缺少服务对象、校区、集合地点、交通说明或预计时长导入时间，按422在details返回具体字段。
+        普通招募送审和批准时，服务端按activity_publication_content复核保存的活动快照。缺少送审必填项时按 422 在 details 返回具体字段。
       tags:
       - 活动
       x-requirement: FR01
@@ -1052,7 +1069,7 @@ paths:
       operationId: review_activity
       summary: 通过或驳回活动版本
       description: 仅pending且审核人不是提交者。锁定活动及审核版本，活动须为pending_review或published。approved原子更新公开快照并发布通知事件。首次rejected回到draft，修改版rejected保留公开版本。cancelled/completed/archived活动不能批准旧审核。校验完整安排、报名窗口和已录取人数，任何冲突不部分生效。
-        完成后客户端重新查询管理详情和当前列表或日程页，保留日期、筛选、选中活动及浏览位置。活动不再匹配原筛选时从结果移出并提示状态已更新。 普通招募送审和批准时，服务端按activity_publication_content复核保存的活动快照。缺少服务对象、校区、集合地点、交通说明或预计时长导入时间，按422在details返回具体字段。
+        完成后客户端重新查询管理详情和当前列表或日程页，保留日期、筛选、选中活动及浏览位置。活动不再匹配原筛选时从结果移出并提示状态已更新。 普通招募送审和批准时，服务端按activity_publication_content复核保存的活动快照。缺少送审必填项时按 422 在 details 返回具体字段。
       tags:
       - 活动
       x-requirement: FR01
@@ -1928,7 +1945,7 @@ paths:
     post:
       operationId: decide_registration
       summary: 人工录取候补或不录取
-      description: 与整批决定共用业务服务。仅submitted/waitlisted/rejected可决定，accepted不可降级。活动须published且尚有未开始时段，校验学生启用、当前版本及名额，事务内写通知事件。候补不自动补位，异常次数在规则off时不影响决定。
+      description: 与整批决定共用业务服务。仅submitted/waitlisted/rejected可决定，accepted不可降级。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段，校验学生启用、当前版本及名额，事务内写通知事件。候补不自动补位，异常次数在规则off时不影响决定。
         首次报名截止只关闭学生主动报名。人工录取与恢复批准要求活动已发布且存在 starts_at > 服务器当前时刻的获批时段。最后一个时段开始时即停止录取与恢复。
       tags:
       - 报名
@@ -5933,7 +5950,7 @@ paths:
     post:
       operationId: decide_registrations_atomically
       summary: 整批录取候补或不录取
-      description: 同一活动1—100个不重复报名ID。事务内核验全部成员授权、学生状态、报名版本及可转换状态，录取检查新增人数和当前余量。活动须published且尚有未开始时段。任一失败整批回滚，409 details定位registration_id及失败码，不返回部分成功。通知事件与状态同事务写入，按幂等键重试不重复决定。
+      description: 同一活动1—100个不重复报名ID。事务内核验全部成员授权、学生状态、报名版本及可转换状态，录取检查新增人数和当前余量。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段。任一失败整批回滚，409 details定位registration_id及失败码，不返回部分成功。通知事件与状态同事务写入，按幂等键重试不重复决定。
         首次报名截止只关闭学生主动报名。人工录取与恢复批准要求活动已发布且存在 starts_at > 服务器当前时刻的获批时段。最后一个时段开始时即停止录取与恢复。
       tags:
       - FR02
@@ -7732,6 +7749,12 @@ components:
       required:
       - expected_version
       - reason
+    activity_contacts:
+      type: array
+      description: 按填写顺序保存联系方式，每项为非空文本。
+      items:
+        type: string
+        pattern: '\S'
     activity_input:
       type: object
       properties:
@@ -7791,6 +7814,28 @@ components:
         hours_import_expected_at:
           type: string
           format: date-time
+        contacts:
+          $ref: '#/components/schemas/activity_contacts'
+        result_expected_date:
+          type: string
+          format: date
+        phone:
+          type: string
+          pattern: '^1[3-9][0-9]{9}$'
+        wechat:
+          type: string
+          pattern: '^[A-Za-z][A-Za-z0-9_-]{5,19}$'
+        hours_import_date:
+          type: string
+          format: date
+        group_qr_id:
+          type: string
+          format: uuid
+        group_qr_upload:
+          type: string
+          writeOnly: true
+          description: 新选的 PNG 或 JPEG 图片，以 data URL 传输，解码后至多 5 MiB。与草稿在同一事务保存。
+          maxLength: 6990532
         contact_text:
           type: string
           minLength: 1
@@ -7812,33 +7857,8 @@ components:
           - per_occurrence
           - whole_activity
       additionalProperties: false
-      required:
-      - title
-      - description
-      - registration_opens_at
-      - registration_closes_at
-      - result_expected_at
-      - location
-      - capacity
-      - eligibility_text
-      - selection_text
-      - hours_rule_text
-      - contact_text
-      - schedule
-      - group_join_instructions
-      description: 全活动仅一条平台报名关系。名额、报名窗口、候补、退出按活动管理。报名截止不得晚于所有有效时段的最早开始时刻。每周报名在群内完成，不设平台场次报名、场次名额和场次录取。schedule修改必须整体提交完整配置，禁止局部合并重复规则。
-        expected_hours与expected_hours_basis必须同时存在或同时省略。创建及提交校验该成对规则。
-      allOf:
-      - oneOf:
-        - required:
-          - expected_hours
-          - expected_hours_basis
-        - not:
-            anyOf:
-            - required:
-              - expected_hours
-            - required:
-              - expected_hours_basis
+      required: [title]
+      description: 草稿必填标题。日期安排允许分步填写，送审时复核完整性。
     activity_draft_patch:
       type: object
       properties:
@@ -7851,43 +7871,55 @@ components:
           maxLength: 100
         description:
           type: string
+          nullable: true
           minLength: 1
           maxLength: 6000
         beneficiaries:
           type: string
+          nullable: true
           maxLength: 500
         registration_opens_at:
           type: string
+          nullable: true
           format: date-time
         registration_closes_at:
           type: string
+          nullable: true
           format: date-time
         result_expected_at:
           type: string
+          nullable: true
           format: date-time
         campus:
           type: string
+          nullable: true
           maxLength: 100
         location:
           type: string
+          nullable: true
           minLength: 1
           maxLength: 500
         meeting_point:
           type: string
+          nullable: true
           maxLength: 500
         transport_notes:
           type: string
+          nullable: true
           maxLength: 1000
         capacity:
           type: integer
+          nullable: true
           minimum: 1
           maximum: 10000
         eligibility_text:
           type: string
+          nullable: true
           minLength: 1
           maxLength: 2000
         selection_text:
           type: string
+          nullable: true
           minLength: 1
           maxLength: 2000
         expected_hours:
@@ -7897,22 +7929,54 @@ components:
           nullable: true
         hours_rule_text:
           type: string
+          nullable: true
           minLength: 1
           maxLength: 2000
         hours_import_expected_at:
           type: string
+          nullable: true
           format: date-time
+        contacts:
+          $ref: '#/components/schemas/activity_contacts'
+        result_expected_date:
+          type: string
+          nullable: true
+          format: date
+        phone:
+          type: string
+          nullable: true
+          pattern: '^1[3-9][0-9]{9}$'
+        wechat:
+          type: string
+          nullable: true
+          pattern: '^[A-Za-z][A-Za-z0-9_-]{5,19}$'
+        hours_import_date:
+          type: string
+          nullable: true
+          format: date
+        group_qr_id:
+          type: string
+          nullable: true
+          format: uuid
+        group_qr_upload:
+          type: string
+          writeOnly: true
+          description: 新选的 PNG 或 JPEG 图片，以 data URL 传输，解码后至多 5 MiB。与草稿在同一事务保存。
+          maxLength: 6990532
         contact_text:
           type: string
+          nullable: true
           minLength: 1
           maxLength: 500
         safety_notes:
           type: string
+          nullable: true
           maxLength: 2000
         schedule:
           $ref: '#/components/schemas/activity_schedule'
         group_join_instructions:
           type: string
+          nullable: true
           description: 入群链接或联系入群说明。仅本活动已录取学生、授权负责人和后台可见，公开列表及未录取详情必须省略。
           minLength: 1
           maxLength: 2000
@@ -7925,38 +7989,8 @@ components:
           - null
           nullable: true
       additionalProperties: false
-      required:
-      - expected_version
-      description: 草稿更新只修改传入字段，schedule整体替换。预计时长和口径同时填值或同时传null清除，两者都省略则保留。
-      oneOf:
-      - not:
-          anyOf:
-          - required:
-            - expected_hours
-          - required:
-            - expected_hours_basis
-      - required:
-        - expected_hours
-        - expected_hours_basis
-        properties:
-          expected_hours:
-            type: string
-          expected_hours_basis:
-            type: string
-      - required:
-        - expected_hours
-        - expected_hours_basis
-        properties:
-          expected_hours:
-            type: string
-            nullable: true
-            enum:
-            - null
-          expected_hours_basis:
-            type: string
-            nullable: true
-            enum:
-            - null
+      required: [expected_version]
+      description: 仅更新传入字段。可选字段传 null 清除，schedule 整体替换。
     activity:
       type: object
       properties:
@@ -8036,6 +8070,23 @@ components:
         hours_import_expected_at:
           type: string
           format: date-time
+        contacts:
+          $ref: '#/components/schemas/activity_contacts'
+        result_expected_date:
+          type: string
+          format: date
+        phone:
+          type: string
+          pattern: '^1[3-9][0-9]{9}$'
+        wechat:
+          type: string
+          pattern: '^[A-Za-z][A-Za-z0-9_-]{5,19}$'
+        hours_import_date:
+          type: string
+          format: date
+        group_qr_id:
+          type: string
+          format: uuid
         contact_text:
           type: string
           minLength: 1
@@ -8145,28 +8196,11 @@ components:
       - activity_code
       - status
       - title
-      - starts_at
-      - ends_at
-      - capacity
-      - schedule
       - is_ongoing
       - state_evaluated_at
       - schedule_revision
       - revision_state
       - owner_display_name
-      description: 全活动仅一条平台报名关系。名额、报名窗口、候补、退出按活动管理。报名截止不得晚于所有有效时段的最早开始时刻。每周报名在群内完成，不设平台场次报名、场次名额和场次录取。schedule修改必须整体提交完整配置，禁止局部合并重复规则。
-        expected_hours与expected_hours_basis必须同时存在或同时省略。创建及提交校验该成对规则。 管理范围必返has_pending_review，存在待审时必返current_review_id。公开及本人日程范围省略这两个管理字段。状态摘要不代替最新详情与权限检查。
-      allOf:
-      - oneOf:
-        - required:
-          - expected_hours
-          - expected_hours_basis
-        - not:
-            anyOf:
-            - required:
-              - expected_hours
-            - required:
-              - expected_hours_basis
     activity_review:
       type: object
       properties:
@@ -8399,6 +8433,7 @@ components:
         schedule_type:
           type: string
           enum:
+          - date_range
           - continuous
           - weekly
           - custom
@@ -10578,6 +10613,21 @@ components:
       - start_time
       - end_time
       - end_day_offset
+    date_range_schedule:
+      type: object
+      properties:
+        schedule_type:
+          type: string
+          enum: [date_range]
+        duration_start_date:
+          type: string
+          format: date
+        duration_end_date:
+          type: string
+          format: date
+      additionalProperties: false
+      required: [schedule_type]
+      description: 北京时间起止日期，含首尾。草稿允许尚未填齐，发布须有两端日期。
     continuous_schedule:
       type: object
       properties:
@@ -10661,12 +10711,14 @@ components:
       description: 在持续日期内选择多个不连续时段，完整时段不得超出日期范围，不得重复或重叠。
     activity_schedule:
       oneOf:
+      - $ref: '#/components/schemas/date_range_schedule'
       - $ref: '#/components/schemas/continuous_schedule'
       - $ref: '#/components/schemas/weekly_schedule'
       - $ref: '#/components/schemas/custom_schedule'
       discriminator:
         propertyName: schedule_type
         mapping:
+          date_range: '#/components/schemas/date_range_schedule'
           continuous: '#/components/schemas/continuous_schedule'
           weekly: '#/components/schemas/weekly_schedule'
           custom: '#/components/schemas/custom_schedule'
@@ -10800,6 +10852,23 @@ components:
         hours_import_expected_at:
           type: string
           format: date-time
+        contacts:
+          $ref: '#/components/schemas/activity_contacts'
+        result_expected_date:
+          type: string
+          format: date
+        phone:
+          type: string
+          pattern: '^1[3-9][0-9]{9}$'
+        wechat:
+          type: string
+          pattern: '^[A-Za-z][A-Za-z0-9_-]{5,19}$'
+        hours_import_date:
+          type: string
+          format: date
+        group_qr_id:
+          type: string
+          format: uuid
         contact_text:
           type: string
           minLength: 1
@@ -10821,24 +10890,7 @@ components:
           - per_occurrence
           - whole_activity
       additionalProperties: false
-      required:
-      - title
-      - description
-      - location
-      - capacity
-      - schedule
-      description: 不可变业务内容。正常招募版本具备activity_input的全部必填内容。历史归档版本无报名窗口及入群说明，capacity为0，description使用建档来源说明，schedule由起止时间生成continuous版本。
-      allOf:
-      - oneOf:
-        - required:
-          - expected_hours
-          - expected_hours_basis
-        - not:
-            anyOf:
-            - required:
-              - expected_hours
-            - required:
-              - expected_hours_basis
+      required: [title]
     activity_revision:
       type: object
       properties:
@@ -11080,6 +11132,7 @@ components:
         schedule_type:
           type: string
           enum:
+          - date_range
           - continuous
           - weekly
           - custom
@@ -11836,32 +11889,23 @@ components:
       - accepted_count
       - capacity
     activity_publication_content:
-      description: 普通招募活动送审和批准时校验的完整内容。线上活动可如实填写线上集合与交通说明。历史建档继续使用原有快照格式。
+      description: 送审和批准要求完整内容。入群文字或二维码至少一项，联系方式至少一项，旧活动兼容 phone、wechat 和原联系文本。日期活动的起止日须齐全，校区限沙河校区、西土城校区或沙河及西土城校区，报名时刻按整分钟填写，预计结果公布使用 result_expected_date，旧结果时刻按北京时间取日期，预计导入日使用 hours_import_date。精确安排兼容原联系方式和导入时间。预计小时数与口径必须成对填写。
       allOf:
       - $ref: '#/components/schemas/activity_input'
-      - required:
-        - beneficiaries
-        - campus
-        - meeting_point
-        - transport_notes
-        - hours_import_expected_at
+      - required: [title, description, beneficiaries, campus, location, meeting_point, transport_notes, registration_opens_at, registration_closes_at, capacity, hours_rule_text, schedule]
         properties:
-          beneficiaries:
-            type: string
-            minLength: 1
-            pattern: \S
-          campus:
-            type: string
-            minLength: 1
-            pattern: \S
-          meeting_point:
-            type: string
-            minLength: 1
-            pattern: \S
-          transport_notes:
-            type: string
-            minLength: 1
-            pattern: \S
+          title: {type: string, pattern: '\S'}
+          description: {type: string, pattern: '\S'}
+          beneficiaries: {type: string, pattern: '\S'}
+          campus: {type: string, pattern: '\S'}
+          location: {type: string, pattern: '\S'}
+          meeting_point: {type: string, pattern: '\S'}
+          transport_notes: {type: string, pattern: '\S'}
+          hours_rule_text: {type: string, pattern: '\S'}
+          schedule: {$ref: '#/components/schemas/activity_schedule'}
+          registration_opens_at: {type: string, format: date-time}
+          registration_closes_at: {type: string, format: date-time}
+          capacity: {type: integer, minimum: 1, maximum: 10000}
   parameters:
     notice_id:
       name: notice_id
@@ -12001,7 +12045,7 @@ x-timeline-interaction:
   rendering: Vue与SVG绘制，数据来自后端。支持筛选、列表与甘特图切换、选择与详情联动，不支持拖拽改期、拉伸时长或时间条直接审批。
   selection: 桌面点击名称或时间条打开详情侧栏，手机打开详情页。分段共用activity_id，保留被选时段。切换与返回保留窗口、筛选、选中活动及浏览位置。
   review: 管理详情展示待审提示，进入审核页后读取冻结快照及差异，再通过或驳回。打开详情、进入审核及提交时分别重新检查状态与权限。
-  clock: 当前时间指示线使用服务端时刻校准，页面可见时每60秒刷新状态，切回页面或完成业务操作立即刷新。进行中标记以服务端响应为准，响应过期或请求失败时标明状态待刷新。 空窗口也使用分页对象的state_evaluated_at校时，“今天”保留原时间粒度。
+  clock: 管理日程与审核日程省略时间指示线和顶部三角。学生日程的当前时间指示线使用服务端时刻校准，页面可见时每60秒刷新状态，切回页面或完成业务操作立即刷新。进行中标记以服务端响应为准，响应过期或请求失败时标明状态待刷新。 空窗口也使用分页对象的state_evaluated_at校时，“今天”保留原时间粒度。
   versions: 正在进行按获批安排，待审核按当前审核对象。两种标记可共存，切换published展示不隐藏待审提示。
 x-hours-misconduct:
   transaction: 核实由时长整批批准完成，不新建独立待审任务。时长、元信息、异常关联、审计与通知事件原子保存。

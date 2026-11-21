@@ -3,6 +3,7 @@ import type { Prisma } from '../generated/prisma/client.js';
 import type { Database } from '../database.js';
 import { invalid } from '../http.js';
 import { includeView, pagination, project, workingRevision } from './read.js';
+import { matchesCampus } from '@hongyan/contracts/activity';
 import { slots } from './schedule.js';
 
 type Query = Record<string, string>;
@@ -20,7 +21,7 @@ function contentFilter(q: Query) {
     invalid('is_ongoing', '进行中筛选值无效');
   return (a: View) =>
     (!q.q || [a.title, a.activity_code].some((v) => v.includes(q.q))) &&
-    (!q.campus || a.campus === q.campus) &&
+    (!q.campus || matchesCampus(a.campus, q.campus)) &&
     (!q.registration_phase || a.registration_phase === q.registration_phase) &&
     (!q.is_ongoing || a.is_ongoing === (q.is_ongoing === 'true')) &&
     (!q.from ||

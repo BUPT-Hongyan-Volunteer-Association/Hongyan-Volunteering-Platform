@@ -5,6 +5,18 @@ const day = 86_400_000;
 function* occurrences(
   schedule: ActivitySchedule,
 ): Generator<{ slot: ScheduleSlot; field: string }> {
+  if (schedule.schedule_type === 'date_range') {
+    const { duration_start_date: start, duration_end_date: end } = schedule;
+    if (start && end)
+      yield {
+        field: 'schedule',
+        slot: {
+          starts_at: start + 'T00:00:00+08:00',
+          ends_at: new Date(Date.parse(end + 'T00:00:00+08:00') + day).toISOString(),
+        },
+      };
+    return;
+  }
   if (schedule.schedule_type === 'continuous') {
     yield { slot: schedule, field: 'schedule' };
     return;
@@ -35,7 +47,8 @@ function* occurrences(
   }
 }
 
-export function slots(schedule: ActivitySchedule) {
+export function slots(schedule?: ActivitySchedule) {
+  if (!schedule) return [];
   return Array.from(occurrences(schedule), ({ slot }) => slot);
 }
 

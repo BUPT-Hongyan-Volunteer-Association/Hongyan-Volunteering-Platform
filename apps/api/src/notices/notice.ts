@@ -10,14 +10,15 @@ import type {
   NoticeReceipt,
   NotificationEvent as EventRow,
 } from '../generated/prisma/client.js';
-import { stable } from '../activities/workflow.js';
+import { comparableContent, stable } from '../activities/workflow.js';
 import { slots } from '../activities/schedule.js';
 
 const fieldLabels = {
   schedule: '活动时间',
   registration_opens_at: '报名开始时间',
   registration_closes_at: '报名截止时间',
-  result_expected_at: '结果公布时间',
+  result_expected_date: '预计结果公布日期',
+  contacts: '联系方式',
   campus: '校区',
   location: '活动地点',
   meeting_point: '集合地点',
@@ -25,6 +26,8 @@ const fieldLabels = {
   capacity: '名额',
   eligibility_text: '报名条件',
   selection_text: '录取说明',
+  group_qr_id: '入群方式',
+  hours_import_date: '预计时长导入日期',
   group_join_instructions: '入群方式',
   hours_rule_text: '时长规则',
   expected_hours: '预计时长',
@@ -47,6 +50,10 @@ const moment = (iso: string) => stamp.format(new Date(iso));
 const kinds = { continuous: '单次', weekly: '每周', custom: '多时段' };
 
 function scheduleText(schedule: ActivitySchedule) {
+  if (schedule.schedule_type === 'date_range') {
+    return schedule.duration_start_date === schedule.duration_end_date ? schedule.duration_start_date :
+      schedule.duration_start_date + ' 至 ' + schedule.duration_end_date;
+  }
   const times = slots(schedule).sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at));
   const first = times[0];
   return `${moment(first.starts_at)} 至 ${moment(first.ends_at)}（${kinds[schedule.schedule_type]}${times.length > 1 ? `，共 ${times.length} 段` : ''}）`;
@@ -55,13 +62,15 @@ function scheduleText(schedule: ActivitySchedule) {
 function display(field: Field, version: ActivityInput) {
   const value = version[field];
   if (value == null || value === '') return '未设置';
-  if (field === 'schedule') return scheduleText(version.schedule);
+  if (field === 'schedule') return scheduleText(version.schedule!);
+  if (field === 'contacts') return version.contacts?.join('、') || '未设置';
   if (field.endsWith('_at') && typeof value === 'string') return moment(value);
   return String(value);
 }
 
 // 累积尚待确认的变更。字段改回原值时仍展示最近的不同值，学生能看清这次恢复了什么。
-export function changeNoticeBody(versions: ActivityInput[]) {
+export function changeNoticeBody(snapshots: ActivityInput[]) {
+  const versions = snapshots.map(comparableContent);
   const latest = versions[versions.length - 1];
   const newestFirst = versions.slice().reverse();
   const lines: string[] = [];
@@ -71,7 +80,7 @@ export function changeNoticeBody(versions: ActivityInput[]) {
     const before = different(versions[0]) ? versions[0] : newestFirst.find(different);
     if (!before) continue;
     const label = fieldLabels[field];
-    if (field === 'group_join_instructions') {
+    if (field === 'group_join_instructions' || field === 'group_qr_id') {
       lines.push(`· ${label}：已更新，录取后可进入活动详情查看`);
     } else {
       const from = display(field, before),
@@ -79,7 +88,7 @@ export function changeNoticeBody(versions: ActivityInput[]) {
       lines.push(`· ${label}：${from === to ? '已更新，请查看最新安排' : `${from} → ${to}`}`);
     }
   }
-  return `以下内容有调整：\n${lines.join('\n')}\n请核对最新安排并确认收到。`;
+  return `以下内容有调整：\n${[...new Set(lines)].join('\n')}\n请核对最新安排并确认收到。`;
 }
 
 export function noticeView(row: NoticeRow, receipt?: NoticeReceipt | null): Notice {

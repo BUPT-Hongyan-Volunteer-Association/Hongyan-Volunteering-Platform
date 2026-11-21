@@ -151,6 +151,31 @@ test('跨活动 24 小时边界：更正替换旧值；警告缺说明不计有�
   assert.equal(missing.projected_delta_hours,'0.0');
 });
 
+test('按日活动含首尾日，认证数取自工作簿', () => {
+  const data = {
+    approved_schedules: [
+      {
+        revision: 1,
+        schedule: {
+          schedule_type: 'date_range',
+          duration_start_date: day,
+          duration_end_date: '2026-11-19',
+        },
+      },
+    ],
+  };
+  for (const date of [day, '2026-11-19']) {
+    const result = preview(
+      [input(2, { service_date: text(date), credited_hours: number('3.5') })],
+      data,
+    );
+    assert.equal(result.projected_delta_hours, '3.5');
+    assert.deepEqual(result.warnings, []);
+  }
+  const outside = preview([input(2, { service_date: text('2026-11-17') })], data);
+  assert.ok(outside.rows[0].errors.some((e) => e.field === 'service_date'));
+});
+
 test('历史获批安排、午夜端点、分钟精度', () => {
   const schedules = [{revision:1,schedule:schedule(day+'T23:30:00+08:00','2026-11-19T00:00:00+08:00')}];
   const data = {published_revision:2,approved_schedules:schedules};

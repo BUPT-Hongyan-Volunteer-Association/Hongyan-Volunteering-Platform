@@ -129,7 +129,7 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
     const prior = existing.get(key), record = prior?.record, previous = prior?.effective ?? 0;
     const revision = record?.origin_schedule_revision ?? selected;
     const duration = coverage(revision, day);
-    if (!duration) fail(row,'service_date','服务日期不在适用的获批安排内');
+    if (duration === 0) fail(row,'service_date','服务日期不在适用的获批安排内');
     if (revision !== null) row.bound_schedule_revision = revision;
     if (record) {
       row.existing_record_id = record.id;
@@ -159,13 +159,13 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
       (reported && (normalizeFact(record.misconduct_fact ?? '') !== fact || row.misconduct_requires_review)))) row.action = 'review_only';
     else row.action = 'skip_identical';
     const delta = row.action === 'skip_identical' ? 0 : value - previous;
-    if (row.action !== 'skip_identical' && duration > 0) {
+    if (row.action !== 'skip_identical' && duration !== 0) {
       const projected = (daily.get(key) ?? 0) + delta;
       const warn = (code: HourWarning['code'], message: string, amount: Partial<HourWarning>) =>
         row.warnings.push({ warning_id: [code, student.id, day, row.row_number].join(':'),
           code, student_id: student.id, service_date: day, row_numbers: [row.row_number],
           message, ...(fact && { explanation: fact }), ...amount });
-      if (value * 360000 > duration) warn('exceeds_planned_hours','预计时长超过当天计划覆盖时长',{ planned_hours: String(duration / 3600000) });
+      if (duration !== null && value * 360000 > duration) warn('exceeds_planned_hours','预计时长超过当天计划覆盖时长',{ planned_hours: String(duration / 3600000) });
       if (projected > 240) warn('daily_total_exceeds_24','该学生跨活动当日预计超过 24 小时',{ projected_daily_hours: hours(projected) });
       if (row.warnings.length && !fact && !row.errors.some((error) => error.field === 'remark')) fail(row,'remark','时长警告须填写说明');
     }
