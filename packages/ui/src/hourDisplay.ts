@@ -29,7 +29,7 @@ export function useReviewWarnings(current: () => ReviewWarnings | undefined) {
     reset() { revised.value = undefined; },
     refreshFrom(error: ApiError) {
       const context = error.body?.context;
-      if (error.status !== 409 || error.body?.code !== 'warning_review_required' ||
+      if (error.body?.code !== 'warning_review_required' ||
         !context?.warnings || !context.warning_snapshot_hash) return false;
       revised.value = { warnings: context.warnings, warning_snapshot_hash: context.warning_snapshot_hash };
       return true;

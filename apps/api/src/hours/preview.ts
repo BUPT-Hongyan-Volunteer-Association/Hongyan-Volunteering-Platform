@@ -13,7 +13,7 @@ export interface HourSnapshot {
   students: readonly { id: string; student_no: string; name: string; registration: readonly RegistrationState[] }[];
   approved_schedules: readonly { revision: number; schedule: ActivitySchedule }[];
   history: readonly HourHistory[];
-  fact_reviews?: ReadonlyMap<string, HourMisconductReview>;
+  fact_reviews: ReadonlyMap<string, HourMisconductReview>;
 }
 export interface PreviewOptions { mode: 'new' | 'correction'; schedule_revision?: number; now: Date }
 type PreviewRow = Omit<HourRow, 'action' | 'errors' | 'warnings'> & {
@@ -123,9 +123,8 @@ export function previewHourRows(book: { rows: readonly HourInputRow[]; date_syst
     row.previous_hours = hours(previous);
     row.misconduct_version = record?.misconduct_version ?? 0;
     const reported = row.misconduct_reported === 'reported';
-    if (reported) row.misconduct_review = snapshot.fact_reviews?.get(factKey(identity, fact));
-    row.misconduct_requires_review = reported && !row.misconduct_review
-      && !record?.reusable_facts?.some((old) => normalizeFact(old) === fact);
+    if (reported) row.misconduct_review = snapshot.fact_reviews.get(factKey(identity, fact));
+    row.misconduct_requires_review = reported && !row.misconduct_review;
     for (const field of group.conflicts) fail(row,field,'同学生、活动和服务日期的记录在此字段冲突');
     if (group.conflicts.size) continue;
     if (!record && options.mode === 'correction') fail(row,'service_date','同键无原记录，无法更正');

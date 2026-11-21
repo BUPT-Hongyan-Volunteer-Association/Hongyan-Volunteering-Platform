@@ -51,7 +51,6 @@ export interface HourHistory extends LedgerKey {
   misconduct_reported: 'none' | 'reported' | 'not_provided';
   misconduct_fact?: string;
   misconduct_version: number;
-  reusable_facts?: readonly string[];
   remark?: string;
 }
 
