@@ -78,6 +78,21 @@ function render(message = '') {
   );
 }
 
+async function enterFullscreen(tab) {
+  const context = tab.context();
+  if (context.browser().browserType().name() !== 'chromium') {
+    await tab.evaluate(() => document.documentElement.requestFullscreen());
+    return;
+  }
+  const session = await context.newCDPSession(tab);
+  try {
+    const { windowId } = await session.send('Browser.getWindowForTarget');
+    await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'fullscreen' } });
+  } finally {
+    await session.detach();
+  }
+}
+
 async function enter(id, account) {
   launching ??= launchBrowser({ headless: false })
     .then((browser) => {
@@ -127,6 +142,9 @@ async function enter(id, account) {
     await tab.getByRole('button', { name: '退出登录' }).waitFor();
     tab.on('close', () => context.close().catch(() => {}));
     await tab.bringToFront();
+    await enterFullscreen(tab).catch(() => {
+      console.warn('浏览器未能自动全屏，可在体验窗口中手动进入全屏。');
+    });
   } catch (e) {
     await context.close();
     throw e;
