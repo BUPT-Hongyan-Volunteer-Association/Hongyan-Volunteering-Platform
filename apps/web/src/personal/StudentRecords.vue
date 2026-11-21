@@ -18,13 +18,10 @@ const paths = {
 };
 const message = ref('');
 const kind = ref('漏记反馈');
-watch(
-  () => route.fullPath,
-  () => {
-    message.value = '';
-    kind.value = '漏记反馈';
-  },
-);
+watch([section, () => route.params.item], () => {
+  message.value = '';
+  kind.value = '漏记反馈';
+});
 function preview() {
   message.value = '当前为表单预览，正式提交待接入。';
 }
@@ -37,6 +34,7 @@ function preview() {
     :title="titles[section]"
     :records="personalRecords[section]"
     :base="paths[section]"
+    :table-heading="section === 'hours' ? '活动' : undefined"
     :selected="String(route.params.item || '')"
   >
     <template #summary

@@ -126,6 +126,12 @@ test('站内通知、确认回执与事件队列', async (t) => {
     assert.equal((await ownerB.request('/organizer/activities/' + a.id + '/notices')).status, 404);
     assert.equal((await student.request('/admin/notification-events')).status, 403);
     assert.equal((await receipts(notice.id, 'follow_up_only=true&status=acknowledged')).total, 0);
+    const filters = 'activity_id=' + a.id + '&unread_only=true&with_counts=true&q=';
+    const found = await inbox(student, filters + encodeURIComponent('活动地点'));
+    assert.equal(found.total, 1);
+    assert.deepEqual(found.inbox_counts, { all: 1, unread: 1, pending: 1 });
+    assert.deepEqual((await inbox(other, filters)).inbox_counts, { all: 0, unread: 0, pending: 0 });
+    assert.equal((await inbox(student, filters + '%25')).total, 0);
     const read = await student.write('POST', target + '/read');
     assert.ok(read.data.read_at);
     assert.equal(read.data.acknowledged_at, undefined);
@@ -133,6 +139,9 @@ test('站内通知、确认回执与事件队列', async (t) => {
     const ack = await student.write('POST', target + '/ack');
     assert.equal(ack.data.read_at, read.data.read_at);
     assert.ok(ack.data.acknowledged_at);
+    const afterAck = await inbox(student, filters);
+    assert.equal(afterAck.total, 0);
+    assert.deepEqual(afterAck.inbox_counts, { all: 1, unread: 0, pending: 0 });
     assert.equal(
       (await student.write('POST', target + '/ack')).data.acknowledged_at,
       ack.data.acknowledged_at,
@@ -197,6 +206,10 @@ test('站内通知、确认回执与事件队列', async (t) => {
     }
     const final = await a.current();
     assert.equal(final.information_version, 4);
+    const historicalPage = await inbox(student, 'activity_id=' + a.id + '&page_size=1&page=2&with_counts=true');
+    assert.equal(historicalPage.items.length, 1);
+    assert.equal(historicalPage.total, 4);
+    assert.deepEqual(historicalPage.inbox_counts, { all: 4, unread: 4, pending: 1 });
     assert.match(final.body, /入群方式：已更新/);
     assert.doesNotMatch(final.body, /第一次修改|第二次修改/);
     await db.registration.updateMany({

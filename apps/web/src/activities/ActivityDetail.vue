@@ -64,7 +64,7 @@ const scheduleReturn =
 const registrationPath = window.history.state?.registrationReturn;
 const registrationReturn =
   typeof registrationPath === 'string' &&
-  /^\/registrations\/[a-f0-9-]+(?:\?|$)/i.test(registrationPath)
+  /^\/registrations(?:\/[a-f0-9-]+)?(?:\?|$)/i.test(registrationPath)
     ? registrationPath
     : undefined;
 const noticePath = window.history.state?.noticeReturn;
@@ -100,7 +100,7 @@ const conditions: [keyof Activity, string, IconName][] = [
       <RouterLink
         :to="noticeReturn || registrationReturn || scheduleReturn || { path: '/', query: $route.query }"
         :aria-label="
-          noticeReturn ? '返回通知详情' : registrationReturn ? '返回报名详情' : scheduleReturn ? '返回日程' : '返回活动列表'
+          noticeReturn ? '返回通知详情' : registrationReturn ? (/^\/registrations\//.test(registrationReturn) ? '返回报名详情' : '返回我的报名') : scheduleReturn ? '返回日程' : '返回活动列表'
         "
         ><UiIcon name="ArrowLeft" />活动详情</RouterLink
       ><RouterLink v-if="showRegistrations" to="/registrations">我的报名</RouterLink>
@@ -250,9 +250,6 @@ const conditions: [keyof Activity, string, IconName][] = [
 </template>
 
 <style scoped>
-.activity-detail {
-  max-width: 1060px;
-}
 .detail-top {
   display: flex;
   align-items: center;

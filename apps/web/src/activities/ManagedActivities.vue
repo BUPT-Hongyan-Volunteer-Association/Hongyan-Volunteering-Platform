@@ -48,65 +48,67 @@ watch(page, load, { immediate: true });
 </script>
 
 <template>
-  <RouterLink class="back-link" :to="hasStudentAccess(props.profile) ? '/mine' : '/'">
-    <UiIcon name="ArrowLeft" />{{ hasStudentAccess(props.profile) ? '返回我的' : '返回活动列表' }}
-  </RouterLink>
-  <div class="page-heading">
-    <h1>我的管理活动</h1>
-    <div class="page-actions">
-      <RouterLink class="button" to="/managed-schedule"
-        ><UiIcon name="Calendar" />本人管理日程</RouterLink
-      >
-      <RouterLink class="button primary" to="/managed/new"
-        ><UiIcon name="Plus" />新建单次活动</RouterLink
-      >
-    </div>
-  </div>
-  <p v-if="loading" class="notice" role="status">正在读取活动…</p>
-  <p v-else-if="error" role="alert">{{ error }} <button @click="load">刷新</button></p>
-  <div v-else-if="!activities.length" class="empty-state">
-    <UiIcon name="FolderOpened" />
-    <p>暂无可管理的活动</p>
-  </div>
-  <ul v-else class="managed-list">
-    <li v-for="a in activities" :key="a.id">
-      <div class="managed-info">
-        <div class="meta-line">{{ a.activity_code }}</div>
-        <div class="page-title">
-          <RouterLink class="row-title" :to="{ path: '/managed/' + a.id, query: sourceQuery }">{{
-            a.title
-          }}</RouterLink>
-          <span class="state-chip" :class="{ attention: a.has_pending_review }">{{
-            a.has_pending_review ? '待审核' : statusLabels[a.status]
-          }}</span>
-        </div>
-        <div class="meta-line">
-          <span v-if="a.location"
-            ><UiIcon name="Location" />{{
-              [a.campus, a.location].filter(Boolean).join(' · ')
-            }}</span
-          ><span><UiIcon name="Clock" />{{ serviceTime(a) }}</span>
-        </div>
-      </div>
+  <div class="reading-area">
+    <RouterLink class="back-link" :to="hasStudentAccess(props.profile) ? '/mine' : '/'">
+      <UiIcon name="ArrowLeft" />{{ hasStudentAccess(props.profile) ? '返回我的' : '返回活动列表' }}
+    </RouterLink>
+    <div class="page-heading">
+      <h1>我的管理活动</h1>
       <div class="page-actions">
-        <RouterLink class="button" :to="{ path: '/managed/' + a.id + '/edit', query: sourceQuery }"
-          ><UiIcon name="EditPen" />编辑与送审</RouterLink
+        <RouterLink class="button" to="/managed-schedule"
+          ><UiIcon name="Calendar" />本人管理日程</RouterLink
         >
-        <RouterLink
-          class="button"
-          :to="{ path: '/managed/' + a.id + '/roster', query: sourceQuery }"
-          ><UiIcon name="Tickets" />报名名单</RouterLink
+        <RouterLink class="button primary" to="/managed/new"
+          ><UiIcon name="Plus" />新建单次活动</RouterLink
         >
       </div>
-    </li>
-  </ul>
-  <Pager
-    v-if="!loading && !error && total > size"
-    :page="page"
-    :size="size"
-    :total="total"
-    @change="(next) => router.push({ query: { page: next } })"
-  />
+    </div>
+    <p v-if="loading" class="notice" role="status">正在读取活动…</p>
+    <p v-else-if="error" role="alert">{{ error }} <button @click="load">刷新</button></p>
+    <div v-else-if="!activities.length" class="empty-state">
+      <UiIcon name="FolderOpened" />
+      <p>暂无可管理的活动</p>
+    </div>
+    <ul v-else class="managed-list">
+      <li v-for="a in activities" :key="a.id">
+        <div class="managed-info">
+          <div class="meta-line">{{ a.activity_code }}</div>
+          <div class="page-title">
+            <RouterLink class="row-title" :to="{ path: '/managed/' + a.id, query: sourceQuery }">{{
+              a.title
+            }}</RouterLink>
+            <span class="state-chip" :class="{ attention: a.has_pending_review }">{{
+              a.has_pending_review ? '待审核' : statusLabels[a.status]
+            }}</span>
+          </div>
+          <div class="meta-line">
+            <span v-if="a.location"
+              ><UiIcon name="Location" />{{
+                [a.campus, a.location].filter(Boolean).join(' · ')
+              }}</span
+            ><span><UiIcon name="Clock" />{{ serviceTime(a) }}</span>
+          </div>
+        </div>
+        <div class="page-actions">
+          <RouterLink class="button" :to="{ path: '/managed/' + a.id + '/edit', query: sourceQuery }"
+            ><UiIcon name="EditPen" />编辑与送审</RouterLink
+          >
+          <RouterLink
+            class="button"
+            :to="{ path: '/managed/' + a.id + '/roster', query: sourceQuery }"
+            ><UiIcon name="Tickets" />报名名单</RouterLink
+          >
+        </div>
+      </li>
+    </ul>
+    <Pager
+      v-if="!loading && !error && total > size"
+      :page="page"
+      :size="size"
+      :total="total"
+      @change="(next) => router.push({ query: { page: next } })"
+    />
+  </div>
 </template>
 <style scoped>
 .managed-list {

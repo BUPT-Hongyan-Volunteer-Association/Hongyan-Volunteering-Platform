@@ -79,7 +79,7 @@ export function changeNoticeBody(versions: ActivityInput[]) {
       lines.push(`· ${label}：${from === to ? '已更新，请查看最新安排' : `${from} → ${to}`}`);
     }
   }
-  return `以下内容有调整：\n${lines.join('\n')}\n请查看最新安排，并在通知详情页确认。`;
+  return `以下内容有调整：\n${lines.join('\n')}\n请核对最新安排并确认收到。`;
 }
 
 export function noticeView(row: NoticeRow, receipt?: NoticeReceipt | null): Notice {

@@ -116,7 +116,7 @@ function preview() {
         <span class="sample-label">示例数据</span>
       </div>
     </div>
-    <div class="entry-list">
+    <div class="entry-list reading-area">
       <RouterLink :to="'/hours/' + batch.id">
         <span class="item-icon"><UiIcon name="DocumentChecked" /></span>
         <div>

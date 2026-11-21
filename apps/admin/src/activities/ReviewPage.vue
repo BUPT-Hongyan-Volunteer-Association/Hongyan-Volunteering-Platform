@@ -16,6 +16,7 @@ import UiIcon from '@hongyan/ui/UiIcon.vue';
 import ActivitySnapshot from '@hongyan/ui/ActivitySnapshot.vue';
 import { fieldLabel, fieldValue } from '@hongyan/ui/activityFields';
 import { localDateTime, reviewLabels } from '@hongyan/ui/activityDisplay';
+import RecordWorkspace from '@hongyan/ui/RecordWorkspace.vue';
 import Pager from '@hongyan/ui/Pager.vue';
 const props = defineProps<{ profile: Profile }>();
 const route = useRoute(),
@@ -48,11 +49,40 @@ const canDecide = computed(
     review.value.submitted_by !== props.profile.account_id,
 );
 let completed: ActivityReview | undefined;
+const queueError = ref('');
+const queueLoading = ref(false);
+let queueSerial = 0;
+async function loadQueue() {
+  const turn = ++queueSerial;
+  queueError.value = '';
+  queueLoading.value = true;
+  rows.value = [];
+  try {
+    const { data } = await listActivityReviews({
+      query: { status: status.value, page: page.value },
+      throwOnError: true,
+    });
+    if (turn === queueSerial) {
+      rows.value = data.data.items;
+      total.value = data.data.total;
+    }
+  } catch (e) {
+    if (turn === queueSerial)
+      queueError.value = e instanceof Error ? e.message : '审核队列读取失败';
+  } finally {
+    if (turn === queueSerial) {
+      queueLoading.value = false;
+      if (!route.params.id) {
+        await nextTick();
+        if (turn === queueSerial) window.scrollTo(0, savedScroll);
+      }
+    }
+  }
+}
 async function load() {
   const n = ++serial;
   loading.value = true;
   error.value = '';
-  rows.value = [];
   review.value = undefined;
   currentPending.value = false;
   try {
@@ -77,28 +107,12 @@ async function load() {
           });
         else await router.push({ path: '/reviews', query: route.query });
       }
-    } else {
-      const result = (
-        await listActivityReviews({
-          query: { status: status.value, page: page.value },
-          throwOnError: true,
-        })
-      ).data.data;
-      if (n !== serial) return;
-      rows.value = result.items;
-      total.value = result.total;
     }
   } catch (e) {
     if (n === serial)
       error.value = '读取最新数据失败：' + (e instanceof Error ? e.message : '请重试');
   } finally {
-    if (n === serial) {
-      loading.value = false;
-      if (!route.params.id) {
-        await nextTick();
-        window.scrollTo(0, savedScroll);
-      }
-    }
+    if (n === serial) loading.value = false;
   }
 }
 async function decide(decision: 'approved' | 'rejected') {
@@ -145,6 +159,7 @@ watch(
     if (route.params.id && completed?.id !== route.params.id) notice.value = '';
     completed = undefined;
     reason.value = '';
+    void loadQueue();
     return load();
   },
   { immediate: true },
@@ -166,7 +181,7 @@ watch(
         ]"
         @update:model-value="
           savedScroll = 0;
-          router.push({ query: { status: $event, page: 1 } });
+          router.push({ path: '/reviews', query: { status: $event, page: 1 } });
         "
       />
     </label>
@@ -180,87 +195,96 @@ watch(
   <p v-if="notice" role="status" class="notice">{{ notice }}</p>
   <p v-if="error" role="alert">{{ error }} <button @click="load">刷新</button></p>
   <p v-if="loading" role="status">正在读取…</p>
-  <template v-else-if="!route.params.id">
-    <div v-if="rows.length" class="entry-list">
-      <RouterLink
-        v-for="r in rows"
-        :key="r.id"
-        :to="{ path: '/reviews/' + r.id, query: route.query }"
-        @click="savedScroll = windowScroll()"
-      >
-        <span class="item-icon"><UiIcon name="DocumentChecked" /></span>
-        <div>
-          <strong>{{ r.snapshot.content.title }} · 版本 {{ r.revision }}</strong
-          ><small v-if="r.created_at">送审 {{ localDateTime(r.created_at) }}</small>
-        </div>
-        <span class="row-end"
-          ><span class="state-chip" :class="{ attention: r.status === 'pending' }">{{
-            reviewLabels[r.status]
-          }}</span
-          ><UiIcon name="ArrowRight"
-        /></span>
-      </RouterLink>
-    </div>
-    <div v-else-if="!error" class="empty-state">
-      <UiIcon name="CircleCheck" />
-      <p>暂无匹配的审核</p>
-    </div>
-    <Pager
-      v-if="total > 20 && !error"
-      :page="page"
-      :size="20"
-      :total="total"
-      @change="(p) => router.push({ query: { ...route.query, page: p } })"
-    />
-  </template>
-  <article v-else-if="review" class="review-detail">
-    <div class="page-title">
-      <h2>{{ review.snapshot.content.title }} · 送审版本 {{ review.revision }}</h2>
-      <span class="state-chip" :class="{ attention: review.status === 'pending' }">{{
-        reviewLabels[review.status]
-      }}</span>
-    </div>
-    <p class="meta-line">
-      {{
-        review.previous_published_snapshot
-          ? '原公开版本 ' + review.previous_published_snapshot.revision
-          : '首次发布，尚无公开版本'
-      }}
-    </p>
-    <section v-if="review.previous_published_snapshot" class="diff">
-      <h3>逐字段差异</h3>
-      <dl v-if="review.changes.length">
-        <template v-for="c in review.changes" :key="c.field_path"
-          ><dt>{{ fieldLabel(c.field_path) }}</dt>
-          <dd>
-            <span>{{ fieldValue(c.field_path, JSON.parse(c.before_value)) }}</span> →
-            <strong>{{ fieldValue(c.field_path, JSON.parse(c.after_value)) }}</strong>
-          </dd>
-        </template>
-      </dl>
-      <p v-else>与原公开版本一致</p>
-    </section>
-    <details :open="!review.previous_published_snapshot">
-      <summary>冻结内容</summary>
-      <ActivitySnapshot :content="review.snapshot.content" />
-    </details>
-    <details v-if="review.previous_published_snapshot">
-      <summary>原公开内容</summary>
-      <ActivitySnapshot :content="review.previous_published_snapshot.content" />
-    </details>
-    <form v-if="canDecide" class="decision-form" @submit.prevent="decide('approved')">
-      <label>审核意见（驳回必填）<textarea v-model="reason" rows="2" /></label>
-      <div class="page-actions">
-        <button type="button" :disabled="busy" @click="decide('rejected')">驳回</button>
-        <button class="primary" type="submit" :disabled="busy">
-          <UiIcon name="Check" />批准发布
-        </button>
+  <RecordWorkspace :selected="!!route.params.id">
+    <template #list>
+      <p v-if="queueError" role="alert">
+        {{ queueError }} <button @click="loadQueue">重新读取队列</button>
+      </p>
+      <p v-else-if="queueLoading" role="status">正在读取审核队列…</p>
+      <div v-else-if="rows.length" class="entry-list reading-area">
+        <RouterLink
+          v-for="r in rows"
+          :key="r.id"
+          :aria-current="route.params.id === r.id ? 'true' : undefined"
+          :to="{ path: '/reviews/' + r.id, query: route.query }"
+          @click="savedScroll = windowScroll()"
+        >
+          <span class="item-icon"><UiIcon name="DocumentChecked" /></span>
+          <div>
+            <strong>{{ r.snapshot.content.title }} · 版本 {{ r.revision }}</strong
+            ><small v-if="r.created_at">送审 {{ localDateTime(r.created_at) }}</small>
+          </div>
+          <span class="row-end"
+            ><span class="state-chip" :class="{ attention: r.status === 'pending' }">{{
+              reviewLabels[r.status]
+            }}</span
+            ><UiIcon name="ArrowRight"
+          /></span>
+        </RouterLink>
       </div>
-    </form>
-    <p v-else class="notice">
-      当前审核只读 · {{ reviewLabels[review.status] }} {{ review.reason }}
-    </p>
-  </article>
+      <div v-else class="empty-state">
+        <UiIcon name="CircleCheck" />
+        <p>暂无匹配的审核</p>
+      </div>
+      <Pager
+        v-if="total > 20 && !queueError && !queueLoading"
+        :page="page"
+        :size="20"
+        :total="total"
+        @change="(p) => router.push({ path: '/reviews', query: { ...route.query, page: p } })"
+      />
+    </template>
+    <template #detail>
+      <article v-if="review" class="review-detail">
+        <div class="page-title">
+          <h2>{{ review.snapshot.content.title }} · 送审版本 {{ review.revision }}</h2>
+          <span class="state-chip" :class="{ attention: review.status === 'pending' }">{{
+            reviewLabels[review.status]
+          }}</span>
+        </div>
+        <p class="meta-line">
+          {{
+            review.previous_published_snapshot
+              ? '原公开版本 ' + review.previous_published_snapshot.revision
+              : '首次发布，尚无公开版本'
+          }}
+        </p>
+        <section v-if="review.previous_published_snapshot" class="diff">
+          <h3>逐字段差异</h3>
+          <dl v-if="review.changes.length">
+            <template v-for="c in review.changes" :key="c.field_path"
+              ><dt>{{ fieldLabel(c.field_path) }}</dt>
+              <dd>
+                <span>{{ fieldValue(c.field_path, JSON.parse(c.before_value)) }}</span> →
+                <strong>{{ fieldValue(c.field_path, JSON.parse(c.after_value)) }}</strong>
+              </dd>
+            </template>
+          </dl>
+          <p v-else>与原公开版本一致</p>
+        </section>
+        <details :open="!review.previous_published_snapshot">
+          <summary>冻结内容</summary>
+          <ActivitySnapshot :content="review.snapshot.content" />
+        </details>
+        <details v-if="review.previous_published_snapshot">
+          <summary>原公开内容</summary>
+          <ActivitySnapshot :content="review.previous_published_snapshot.content" />
+        </details>
+        <form v-if="canDecide" class="decision-form" @submit.prevent="decide('approved')">
+          <label>审核意见（驳回必填）<textarea v-model="reason" rows="2" /></label>
+          <div class="page-actions">
+            <button type="button" :disabled="busy" @click="decide('rejected')">驳回</button>
+            <button class="primary" type="submit" :disabled="busy">
+              <UiIcon name="Check" />批准发布
+            </button>
+          </div>
+        </form>
+        <p v-else class="notice">
+          当前审核只读 · {{ reviewLabels[review.status] }} {{ review.reason }}
+        </p>
+      </article>
+    </template>
+  </RecordWorkspace>
 </template>
 <style scoped>
 .review-filter {
@@ -269,6 +293,10 @@ watch(
   gap: 8px;
   font-size: 14px;
   color: var(--muted);
+}
+.entry-list a[aria-current] {
+  background: var(--brand-tint);
+  box-shadow: inset 3px 0 var(--brand);
 }
 .entry-list small {
   display: block;

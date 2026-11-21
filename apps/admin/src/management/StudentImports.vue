@@ -281,7 +281,7 @@ watch(
 </script>
 
 <template>
-  <div class="page-heading">
+  <div class="page-heading reading-area">
     <div class="page-title">
       <h1>{{ title }}</h1>
       <span v-if="batch" class="state-chip" :class="{
@@ -300,7 +300,7 @@ watch(
     @change="choose"
   />
   <div
-    class="dropzone"
+    class="dropzone reading-area"
     :class="{ dragging, busy }"
     role="button"
     tabindex="0"
@@ -328,7 +328,7 @@ watch(
     <p v-if="writeFailure.details.length">请按原表行号修正文件后重新上传，整批未写入。</p>
   </section>
   <p v-if="loading && !batch" role="status">正在读取批次…</p>
-  <section v-else-if="batch" class="batch-summary">
+  <section v-else-if="batch" class="batch-summary reading-area">
     <div class="page-title">
       <h2>批次 {{ batch.id.slice(0, 8) }}</h2>
       <span class="state-chip" :class="{ attention: batch.status === 'invalid' || batch.status === 'failed', neutral: batch.status === 'validating' }">{{ statusText }}</span>

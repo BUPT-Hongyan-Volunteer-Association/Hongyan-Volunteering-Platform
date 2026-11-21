@@ -309,7 +309,7 @@ function resultBody(activityTitle: string, status: string, reason: string | null
   const result = resultTexts[status] ?? '已有结果';
   const head =
     status === 'accepted'
-      ? `恭喜，你${result}：「${activityTitle}」。请按时参加活动，并在通知详情页确认收到。`
+      ? `恭喜，你${result}：「${activityTitle}」。请确认收到，并按时参加活动。`
       : `「${activityTitle}」的报名结果：你${result}。请在活动详情页查看后续安排。`;
   return reason ? `${head}\n说明：${reason}` : head;
 }

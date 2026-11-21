@@ -1867,7 +1867,7 @@ paths:
                 - request_id
               examples:
                 pending_roster:
-                  summary: 图21-2 待处理名单，第1页
+                  summary: 待处理名单，第1页
                   value:
                     data:
                       items:
@@ -2431,6 +2431,21 @@ paths:
       - student
       - organizer
       parameters:
+      - name: q
+        in: query
+        description: 在本人通知的标题和正文中搜索。
+        schema:
+          type: string
+          maxLength: 100
+      - name: unread_only
+        in: query
+        schema:
+          type: boolean
+      - name: with_counts
+        in: query
+        description: 返回同一搜索和活动范围的全部、未读和待确认数量。
+        schema:
+          type: boolean
       - name: unacknowledged_only
         in: query
         required: false
@@ -2980,7 +2995,7 @@ paths:
                 - request_id
               examples:
                 review_header:
-                  summary: 图21-3 送审快照
+                  summary: 时长审核送审快照
                   value:
                     data:
                       id: 00000000-0000-4000-8000-000000000032
@@ -3121,7 +3136,7 @@ paths:
                       total: 1
                     request_id: 00000000-0000-4000-8000-000000000001
                 review_rows:
-                  summary: 图21-3 七列导入，第三条数据对应工作表第4行
+                  summary: 七列时长导入，第三条数据对应工作表第4行
                   value:
                     data:
                       items:
@@ -3422,7 +3437,7 @@ paths:
                   expected_version: 2
                   decision: approved
               screen_approval:
-                summary: 图21-3 无时长警告，只核实第4行
+                summary: 无时长警告，只核实第4行
                 value:
                   expected_version: 2
                   decision: approved
@@ -10266,6 +10281,15 @@ components:
     notice_page:
       type: object
       properties:
+        inbox_counts:
+          type: object
+          description: 本人通知列表请求 with_counts 时返回，计数覆盖整个筛选范围。
+          required: [all, unread, pending]
+          additionalProperties: false
+          properties:
+            all: { type: integer, minimum: 0 }
+            unread: { type: integer, minimum: 0 }
+            pending: { type: integer, minimum: 0 }
         items:
           type: array
           items:

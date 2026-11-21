@@ -18,6 +18,9 @@ const sections = {
 };
 const section = computed(() => route.params.area as keyof typeof sections);
 const date = ref('');
+const serviceDates = [
+  ...new Set(attendance.map((row) => row.fields.find(([label]) => label === '服务日期')![1])),
+];
 const feedback = ref('');
 const records = computed(() => {
   const list = sections[section.value].records;
@@ -25,7 +28,7 @@ const records = computed(() => {
   return list.filter((r) => r.fields.some(([k, v]) => k === '服务日期' && v === date.value));
 });
 watch(
-  () => route.fullPath,
+  [section, () => route.params.item, () => route.params.id],
   () => {
     feedback.value = '';
   },
@@ -35,11 +38,20 @@ watch(
   <PreviewRecords
     :title="sections[section].title"
     :records="records"
+    :table-heading="section === 'attendance' ? '姓名' : section === 'appeals' ? '反馈' : undefined"
+    :status-heading="section === 'appeals' ? '状态' : undefined"
     :base="'/managed/' + route.params.id + '/' + section"
     :selected="String(route.params.item || '')"
   >
     <template #filters>
-      <label v-if="section === 'attendance'">服务日期 <input type="date" v-model="date" /></label>
+      <label v-if="section === 'attendance'"
+        >服务日期
+        <UiSelect
+          label="服务日期"
+          :model-value="date"
+          :options="[{ value: '', label: '所有日期' }, ...serviceDates]"
+          @update:model-value="date = $event"
+      /></label>
     </template>
     <template #detail="{ record }">
       <button

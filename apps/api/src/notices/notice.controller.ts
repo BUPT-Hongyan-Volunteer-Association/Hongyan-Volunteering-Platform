@@ -65,39 +65,64 @@ export class NoticeController {
     const pending = flag(q, 'unacknowledged_only');
     if (q.notice_kind && !noticeKinds.includes(q.notice_kind))
       invalid('notice_kind', '通知类别无效');
-    const notice: Prisma.NoticeWhereInput = {
-      id: uuid(q, 'notice_id'),
-      activity_id: uuid(q, 'activity_id'),
-      notice_kind: q.notice_kind,
-      ...(pending && {
+    const unread = flag(q, 'unread_only');
+    const withCounts = flag(q, 'with_counts');
+    if (q.q !== undefined && (typeof q.q !== 'string' || q.q.length > 100))
+      invalid('q', '搜索词最多 100 个字符');
+    const text = q.q?.trim().replace(/[\\%_]/g, '\\$&');
+    const scope: Prisma.NoticeReceiptWhereInput = {
+      student_id,
+      notice: {
+        id: uuid(q, 'notice_id'),
+        activity_id: uuid(q, 'activity_id'),
+        notice_kind: q.notice_kind,
+        ...(text && {
+          OR: [
+            { title: { contains: text, mode: 'insensitive' } },
+            { body: { contains: text, mode: 'insensitive' } },
+          ],
+        }),
+      },
+    };
+    const followUp: Prisma.NoticeReceiptWhereInput = {
+      acknowledged_at: null,
+      notice: {
         is_current: true,
         requires_ack: true,
         OR: [
           { notice_kind: { notIn: attendanceKinds } },
           { activity: { registrations: { some: { student_id, status: { in: activeStatuses } } } } },
         ],
-      }),
+      },
     };
-    const where = { student_id, notice, ...(pending && { acknowledged_at: null }) };
-    const [rows, total] = await this.db.$transaction(
-      [
-        this.db.noticeReceipt.findMany({
-          where,
-          include: { notice: true },
-          skip,
-          take: page_size,
-          orderBy: [{ notice: { published_at: 'desc' } }, { notice_id: 'asc' }],
-        }),
-        this.db.noticeReceipt.count({ where }),
-      ],
-      snapshot,
-    );
-    return envelope<NoticePage>({
-      items: rows.map((r) => noticeView(r.notice, r)),
-      page,
-      page_size,
-      total,
-    });
+    const where = { ...scope, ...(unread && { read_at: null }), ...(pending && { AND: followUp }) };
+    return this.db.$transaction(async (tx) => {
+      const rows = await tx.noticeReceipt.findMany({
+        where,
+        include: { notice: true },
+        skip,
+        take: page_size,
+        orderBy: [{ notice: { published_at: 'desc' } }, { notice_id: 'asc' }],
+      });
+      const counts = withCounts
+        ? {
+            all: await tx.noticeReceipt.count({ where: scope }),
+            unread: await tx.noticeReceipt.count({ where: { ...scope, read_at: null } }),
+            pending: await tx.noticeReceipt.count({ where: { ...scope, AND: followUp } }),
+          }
+        : undefined;
+      const total =
+        counts && !(unread && pending)
+          ? counts[pending ? 'pending' : unread ? 'unread' : 'all']
+          : await tx.noticeReceipt.count({ where });
+      return envelope<NoticePage>({
+        items: rows.map((r) => noticeView(r.notice, r)),
+        page,
+        page_size,
+        total,
+        ...(counts && { inbox_counts: counts }),
+      });
+    }, snapshot);
   }
 
   @Post('me/notices/:id/read')

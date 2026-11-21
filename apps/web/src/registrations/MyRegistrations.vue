@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { listMyRegistrations, type Registration, type RegistrationPage } from '@hongyan/contracts';
+import RecordSummaryList from '@hongyan/ui/RecordSummaryList.vue';
 import Pager from '@hongyan/ui/Pager.vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
@@ -18,7 +19,22 @@ const options = [
   ...Object.entries(registrationLabels).map(([value, label]) => ({ value, label })),
 ];
 const result = ref<RegistrationPage>();
-const selected = computed(() => result.value?.items[0]);
+const rows = computed(() =>
+  (result.value?.items || []).map((row) => ({
+    id: row.id,
+    activityId: row.activity_id,
+    title: row.activity_title || '活动报名',
+    status: registrationLabels[row.status],
+    date: row.submitted_at,
+    dateLabel: localDateTime(row.submitted_at),
+    summary: [
+      row.statement && '申请说明 · ' + row.statement,
+      row.decision_reason && '处理说明 · ' + row.decision_reason,
+    ]
+      .filter(Boolean)
+      .join('　'),
+  })),
+);
 const error = ref('');
 let serial = 0;
 async function load() {
@@ -53,69 +69,42 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <RouterLink v-if="item" class="back-link" :to="{ path: '/registrations', query: route.query }">
-    <UiIcon name="ArrowLeft" />返回我的报名
-  </RouterLink>
-  <header class="page-heading">
-    <h1>{{ item ? '报名详情' : '我的报名' }}</h1>
-    <UiSelect
-      v-if="!item"
-      label="报名状态"
-      :model-value="status"
-      :options="options"
-      @update:model-value="filter"
-    />
-  </header>
-  <p v-if="error" role="alert">{{ error }} <button @click="load">重新读取</button></p>
-  <p v-else-if="!result" role="status">正在读取报名记录…</p>
-  <template v-else-if="item">
-    <section v-if="selected">
-      <h2>{{ selected.activity_title || '活动报名' }}</h2>
-      <dl class="detail-fields">
-        <dt>报名状态</dt>
-        <dd>{{ registrationLabels[selected.status] }}</dd>
-        <dt>提交时间</dt>
-        <dd>{{ localDateTime(selected.submitted_at) }}</dd>
-        <template v-if="selected.statement"
-          ><dt>申请说明</dt>
-          <dd>{{ selected.statement }}</dd></template
-        >
-        <template v-if="selected.decision_reason"
-          ><dt>处理说明</dt>
-          <dd>{{ selected.decision_reason }}</dd></template
-        >
-      </dl>
-      <RouterLink
-        class="button"
-        :to="{
-          path: '/activities/' + selected.activity_id,
-          state: { registrationReturn: route.fullPath },
-        }"
-        >查看活动详情</RouterLink
-      >
-    </section>
-    <p v-else>未找到该报名记录。</p>
-  </template>
-  <template v-else>
-    <div v-if="result.items.length" class="entry-list">
-      <RouterLink
-        v-for="row in result.items"
-        :key="row.id"
-        :to="{ path: '/registrations/' + row.id, query: route.query }"
-      >
-        <div>
-          <strong>{{ row.activity_title || '活动报名' }}</strong>
-          <div class="meta-line">{{ localDateTime(row.submitted_at) }} 提交</div>
-        </div>
-        <span class="state-chip">{{ registrationLabels[row.status] }}</span>
-      </RouterLink>
-    </div>
-    <p v-else>暂无符合条件的报名记录。</p>
-    <Pager
-      :page="page"
-      :size="result.page_size"
-      :total="result.total"
-      @change="(n) => router.push({ query: { ...route.query, page: n } })"
-    />
-  </template>
+  <section class="reading-area">
+    <RouterLink v-if="item" class="back-link" :to="{ path: '/registrations', query: route.query }">
+      <UiIcon name="ArrowLeft" />返回我的报名
+    </RouterLink>
+    <header class="page-heading">
+      <h1>{{ item ? '报名详情' : '我的报名' }}</h1>
+      <UiSelect
+        v-if="!item"
+        label="报名状态"
+        :model-value="status"
+        :options="options"
+        @update:model-value="filter"
+      />
+    </header>
+    <p v-if="error" role="alert">{{ error }} <button @click="load">重新读取</button></p>
+    <p v-else-if="!result" role="status">正在读取报名记录…</p>
+    <template v-else>
+      <RecordSummaryList v-if="rows.length" :records="rows">
+        <template #action="{ row }">
+          <RouterLink
+            :to="{
+              path: '/activities/' + row.activityId,
+              state: { registrationReturn: route.fullPath },
+            }"
+            >查看活动详情</RouterLink
+          >
+        </template>
+      </RecordSummaryList>
+      <p v-else>{{ item ? '未找到该报名记录。' : '暂无符合条件的报名记录。' }}</p>
+      <Pager
+        v-if="!item"
+        :page="page"
+        :size="result.page_size"
+        :total="result.total"
+        @change="(n) => router.push({ query: { ...route.query, page: n } })"
+      />
+    </template>
+  </section>
 </template>
