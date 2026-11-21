@@ -8,6 +8,8 @@
 
 审核员可从「建档导入」下载 v1.5 学生名单模板，填写后上传，按原表行号核对并确认，再到「学生档案」查询建档结果。
 
+学生按日期窗口查看活动日程，负责人从「管理日程」进入本人管理的活动，审核员在「全院日程」按负责人和审核状态查看。日程按小时、日、周、月绘制真实服务时段，学生日程以服务端时刻标记进行中，页面可见时每 60 秒校准。
+
 ## 本地运行
 
 1. 准备 Node.js 24、pnpm 10.32.1 和 PostgreSQL 18。启动数据库，创建开发库，将 `apps/api/.env.example` 复制为 `apps/api/.env`，按实际账号、端口和库名填写 `DATABASE_URL`。
@@ -36,7 +38,7 @@
 
 ## 开发检查
 
-类型检查用 `pnpm typecheck`，服务端回归用 `pnpm --filter @hongyan/api test:flow`（活动流程和现场异常）、`pnpm --filter @hongyan/api test:students`（学生名单导入）和 `pnpm --filter @hongyan/api test:notice`（通知与回执），页面回归用 `pnpm test:pages`。服务端与页面回归都会创建独立测试库，数据库账号须有建库权限。页面回归和身份选择页可使用已安装的 Chrome 或 Edge。用 Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，再通过 HTTPS 访问。
+类型检查用 `pnpm typecheck`，服务端回归用 `pnpm --filter @hongyan/api test:flow`（活动流程和现场异常）、`pnpm --filter @hongyan/api test:timeline`（活动日程）、`pnpm --filter @hongyan/api test:students`（学生名单导入）和 `pnpm --filter @hongyan/api test:notice`（通知与回执），页面回归用 `pnpm test:pages`。服务端与页面回归都会创建独立测试库，数据库账号须有建库权限。页面回归和身份选择页可使用已安装的 Chrome 或 Edge。用 Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，再通过 HTTPS 访问。
 
 时长工作簿解析测试用 `pnpm --filter @hongyan/api test:hour-workbook`，逐行预览测试用 `pnpm --filter @hongyan/api test:hour-preview`。两者均可在本地离线运行。
 
