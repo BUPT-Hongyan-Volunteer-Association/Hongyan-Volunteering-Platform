@@ -65,12 +65,12 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   // 取一批到期事件逐个投递。抢占失败的（已被别的进程处理）直接跳过。
-  async drain(now = new Date()) {
+  async drain(now?: Date) {
     if (this.draining) return;
     this.draining = true;
     try {
       const due = await this.db.notificationEvent.findMany({
-        where: dueAt(now),
+        where: dueAt(now ?? new Date()),
         orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
         select: { id: true },
         take: 50,
@@ -78,7 +78,7 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
       for (const { id } of due) {
         // 单个事件处理失败（例如数据库瞬时错误）不能拖垮整批，下一轮会重新取到它。
         try {
-          await this.attempt(id, now);
+          await this.attempt(id, now ?? new Date());
         } catch (error) {
           this.logger.error(`通知事件处理异常 event=${id} ${errorText(error)}`);
         }

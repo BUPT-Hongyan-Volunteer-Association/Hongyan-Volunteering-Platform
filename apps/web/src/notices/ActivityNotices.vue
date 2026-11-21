@@ -135,7 +135,6 @@ async function reloadReceipts() {
       <h3>接收人回执</h3>
       <p v-if="receiptPage" class="receipt-summary">
         接收 {{ current.recipient_count }} 人 · 待跟进 {{ receiptPage.pending }} 人
-        <template v-if="receiptPage.pending === 0"> · 全部已确认或已移出</template>
       </p>
       <div class="row-actions">
         <UiSelect

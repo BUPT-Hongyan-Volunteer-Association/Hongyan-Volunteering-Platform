@@ -13,7 +13,7 @@ import Pager from '@hongyan/ui/Pager.vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { localDateTime } from '@hongyan/ui/activityDisplay';
-import { message, pageNumber, usePageRead } from '../usePageRead';
+import { message, noAccess, pageNumber, usePageRead } from '../usePageRead';
 
 const route = useRoute(),
   router = useRouter();
@@ -80,7 +80,7 @@ const {
         }
       } catch (e) {
         if (!signal.aborted) {
-          if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) throw e;
+          if (noAccess(e)) throw e;
           feedback.value = message(e);
         }
       }
@@ -117,7 +117,7 @@ async function ack(notice: Notice) {
   } catch (e) {
     if (item.value === notice.id) {
       feedback.value = message(e);
-      if (e instanceof ApiError && [401, 403, 404, 409].includes(e.status ?? 0)) await refresh();
+      if (noAccess(e) || (e instanceof ApiError && e.status === 409)) await refresh();
     }
   } finally {
     busy.value = false;
@@ -175,8 +175,6 @@ onUnmounted(() => window.removeEventListener('focus', focus));
         <dd>{{ kinds[selected.notice_kind] }}</dd>
         <dt>是否需要确认</dt>
         <dd>{{ selected.requires_ack ? '需要' : '不需要' }}</dd>
-        <dt>当前状态</dt>
-        <dd>{{ state(selected).label }}</dd>
         <template v-if="selected.read_at"
           ><dt>已读时间</dt>
           <dd>{{ localDateTime(selected.read_at) }}</dd></template
