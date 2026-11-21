@@ -10,6 +10,7 @@ import MyRegistrations from './registrations/MyRegistrations.vue';
 import Roster from './registrations/Roster.vue';
 import PersonalPage from './PersonalPage.vue';
 import StudentRecords from './personal/StudentRecords.vue';
+import MyNotices from './notices/MyNotices.vue';
 import SchedulePage from '@hongyan/ui/SchedulePage.vue';
 export const router = createRouter({
   history: createWebHistory(),
@@ -68,7 +69,7 @@ export const router = createRouter({
     {
       path: '/notices/:item?',
       name: 'notices',
-      component: StudentRecords,
+      component: MyNotices,
       meta: { personal: true },
     },
     {

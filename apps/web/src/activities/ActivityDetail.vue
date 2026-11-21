@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import UiIcon, { type IconName } from '@hongyan/ui/UiIcon.vue';
 import { activityTypes as types, localDateTime as date } from '@hongyan/ui/activityDisplay';
 import {
   applyForActivity,
   createCommand,
+  listMyNotices,
   type Activity,
   type Registration,
 } from '@hongyan/contracts';
@@ -66,6 +67,19 @@ const registrationReturn =
     ? registrationPath
     : undefined;
 const contact = ref<HTMLDialogElement>();
+const pendingNotices = ref(0);
+onMounted(async () => {
+  if (!props.showRegistrations) return;
+  try {
+    const { data } = await listMyNotices({
+      query: { activity_id: props.activity.id, unacknowledged_only: true, page_size: 1 },
+      throwOnError: true,
+    });
+    pendingNotices.value = data.data.total;
+  } catch {
+    // 未登录或非学生身份时不提示，详情页其余内容照常展示。
+  }
+});
 const phases = {
   open: '报名中',
   not_open: '尚未开放',
@@ -91,6 +105,11 @@ const conditions: [keyof Activity, string, IconName][] = [
         ><UiIcon name="ArrowLeft" />活动详情</RouterLink
       ><RouterLink v-if="showRegistrations" to="/registrations">我的报名</RouterLink>
     </div>
+    <p v-if="pendingNotices > 0" class="notice-callout">
+      <UiIcon name="Bell" />
+      本活动有 {{ pendingNotices }} 条通知待确认，
+      <RouterLink to="/notices?pending=1">去查看并确认</RouterLink>
+    </p>
     <div class="detail-columns">
       <div class="detail-intro">
         <div class="page-actions">
@@ -430,5 +449,21 @@ dialog button {
   .detail-footer:not(:has(.contact-btn)) {
     grid-template-columns: 1fr;
   }
+}
+</style>
+
+<style scoped>
+.notice-callout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin: 0 0 16px;
+  border: 1px solid var(--line, #dfe5ef);
+  border-radius: var(--radius, 8px);
+  background: var(--surface-muted, #f5f8ff);
+}
+.notice-callout a {
+  text-decoration: underline;
 }
 </style>
