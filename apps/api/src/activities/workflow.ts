@@ -180,6 +180,7 @@ export class Workflow {
         (studentId(actor) !== account.student?.id || !row?.published_revision)
       )
         invisible();
+      if (access === 'self' && studentId(actor) !== account.student?.id) invisible();
       if (access === 'create' && !actor.roles.includes('organizer')) denied();
       if (access === 'review' && !staff(actor)) denied();
       if (

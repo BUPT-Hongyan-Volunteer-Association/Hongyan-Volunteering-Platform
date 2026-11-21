@@ -5,14 +5,12 @@ import { useRoute } from 'vue-router';
 import PreviewRecords from '@hongyan/ui/PreviewRecords.vue';
 import { requests } from '../registrations/requests';
 import { attendance } from '../notices/organizer';
-import ActivityNotices from '../notices/ActivityNotices.vue';
 import { appeals, corrections } from '../hours/organizer';
 import { incidents } from '../incidents/organizer';
 
 const route = useRoute();
 const sections = {
   requests: { title: '退出与恢复', records: requests },
-  notices: { title: '通知与回执', records: [] as typeof attendance },
   attendance: { title: '现场人员记录', records: attendance },
   appeals: { title: '漏记反馈', records: appeals },
   corrections: { title: '错账修复组', records: corrections },
@@ -34,12 +32,7 @@ watch(
 );
 </script>
 <template>
-  <ActivityNotices
-    v-if="section === 'notices'"
-    :activity-id="String(route.params.id)"
-  />
   <PreviewRecords
-    v-else
     :title="sections[section].title"
     :records="records"
     :base="'/managed/' + route.params.id + '/' + section"

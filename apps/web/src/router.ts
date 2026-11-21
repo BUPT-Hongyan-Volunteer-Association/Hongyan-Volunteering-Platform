@@ -10,6 +10,7 @@ import MyRegistrations from './registrations/MyRegistrations.vue';
 import Roster from './registrations/Roster.vue';
 import PersonalPage from './PersonalPage.vue';
 import StudentRecords from './personal/StudentRecords.vue';
+import ActivityNotices from './notices/ActivityNotices.vue';
 import MyNotices from './notices/MyNotices.vue';
 import SchedulePage from '@hongyan/ui/SchedulePage.vue';
 export const router = createRouter({
@@ -26,14 +27,15 @@ export const router = createRouter({
       meta: { organizer: true, profile: true },
       children: [
         {
-          path: ':area(requests|notices|attendance|appeals|corrections|incidents)/:item?',
+          path: ':area(requests|attendance|appeals|corrections|incidents)/:item?',
           name: 'organizer-section',
           component: OrganizerSection,
         },
         { path: 'edit', name: 'activity-edit', component: ActivityEditor },
+        { path: 'notices/:item?', name: 'activity-notices', component: ActivityNotices, meta: { area: 'notices' } },
         { path: 'roster', name: 'roster', component: Roster },
-        { path: 'batches', name: 'hour-batches', component: HourBatches },
-        { path: 'batches/:item', name: 'hour-batch', component: HourBatchDetail },
+        { path: 'batches', name: 'hour-batches', component: HourBatches, meta: { area: 'batches' } },
+        { path: 'batches/:item', name: 'hour-batch', component: HourBatchDetail, meta: { area: 'batches' } },
       ],
     },
     {

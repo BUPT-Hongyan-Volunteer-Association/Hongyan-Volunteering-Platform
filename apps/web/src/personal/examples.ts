@@ -1,36 +1,10 @@
-import type { Appeal, HourRecord, Incident, Notice } from '@hongyan/contracts';
+import type { Appeal, HourRecord, Incident } from '@hongyan/contracts';
 import type { PreviewRecord } from '@hongyan/ui/preview';
 
 export const title = '图书馆志愿服务';
 export const activityId = '71000000-0000-4000-8000-000000000001';
 const student = '71000000-0000-4000-8000-000000000002';
 const common = { version: 1, student_id: student, activity_id: activityId };
-const notices: Notice[] = [
-  { title: '集合地点调整', notice_kind: 'change', body: '11 月 21 日请到一层服务台集合。' },
-  {
-    title: '时长审核结果',
-    notice_kind: 'hours_result',
-    body: '11 月 14 日的服务已核定 2.0 小时。',
-    read_at: '2026-11-16T11:00:00+08:00',
-  },
-  {
-    title: '录取结果',
-    notice_kind: 'result',
-    body: '你的整项活动报名已录取。',
-    read_at: '2026-11-11T11:01:00+08:00',
-    acknowledged_at: '2026-11-11T11:05:00+08:00',
-  },
-].map((n, i) => ({
-  ...n,
-  notice_kind: n.notice_kind as Notice['notice_kind'],
-  id: '71000000-0000-4000-8000-00000000001' + i,
-  activity_id: activityId,
-  version: 1,
-  information_version: 1,
-  requires_ack: i !== 1,
-  is_current: true,
-  published_at: ['2026-11-17', '2026-11-16', '2026-11-11'][i] + 'T10:00:00+08:00',
-}));
 const hour: HourRecord = {
   ...common,
   id: '71000000-0000-4000-8000-000000000020',
@@ -68,17 +42,7 @@ const incidentAppeal: Appeal = {
   status: 'pending',
 };
 export const totalHours = hour.credited_hours;
-export const personalRecords: Record<'notices' | 'hours' | 'feedback', PreviewRecord[]> = {
-  notices: notices.map((n) => ({
-    id: n.id,
-    title: n.title,
-    status: n.acknowledged_at ? '已确认' : n.read_at ? '已读' : '未读',
-    fields: [
-      ['所属活动', title],
-      ['发布日期', n.published_at.slice(0, 10)],
-      ['通知内容', n.body],
-    ],
-  })),
+export const personalRecords: Record<'hours' | 'feedback', PreviewRecord[]> = {
   hours: [
     {
       id: hour.id,

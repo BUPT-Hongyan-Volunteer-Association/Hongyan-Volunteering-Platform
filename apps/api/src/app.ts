@@ -26,7 +26,6 @@ import { RegistrationController } from './registrations/registration.controller.
 import { ManagedController } from './activities/managed.controller.js';
 import { NoticeController } from './notices/notice.controller.js';
 import { NoticeWorker } from './notices/notice.worker.js';
-import { Clock } from './notices/clock.js';
 import { HourBatchesController, HourUploadScope } from './hours/batches.controller.js';
 import { HourValidationWorker } from './hours/validation-worker.js';
 import { StudentController } from './students/student.controller.js';
@@ -96,7 +95,6 @@ class HttpErrorFilter implements ExceptionFilter {
     HourUploadScope,
     HourValidationWorker,
     StudentImportService,
-    Clock,
     NoticeWorker,
   ],
 })

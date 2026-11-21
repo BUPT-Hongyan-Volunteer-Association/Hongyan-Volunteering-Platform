@@ -2,6 +2,8 @@
 
 学生查看活动、报名和查询结果，负责人创建活动并送审、处理录取，审核员审批活动及修订。负责人也可在「我的管理活动」选择活动，进入「时长批次」下载模板、上传工作簿并核对预览。预览不计入学生累计时长。
 
+活动安排修订获批或负责人完成录取后，学生可在「通知」打开并确认。负责人在活动工作区的「通知与回执」可查询接收人和待跟进名单。
+
 审核员可从「建档导入」下载 v1.5 学生名单模板，填写后上传，按原表行号核对并确认，再到「学生档案」查询建档结果。
 
 ## 本地运行
@@ -30,7 +32,7 @@
 
 ## 开发检查
 
-类型检查用 `pnpm typecheck`，服务端回归用 `pnpm --filter @hongyan/api test:flow` 与 `pnpm --filter @hongyan/api test:students`（学生名单导入），页面回归用 `pnpm test:pages`。服务端与页面回归都会创建独立测试库，数据库账号须有建库权限。页面回归和身份选择页可使用已安装的 Chrome 或 Edge。用 Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，再通过 HTTPS 访问。
+类型检查用 `pnpm typecheck`，服务端回归用 `pnpm --filter @hongyan/api test:flow`（活动流程）、`pnpm --filter @hongyan/api test:students`（学生名单导入）和 `pnpm --filter @hongyan/api test:notice`（通知与回执），页面回归用 `pnpm test:pages`。服务端与页面回归都会创建独立测试库，数据库账号须有建库权限。页面回归和身份选择页可使用已安装的 Chrome 或 Edge。用 Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，再通过 HTTPS 访问。
 
 时长工作簿解析测试用 `pnpm --filter @hongyan/api test:hour-workbook`，逐行预览测试用 `pnpm --filter @hongyan/api test:hour-preview`。两者均可在本地离线运行。
 

@@ -1,41 +1,26 @@
-import type { NotificationEvent, Receipt, Notice } from '@hongyan/contracts/types';
+import type {
+  ActivityInput,
+  ActivitySchedule,
+  NotificationEvent,
+  Receipt,
+  Notice,
+} from '@hongyan/contracts/types';
 import type {
   Notice as NoticeRow,
   NoticeReceipt,
   NotificationEvent as EventRow,
 } from '../generated/prisma/client.js';
+import { stable } from '../activities/workflow.js';
+import { slots } from '../activities/schedule.js';
 
-// 会通知到学生的字段。顺序即正文里的展示顺序；activities/review.controller.ts 直接引用这份清单，
-// 避免"哪些字段要通知"和"字段中文名"两处各写一遍，加字段时只改这里。
-export const notifiedFields = [
-  'schedule',
-  'registration_opens_at',
-  'registration_closes_at',
-  'result_expected_at',
-  'campus',
-  'location',
-  'meeting_point',
-  'transport_notes',
-  'capacity',
-  'eligibility_text',
-  'selection_text',
-  'group_join_instructions',
-  'hours_rule_text',
-  'expected_hours',
-  'expected_hours_basis',
-  'hours_import_expected_at',
-] as const;
-
-// 变更字段对学生的可读名称，键必须覆盖上面的 notifiedFields。
-// 嵌套字段只取根键，避免把技术路径暴露给用户。
-const changeFieldLabels: Record<string, string> = {
-  location: '活动地点',
-  meeting_point: '集合地点',
-  campus: '校区',
+const fieldLabels = {
   schedule: '活动时间',
   registration_opens_at: '报名开始时间',
   registration_closes_at: '报名截止时间',
   result_expected_at: '结果公布时间',
+  campus: '校区',
+  location: '活动地点',
+  meeting_point: '集合地点',
   transport_notes: '交通说明',
   capacity: '名额',
   eligibility_text: '报名条件',
@@ -45,11 +30,9 @@ const changeFieldLabels: Record<string, string> = {
   expected_hours: '预计时长',
   expected_hours_basis: '时长计算依据',
   hours_import_expected_at: '时长导入时间',
-};
-
-// 这些字段的具体内容只该给已录取的学生看：报名者与候补也会收到变更通知，
-// 但入群方式属于录取后的信息，正文里只提示"已更新"，详情页再展示。
-const restrictedFields = new Set(['group_join_instructions']);
+} satisfies Partial<Record<keyof ActivityInput, string>>;
+type Field = keyof typeof fieldLabels;
+export const notifiedFields = new Set<string>(Object.keys(fieldLabels));
 
 const stamp = new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai',
@@ -58,85 +41,45 @@ const stamp = new Intl.DateTimeFormat('zh-CN', {
   day: '2-digit',
   hour: '2-digit',
   minute: '2-digit',
-  hour12: false,
+  hourCycle: 'h23',
 });
+const moment = (iso: string) => stamp.format(new Date(iso));
+const kinds = { continuous: '单次', weekly: '每周', custom: '多时段' };
 
-function clip(text: string, limit = 30): string {
-  return text.length > limit ? text.slice(0, limit) + '…' : text;
+function scheduleText(schedule: ActivitySchedule) {
+  const times = slots(schedule).sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at));
+  const first = times[0];
+  return `${moment(first.starts_at)} 至 ${moment(first.ends_at)}（${kinds[schedule.schedule_type]}${times.length > 1 ? `，共 ${times.length} 段` : ''}）`;
 }
 
-function moment(value: unknown): string {
-  const at = typeof value === 'string' ? new Date(value) : null;
-  return at && !Number.isNaN(at.getTime()) ? stamp.format(at) : '未设置';
+function display(field: Field, version: ActivityInput) {
+  const value = version[field];
+  if (value == null || value === '') return '未设置';
+  if (field === 'schedule') return scheduleText(version.schedule);
+  if (field.endsWith('_at') && typeof value === 'string') return moment(value);
+  return String(value);
 }
 
-const scheduleKinds: Record<string, string> = {
-  continuous: '单次',
-  weekly: '每周',
-  custom: '多时段',
-};
-
-type ScheduleLike = { starts_at?: unknown; ends_at?: unknown; schedule_type?: unknown };
-
-function isSchedule(value: object): value is ScheduleLike {
-  return 'starts_at' in value || 'ends_at' in value || 'schedule_type' in value;
-}
-
-// 活动时间可能只填截止时间，也可能按周重复，逐种情况给出一句能读懂的描述。
-function scheduleText(schedule: ScheduleLike): string {
-  const from = schedule.starts_at ? moment(schedule.starts_at) : '';
-  const to = schedule.ends_at ? moment(schedule.ends_at) : '';
-  const range = from && to ? `${from} 至 ${to}` : to ? `截止 ${to}` : from ? `${from} 起` : '未设置';
-  const kind = scheduleKinds[String(schedule.schedule_type)];
-  return kind ? `${range}（${kind}）` : range;
-}
-
-// 把快照里的字段值变成学生能直接读懂的一句话，时间统一按东八区展示。
-function displayValue(value: unknown): string {
-  if (value === null || value === undefined || value === '') return '未设置';
-  if (typeof value === 'number') return String(value);
-  if (typeof value === 'string') return clip(value);
-  if (Array.isArray(value)) return clip(value.map(String).join('、'));
-  if (typeof value === 'object' && isSchedule(value)) return scheduleText(value);
-  return clip(JSON.stringify(value));
-}
-
-function read(source: unknown, key: string): unknown {
-  return source && typeof source === 'object' ? (source as Record<string, unknown>)[key] : undefined;
-}
-
-// 变更说明只讲"哪里从什么变成了什么"，比罗列字段名更能帮学生判断要不要重新看安排。
-function changeLines(fields: string[], before: unknown, after: unknown): string[] {
-  const seen = new Set<string>();
+// 累积尚待确认的变更。字段改回原值时仍展示最近的不同值，学生能看清这次恢复了什么。
+export function changeNoticeBody(versions: ActivityInput[]) {
+  const latest = versions[versions.length - 1];
+  const newestFirst = versions.slice().reverse();
   const lines: string[] = [];
-  for (const field of fields) {
-    const root = field.split('.')[0];
-    if (seen.has(root)) continue;
-    seen.add(root);
-    const label = changeFieldLabels[root] ?? '活动信息';
-    if (restrictedFields.has(root)) {
-      lines.push(`${label}：已更新，录取后可进入活动详情查看`);
-      continue;
+  for (const field of Object.keys(fieldLabels) as Field[]) {
+    const finalValue = stable(latest[field]);
+    const different = (version: ActivityInput) => stable(version[field]) !== finalValue;
+    const before = different(versions[0]) ? versions[0] : newestFirst.find(different);
+    if (!before) continue;
+    const label = fieldLabels[field];
+    if (field === 'group_join_instructions') {
+      lines.push(`· ${label}：已更新，录取后可进入活动详情查看`);
+    } else {
+      const from = display(field, before),
+        to = display(field, latest);
+      lines.push(`· ${label}：${from === to ? '已更新，请查看最新安排' : `${from} → ${to}`}`);
     }
-    lines.push(`${label}：${displayValue(read(before, root))} → ${displayValue(read(after, root))}`);
   }
-  return lines;
-}
-
-// 两份修订快照之间真正变了的字段：只改标题不算变更，字段值真的变了才要提醒。
-// 用来按字段判断"这次变更是否已被后续修订覆盖"，避免整条通知被误作废。
-export function changedFields(before: unknown, after: unknown): string[] {
-  return notifiedFields.filter((field) => !sameValue(read(before, field), read(after, field)));
-}
-
-function sameValue(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-export function changeNoticeBody(fields: string[], before: unknown, after: unknown): string {
-  const lines = changeLines(fields, before, after);
-  const detail = lines.length ? lines.map((line) => `· ${line}`).join('\n') : '· 活动信息已更新';
-  return `以下内容有调整：\n${detail}\n请查看最新安排，并在活动详情页确认。`;
+  return `以下内容有调整：\n${lines.join('\n')}\n请查看最新安排，并在通知详情页确认。`;
 }
 
 export function noticeView(row: NoticeRow, receipt?: NoticeReceipt | null): Notice {
@@ -184,9 +127,7 @@ export function eventView(row: EventRow): NotificationEvent {
     version: row.version,
     event_type: row.event_type,
     ...(row.activity_id ? { activity_id: row.activity_id } : {}),
-    // 契约里 resource_id 是必填字符串；activity_changed 事件总会写入审核 id，
-    // 这里只为将来的无资源事件留一个空值兜底。
-    resource_id: row.resource_id ?? '',
+    resource_id: row.resource_id,
     status: row.status as NotificationEvent['status'],
     attempt_count: row.attempt_count,
     ...(row.last_error ? { last_error: row.last_error } : {}),

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import UiIcon, { type IconName } from '@hongyan/ui/UiIcon.vue';
 import { activityTypes as types, localDateTime as date } from '@hongyan/ui/activityDisplay';
 import {
@@ -9,6 +9,7 @@ import {
   type Activity,
   type Registration,
 } from '@hongyan/contracts';
+import { usePageRead } from '../usePageRead';
 import { registrationLabels } from '../registrations/labels';
 const props = defineProps<{
   activity: Activity;
@@ -66,20 +67,19 @@ const registrationReturn =
   /^\/registrations\/[a-f0-9-]+(?:\?|$)/i.test(registrationPath)
     ? registrationPath
     : undefined;
+const noticePath = window.history.state?.noticeReturn;
+const noticeReturn = typeof noticePath === 'string' && /^\/notices\/[a-f0-9-]+(?:\?|$)/i.test(noticePath)
+  ? noticePath : undefined;
 const contact = ref<HTMLDialogElement>();
-const pendingNotices = ref(0);
-onMounted(async () => {
-  if (!props.showRegistrations) return;
-  try {
-    const { data } = await listMyNotices({
-      query: { activity_id: props.activity.id, unacknowledged_only: true, page_size: 1 },
-      throwOnError: true,
-    });
-    pendingNotices.value = data.data.total;
-  } catch {
-    // 未登录或非学生身份时不提示，详情页其余内容照常展示。
-  }
-});
+const { data: pendingNotices } = usePageRead(
+  () => props.showRegistrations && props.activity.id,
+  async (signal) => props.showRegistrations
+    ? (await listMyNotices({
+        query: { activity_id: props.activity.id, unacknowledged_only: true, page_size: 1 },
+        signal, throwOnError: true,
+      })).data.data.total
+    : 0,
+);
 const phases = {
   open: '报名中',
   not_open: '尚未开放',
@@ -98,17 +98,17 @@ const conditions: [keyof Activity, string, IconName][] = [
   <article class="activity-detail">
     <div class="detail-top">
       <RouterLink
-        :to="registrationReturn || scheduleReturn || { path: '/', query: $route.query }"
+        :to="noticeReturn || registrationReturn || scheduleReturn || { path: '/', query: $route.query }"
         :aria-label="
-          registrationReturn ? '返回报名详情' : scheduleReturn ? '返回日程' : '返回活动列表'
+          noticeReturn ? '返回通知详情' : registrationReturn ? '返回报名详情' : scheduleReturn ? '返回日程' : '返回活动列表'
         "
         ><UiIcon name="ArrowLeft" />活动详情</RouterLink
       ><RouterLink v-if="showRegistrations" to="/registrations">我的报名</RouterLink>
     </div>
-    <p v-if="pendingNotices > 0" class="notice-callout">
+    <p v-if="pendingNotices" class="notice-callout">
       <UiIcon name="Bell" />
       本活动有 {{ pendingNotices }} 条通知待确认，
-      <RouterLink to="/notices?pending=1">去查看并确认</RouterLink>
+      <RouterLink :to="{ path: '/notices', query: { pending: '1', activity_id: activity.id } }">去查看并确认</RouterLink>
     </p>
     <div class="detail-columns">
       <div class="detail-intro">
@@ -450,9 +450,6 @@ dialog button {
     grid-template-columns: 1fr;
   }
 }
-</style>
-
-<style scoped>
 .notice-callout {
   display: flex;
   align-items: center;

@@ -24,11 +24,7 @@ import {
   wrongState,
 } from './workflow.js';
 import { content, validate } from './validation.js';
-import { notifiedFields as notifiedFieldList } from '../notices/notice.js';
-
-// 会通知到学生的字段直接引用通知模块的清单，新增字段只改一处，
-// 也保证"登记了什么变更"和"通知里写了什么"永远对得上。
-const notifiedFields = new Set<string>(notifiedFieldList);
+import { notifiedFields } from '../notices/notice.js';
 
 // Each review references a frozen revision and, for amendments, its previous public revision.
 async function snapshotsForReviews(tx: Tx, reviews: ActivityReview[]) {
@@ -180,26 +176,15 @@ export class ReviewController {
               changed_fields,
             })),
           });
-          // 与业务写入同事务登记待发送事件：键按审核唯一，重复审批不会重复投递。
-          await tx.notificationEvent.createMany({
-            data: [
-              {
-                event_type: 'activity_changed',
-                event_key: `activity_change:${id}`,
-                activity_id: row.id,
-                resource_id: id,
-                source_revision: r.revision,
-                payload: {
-                  review_id: id,
-                  revision: r.revision,
-                  previous_revision: r.previous_revision,
-                  changed_fields,
-                  recipients: recipients.map((p) => p.student_id),
-                  actor_id: req.actor.account_id,
-                },
-              },
-            ],
-            skipDuplicates: true,
+          await tx.notificationEvent.create({
+            data: {
+              event_type: 'activity_changed',
+              event_key: `activity_change:${id}`,
+              activity_id: row.id,
+              resource_id: id,
+              source_revision: r.revision,
+              payload: {},
+            },
           });
         }
       }

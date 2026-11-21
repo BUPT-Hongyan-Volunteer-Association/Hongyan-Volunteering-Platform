@@ -145,29 +145,23 @@ export async function admit(
       status: current.status,
     },
   });
-  // 决定与待发送通知写在同一个事务里：要么都成立，要么都不成立，不会出现"录取了却没通知"。
-  // 队列条目直接沿用决定事件的 ID：重试、追溯、幂等判断都对着同一笔业务事实，
-  // 不会出现"队列里一个新 ID、库里一个旧 ID"对不上的情况。
-  await tx.notificationEvent.createMany({
-    data: [
-      {
-        id: decision.event_id,
-        event_type: 'registration_decided',
-        event_key: `registration_decision:${decision.event_id}`,
-        activity_id: activity.id,
-        resource_id: id,
-        payload: {
-          event_id: decision.event_id,
-          registration_id: id,
-          student_id: current.student_id,
-          registration_version: current.version,
-          status: current.status,
-          decision_reason: current.decision_reason,
-          actor_id: actor,
-        },
+  await tx.notificationEvent.create({
+    data: {
+      id: decision.event_id,
+      event_type: decision.event_type,
+      event_key: `registration_decision:${decision.event_id}`,
+      activity_id: decision.activity_id,
+      resource_id: decision.registration_id,
+      payload: {
+        event_id: decision.event_id,
+        registration_id: decision.registration_id,
+        student_id: decision.student_id,
+        registration_version: decision.registration_version,
+        status: decision.status,
+        decision_reason: current.decision_reason,
+        actor_id: actor,
       },
-    ],
-    skipDuplicates: true,
+    },
   });
   return registrationView(current);
 }

@@ -1,123 +1,116 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
-import {
-  listActivityNotices,
-  listNoticeReceipts,
-  type Notice,
-  type NoticePage,
-  type Receipt,
-  type ReceiptPage,
-} from '@hongyan/contracts';
+import { computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { listActivityNotices, listNoticeReceipts } from '@hongyan/contracts';
 import Pager from '@hongyan/ui/Pager.vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { localDateTime } from '@hongyan/ui/activityDisplay';
+import { pageNumber, usePageRead } from '../usePageRead';
 
-const props = defineProps<{ activityId: string }>();
-const route = useRoute();
+const route = useRoute(),
+  router = useRouter();
+const activityId = computed(() => String(route.params.id));
 const item = computed(() => String(route.params.item || ''));
-const page = computed(() => {
-  const value = Number(route.query.page);
-  return Number.isSafeInteger(value) && value > 0 ? value : 1;
+const page = computed(() => pageNumber(route.query.notice_page));
+const receiptIndex = computed(() => pageNumber(route.query.receipt_page));
+const listQuery = computed(() => ({
+  page: route.query.page,
+  notice_page: route.query.notice_page,
+}));
+const followUp = computed({
+  get: () => (route.query.receipts === 'all' ? '0' : '1'),
+  set: (value) => {
+    void router.push({
+      query: { ...listQuery.value, receipts: value === '0' ? 'all' : undefined },
+    });
+  },
 });
-const followUp = ref('1');
 
-const page1 = ref<NoticePage>();
-const current = ref<Notice>();
-const receipts = ref<ReceiptPage>();
-const totals = ref<{ all: number; pending: number }>();
-const error = ref('');
-const receiptError = ref('');
-let serial = 0;
-let receiptSerial = 0;
-
-async function loadList() {
-  const turn = ++serial;
-  error.value = '';
-  try {
-    const { data } = await listActivityNotices({
-      path: { id: props.activityId },
-      query: { page: page.value, page_size: 10 },
-      throwOnError: true,
-    });
-    if (turn !== serial) return;
-    page1.value = data.data;
-    if (item.value) await loadDetail(item.value);
-    else {
-      current.value = undefined;
-      receipts.value = undefined;
-    }
-  } catch (e) {
-    if (turn === serial) error.value = e instanceof Error ? e.message : '通知读取失败';
-  }
-}
-
-async function loadDetail(id: string) {
-  const notice = page1.value?.items.find((row: Notice) => row.id === id);
-  current.value = notice;
-  await loadReceipts();
-}
-
-async function loadReceipts() {
-  const notice = current.value;
-  if (!notice) return;
-  const turn = ++receiptSerial;
-  receiptError.value = '';
-  receipts.value = undefined;
-  try {
-    const { data } = await listNoticeReceipts({
-      path: { id: notice.id },
-      query: { page: 1, page_size: 100, follow_up_only: followUp.value === '1' || undefined },
-      throwOnError: true,
-    });
-    const counts = await Promise.all([
-      listNoticeReceipts({ path: { id: notice.id }, query: { page_size: 1 }, throwOnError: true }),
+const {
+  data: listing,
+  error,
+  refresh,
+} = usePageRead(
+  () => [activityId.value, item.value, page.value].join('/'),
+  async (signal) =>
+    (
+      await listActivityNotices({
+        path: { id: activityId.value },
+        query: item.value ? { notice_id: item.value } : { page: page.value, page_size: 10 },
+        signal,
+        throwOnError: true,
+      })
+    ).data.data,
+);
+const current = computed(() => (item.value ? listing.value?.items[0] : undefined));
+const {
+  data: receiptPage,
+  loading,
+  error: receiptError,
+  refresh: refreshReceipts,
+} = usePageRead(
+  () => [current.value?.id, receiptIndex.value, followUp.value].join('/'),
+  async (signal) => {
+    const notice = current.value;
+    if (!notice) return;
+    const path = { id: notice.id },
+      pending = followUp.value === '1';
+    const [rows, count] = await Promise.all([
       listNoticeReceipts({
-        path: { id: notice.id },
-        query: { page_size: 1, follow_up_only: true },
+        path,
+        query: { page: receiptIndex.value, page_size: 20, follow_up_only: pending },
+        signal,
         throwOnError: true,
       }),
+      !pending && notice.is_current && notice.requires_ack
+        ? listNoticeReceipts({
+            path,
+            query: { page_size: 1, follow_up_only: true },
+            signal,
+            throwOnError: true,
+          })
+        : undefined,
     ]);
-    if (turn !== receiptSerial) return;
-    receipts.value = data.data;
-    totals.value = {
-      all: counts[0].data.data.total,
-      pending: counts[1].data.data.total,
+    return {
+      rows: rows.data.data,
+      pending: pending ? rows.data.data.total : (count?.data.data.total ?? 0),
     };
-  } catch (e) {
-    if (turn === receiptSerial) receiptError.value = e instanceof Error ? e.message : '回执读取失败';
-  }
+  },
+  () => void refresh(),
+);
+const receipts = computed(() => receiptPage.value?.rows);
+async function reloadReceipts() {
+  await refresh(false);
+  if (current.value) await refreshReceipts();
 }
-
-watch(() => route.fullPath, loadList, { immediate: true });
-watch(followUp, loadReceipts);
 </script>
 
 <template>
+  <h2 v-if="!item">通知与回执</h2>
   <RouterLink
     v-if="item"
     class="back-link"
-    :to="{ path: '/managed/' + activityId + '/notices', query: route.query }"
+    :to="{ path: '/managed/' + activityId + '/notices', query: listQuery }"
   >
     <UiIcon name="ArrowLeft" />返回通知列表
   </RouterLink>
 
-  <p v-if="error" role="alert">{{ error }} <button @click="loadList">重新读取</button></p>
-  <p v-else-if="!page1" role="status">正在读取通知…</p>
+  <p v-if="error" role="alert">{{ error }} <button @click="refresh()">重新读取</button></p>
+  <p v-else-if="!listing" role="status">正在读取通知…</p>
 
   <template v-else-if="!item">
-    <div v-if="page1.items.length" class="entry-list">
+    <div v-if="listing.items.length" class="entry-list">
       <RouterLink
-        v-for="row in page1.items"
+        v-for="row in listing.items"
         :key="row.id"
         :to="{ path: '/managed/' + activityId + '/notices/' + row.id, query: route.query }"
       >
         <div>
           <strong>{{ row.title }}</strong>
           <div class="meta-line">
-            {{ localDateTime(row.published_at) }} 发布 · 第 {{ row.information_version }} 版 ·
-            接收 {{ row.recipient_count ?? 0 }} 人
+            {{ localDateTime(row.published_at) }} 发布 · 第 {{ row.information_version }} 版 · 接收
+            {{ row.recipient_count ?? 0 }} 人
           </div>
         </div>
         <span class="state-chip">{{ row.is_current ? '当前有效' : '已被替代' }}</span>
@@ -126,9 +119,9 @@ watch(followUp, loadReceipts);
     <p v-else>本活动还没有发出过通知。修改活动地点等关键信息并经审核后，系统会通知相关学生。</p>
     <Pager
       :page="page"
-      :size="page1.page_size"
-      :total="page1.total"
-      @change="(n) => $router.push({ query: { ...route.query, page: n } })"
+      :size="listing.page_size"
+      :total="listing.total"
+      @change="(n) => $router.push({ query: { ...listQuery, notice_page: n } })"
     />
   </template>
 
@@ -140,9 +133,9 @@ watch(followUp, loadReceipts);
       </div>
       <p class="notice-body">{{ current.body }}</p>
       <h3>接收人回执</h3>
-      <p v-if="totals" class="receipt-summary">
-        接收 {{ totals.all }} 人 · 待跟进 {{ totals.pending }} 人
-        <template v-if="totals.pending === 0"> · 全部已确认或已移出</template>
+      <p v-if="receiptPage" class="receipt-summary">
+        接收 {{ current.recipient_count }} 人 · 待跟进 {{ receiptPage.pending }} 人
+        <template v-if="receiptPage.pending === 0"> · 全部已确认或已移出</template>
       </p>
       <div class="row-actions">
         <UiSelect
@@ -153,36 +146,53 @@ watch(followUp, loadReceipts);
             { value: '0', label: '全部接收人' },
           ]"
         />
-        <button :disabled="!receipts" @click="loadReceipts">刷新回执</button>
+        <button :disabled="loading" @click="reloadReceipts">刷新回执</button>
       </div>
       <p v-if="receiptError" role="alert">{{ receiptError }}</p>
       <p v-else-if="!receipts" role="status">正在读取回执…</p>
       <template v-else>
-        <table v-if="receipts.items.length" class="receipt-table">
-          <thead>
-            <tr>
-              <th>学号</th>
-              <th>姓名</th>
-              <th>状态</th>
-              <th>已读时间</th>
-              <th>确认时间</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in receipts.items" :key="row.student_id">
-              <td>{{ row.student_no }}</td>
-              <td>{{ row.student_name }}</td>
-              <td>{{ row.status === 'acknowledged' ? '已确认' : row.status === 'read' ? '已读未确认' : '未读' }}</td>
-              <td>{{ row.read_at ? localDateTime(row.read_at) : '—' }}</td>
-              <td>{{ row.acknowledged_at ? localDateTime(row.acknowledged_at) : '—' }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-if="receipts.items.length" class="receipt-scroll">
+          <table class="receipt-table">
+            <thead>
+              <tr>
+                <th>学号</th>
+                <th>姓名</th>
+                <th>状态</th>
+                <th>已读时间</th>
+                <th>确认时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in receipts.items" :key="row.student_id">
+                <td>{{ row.student_no }}</td>
+                <td>{{ row.student_name }}</td>
+                <td>
+                  {{
+                    row.status === 'acknowledged'
+                      ? '已确认'
+                      : row.status === 'read'
+                        ? '已读未确认'
+                        : '未读'
+                  }}
+                </td>
+                <td>{{ row.read_at ? localDateTime(row.read_at) : '—' }}</td>
+                <td>{{ row.acknowledged_at ? localDateTime(row.acknowledged_at) : '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p v-else>
-          {{ followUp === '1' ? '全部接收人都已确认，无需跟进。' : '这条通知没有接收人。' }}
+          {{ followUp === '1' ? '当前没有需要跟进的接收人。' : '这条通知没有接收人。' }}
         </p>
+        <Pager
+          v-if="receiptIndex > 1 || receipts.total > receipts.page_size"
+          :page="receiptIndex"
+          :size="receipts.page_size"
+          :total="receipts.total"
+          @change="(n) => $router.push({ query: { ...route.query, receipt_page: n } })"
+        />
         <p class="hint">
-          「待跟进」只算当前有效、需要确认且尚未确认的学生；已退出活动或被后续版本替代的不计。
+          「待跟进」只算当前有效、需要确认且尚未确认的学生。已退出活动的学生会移出集合和变更通知的待跟进名单。
         </p>
       </template>
       <p v-if="!current.is_current" class="hint">
@@ -194,6 +204,9 @@ watch(followUp, loadReceipts);
 </template>
 
 <style scoped>
+.receipt-scroll {
+  overflow-x: auto;
+}
 .notice-body {
   white-space: pre-line;
   line-height: 1.8;

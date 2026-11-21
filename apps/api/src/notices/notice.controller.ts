@@ -9,14 +9,19 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import type { NoticePage, NotificationEventPage, ReceiptPage } from '@hongyan/contracts/types';
+import type {
+  NoticePage,
+  NotificationEventPage,
+  ReasonAction,
+  ReceiptPage,
+} from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import { Database } from '../database.js';
-import { BusinessError, denied, envelope, invalid, invisible } from '../http.js';
+import { denied, envelope, invalid, invisible } from '../http.js';
 import { managedScope, pagination, staff } from '../activities/read.js';
-import { Workflow, checkVersion, wrongState, type Tx } from '../activities/workflow.js';
-import { studentId, type Actor, type SessionRequest } from '../auth/session.guard.js';
-import { Clock } from './clock.js';
+import { validate } from '../activities/validation.js';
+import { Workflow, checkVersion, wrongState } from '../activities/workflow.js';
+import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { eventView, noticeView, receiptView } from './notice.js';
 
 const noticeKinds = [
@@ -28,14 +33,21 @@ const noticeKinds = [
   'appeal_result',
   'other',
 ];
-const receiptStatuses = ['unread', 'read', 'acknowledged'];
-const eventStatuses = ['pending', 'running', 'delivered', 'failed', 'superseded'];
+const attendanceKinds = ['change', 'gathering'];
+const activeStatuses = ['submitted', 'waitlisted', 'accepted'];
+const snapshot = { isolationLevel: 'RepeatableRead' } as const;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+type Filters = Record<string, string>;
 
-function flag(q: Record<string, string>, name: string) {
-  const value = q[name];
-  if (value === undefined) return false;
-  if (value !== 'true' && value !== 'false') invalid(name, '只能是 true 或 false');
+function uuid(q: Filters, field: string) {
+  if (q[field] !== undefined && !uuidPattern.test(q[field])) invalid(field, '标识格式错误');
+  return q[field];
+}
+
+function flag(q: Filters, field: string) {
+  const value = q[field];
+  if (value !== undefined && value !== 'true' && value !== 'false')
+    invalid(field, '只能是 true 或 false');
   return value === 'true';
 }
 
@@ -44,256 +56,205 @@ export class NoticeController {
   constructor(
     private db: Database,
     private workflow: Workflow,
-    private clock: Clock,
   ) {}
 
   @Get('me/notices')
-  async mine(@Req() req: SessionRequest, @Query() q: Record<string, string>) {
-    const student = studentId(req.actor);
+  async mine(@Req() req: SessionRequest, @Query() q: Filters) {
+    const student_id = studentId(req.actor);
     const { page, page_size, skip } = pagination(q);
-    const unacknowledged = flag(q, 'unacknowledged_only');
+    const pending = flag(q, 'unacknowledged_only');
     if (q.notice_kind && !noticeKinds.includes(q.notice_kind))
       invalid('notice_kind', '通知类别无效');
-    if (q.activity_id && !uuidPattern.test(q.activity_id))
-      invalid('activity_id', '活动标识格式错误');
-    const where: Prisma.NoticeReceiptWhereInput = {
-      student_id: student,
-      ...(unacknowledged && { acknowledged_at: null }),
-      notice: {
-        ...(q.notice_kind && { notice_kind: q.notice_kind }),
-        ...(q.activity_id && { activity_id: q.activity_id }),
-        ...(unacknowledged && { is_current: true, requires_ack: true }),
-      },
-    };
-    const [rows, total] = await Promise.all([
-      this.db.noticeReceipt.findMany({
-        where,
-        include: { notice: true },
-        orderBy: [{ notice: { published_at: 'desc' } }, { notice_id: 'asc' }],
-        skip,
-        take: page_size,
+    const notice: Prisma.NoticeWhereInput = {
+      id: uuid(q, 'notice_id'),
+      activity_id: uuid(q, 'activity_id'),
+      notice_kind: q.notice_kind,
+      ...(pending && {
+        is_current: true,
+        requires_ack: true,
+        OR: [
+          { notice_kind: { notIn: attendanceKinds } },
+          { activity: { registrations: { some: { student_id, status: { in: activeStatuses } } } } },
+        ],
       }),
-      this.db.noticeReceipt.count({ where }),
-    ]);
-    const data: NoticePage = {
-      items: rows.map((row) => noticeView(row.notice, row)),
+    };
+    const where = { student_id, notice, ...(pending && { acknowledged_at: null }) };
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.noticeReceipt.findMany({
+          where,
+          include: { notice: true },
+          skip,
+          take: page_size,
+          orderBy: [{ notice: { published_at: 'desc' } }, { notice_id: 'asc' }],
+        }),
+        this.db.noticeReceipt.count({ where }),
+      ],
+      snapshot,
+    );
+    return envelope<NoticePage>({
+      items: rows.map((r) => noticeView(r.notice, r)),
       page,
       page_size,
       total,
-    };
-    return envelope(data);
+    });
   }
 
   @Post('me/notices/:id/read')
   @HttpCode(200)
-  async read(@Req() req: SessionRequest, @Param('id', new ParseUUIDPipe()) id: string) {
-    const student = studentId(req.actor);
-    return this.workflow.run(req, null, 'self', async (tx) => {
-      const receipt = await this.lock(tx, id, student);
-      if (!receipt) invisible();
-      const row = receipt.read_at
-        ? receipt
-        : await tx.noticeReceipt.update({
-            where: { notice_id_student_id: { notice_id: id, student_id: student } },
-            data: { read_at: this.clock.now() },
-          });
-      return noticeView(receipt.notice, row);
-    });
+  read(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.markReceipt(req, id, false);
   }
 
   @Post('me/notices/:id/ack')
   @HttpCode(200)
-  async acknowledge(@Req() req: SessionRequest, @Param('id', new ParseUUIDPipe()) id: string) {
-    const student = studentId(req.actor);
+  acknowledge(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.markReceipt(req, id, true);
+  }
+
+  private markReceipt(req: SessionRequest, notice_id: string, acknowledge: boolean) {
+    const student_id = studentId(req.actor);
     return this.workflow.run(req, null, 'self', async (tx) => {
-      const receipt = await this.lock(tx, id, student);
+      // 共享锁将确认与通知替代排序。回执行锁保证两次确认保留同一个首次时间。
+      await tx.$queryRaw`SELECT 1 FROM notice n JOIN notice_receipt r ON n.id = r.notice_id
+        WHERE n.id = ${notice_id}::uuid AND r.student_id = ${student_id}::uuid FOR SHARE OF n FOR UPDATE OF r`;
+      const where = { notice_id_student_id: { notice_id, student_id } };
+      const receipt = await tx.noticeReceipt.findUnique({ where, include: { notice: true } });
       if (!receipt) invisible();
-      if (!receipt.notice.requires_ack)
-        throw new BusinessError(409, 'invalid_state', '该通知不需要确认');
-      // 重复确认保留首次确认时间，只补写此前缺失的阅读时间。
-      const now = this.clock.now();
-      const row = receipt.acknowledged_at
-        ? receipt
-        : await tx.noticeReceipt.update({
-            where: { notice_id_student_id: { notice_id: id, student_id: student } },
-            data: { acknowledged_at: now, read_at: receipt.read_at ?? now },
-          });
-      return noticeView(receipt.notice, row);
+      if (acknowledge ? receipt.acknowledged_at : receipt.read_at)
+        return noticeView(receipt.notice, receipt);
+      if (acknowledge && (!receipt.notice.is_current || !receipt.notice.requires_ack)) wrongState();
+      const now = new Date();
+      const updated = await tx.noticeReceipt.update({
+        where,
+        data: { read_at: receipt.read_at ?? now, ...(acknowledge && { acknowledged_at: now }) },
+      });
+      return noticeView(receipt.notice, updated);
     });
   }
 
   @Get('organizer/activities/:id/notices')
   async sent(
     @Req() req: SessionRequest,
-    @Param('id', new ParseUUIDPipe()) id: string,
-    @Query() q: Record<string, string>,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() q: Filters,
   ) {
-    await this.managed(id, req.actor);
+    const scope = managedScope(req.actor);
     const { page, page_size, skip } = pagination(q);
-    const [rows, total] = await Promise.all([
-      this.db.notice.findMany({
-        where: { activity_id: id },
+    const where = { activity_id: id, id: uuid(q, 'notice_id') };
+    return this.db.$transaction(async (tx) => {
+      if (!(await tx.activity.findFirst({ where: { id, ...scope }, select: { id: true } })))
+        invisible();
+      const rows = await tx.notice.findMany({
+        where,
         include: { _count: { select: { receipts: true } } },
         orderBy: [{ published_at: 'desc' }, { id: 'asc' }],
         skip,
         take: page_size,
-      }),
-      this.db.notice.count({ where: { activity_id: id } }),
-    ]);
-    const data: NoticePage = {
-      items: rows.map((row) => ({
-        ...noticeView(row),
-        recipient_count: row._count.receipts,
-      })),
-      page,
-      page_size,
-      total,
-    };
-    return envelope(data);
+      });
+      return envelope<NoticePage>({
+        items: rows.map((r) => ({ ...noticeView(r), recipient_count: r._count.receipts })),
+        total: await tx.notice.count({ where }),
+        page,
+        page_size,
+      });
+    }, snapshot);
   }
 
   @Get('organizer/notices/:id/receipts')
   async receipts(
     @Req() req: SessionRequest,
-    @Param('id', new ParseUUIDPipe()) id: string,
-    @Query() q: Record<string, string>,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() q: Filters,
   ) {
-    const notice = await this.db.notice.findUnique({
-      where: { id },
-      select: { id: true, activity_id: true, is_current: true, requires_ack: true },
-    });
-    if (!notice) invisible();
-    await this.managed(notice.activity_id, req.actor);
+    const scope = managedScope(req.actor);
     const { page, page_size, skip } = pagination(q);
-    const followUp = flag(q, 'follow_up_only');
-    if (q.status && !receiptStatuses.includes(q.status)) invalid('status', '回执状态无效');
-    // 被替代或无需确认的通知没有待跟进名单，直接返回空页。
-    if (followUp && (!notice.is_current || !notice.requires_ack)) {
-      const empty: ReceiptPage = { items: [], page, page_size, total: 0 };
-      return envelope(empty);
-    }
-    const where: Prisma.NoticeReceiptWhereInput = {
-      notice_id: id,
-      ...(q.status === 'unread' && { read_at: null }),
-      ...(q.status === 'read' && { read_at: { not: null }, acknowledged_at: null }),
-      ...(q.status === 'acknowledged' && { acknowledged_at: { not: null } }),
-      ...(followUp && {
-        acknowledged_at: null,
-        student: {
-          registrations: {
-            some: {
-              activity_id: notice.activity_id,
-              status: { in: ['submitted', 'waitlisted', 'accepted'] },
+    const follow = flag(q, 'follow_up_only');
+    if (q.status && !['unread', 'read', 'acknowledged'].includes(q.status))
+      invalid('status', '回执状态无效');
+    return this.db.$transaction(async (tx) => {
+      const notice = await tx.notice.findFirst({ where: { id, activity: scope } });
+      if (!notice) invisible();
+      if (follow && (!notice.is_current || !notice.requires_ack || q.status === 'acknowledged'))
+        return envelope<ReceiptPage>({ items: [], total: 0, page, page_size });
+      const where: Prisma.NoticeReceiptWhereInput = {
+        notice_id: id,
+        ...(q.status === 'unread' && { read_at: null }),
+        ...(q.status === 'read' && { read_at: { not: null }, acknowledged_at: null }),
+        ...(q.status === 'acknowledged' && { acknowledged_at: { not: null } }),
+        ...(follow && { acknowledged_at: null }),
+        ...(follow &&
+          attendanceKinds.includes(notice.notice_kind) && {
+            student: {
+              registrations: {
+                some: { activity_id: notice.activity_id, status: { in: activeStatuses } },
+              },
             },
-          },
-        },
-      }),
-    };
-    const [rows, total] = await Promise.all([
-      this.db.noticeReceipt.findMany({
+          }),
+      };
+      const rows = await tx.noticeReceipt.findMany({
         where,
-        include: { student: { select: { student_no: true, account: { select: { display_name: true } } } } },
-        orderBy: [{ student: { student_no: 'asc' } }],
+        include: {
+          student: { select: { student_no: true, account: { select: { display_name: true } } } },
+        },
+        orderBy: { student: { student_no: 'asc' } },
         skip,
         take: page_size,
-      }),
-      this.db.noticeReceipt.count({ where }),
-    ]);
-    const data: ReceiptPage = {
-      items: rows.map((row) => receiptView(row)),
-      page,
-      page_size,
-      total,
-    };
-    return envelope(data);
+      });
+      return envelope<ReceiptPage>({
+        items: rows.map(receiptView),
+        page,
+        page_size,
+        total: await tx.noticeReceipt.count({ where }),
+      });
+    }, snapshot);
   }
 
   @Get('admin/notification-events')
-  async events(@Req() req: SessionRequest, @Query() q: Record<string, string>) {
+  async events(@Req() req: SessionRequest, @Query() q: Filters) {
     if (!staff(req.actor)) denied();
     const { page, page_size, skip } = pagination(q);
-    if (q.status && !eventStatuses.includes(q.status)) invalid('status', '事件状态无效');
-    if (q.activity_id && !uuidPattern.test(q.activity_id))
-      invalid('activity_id', '活动标识格式错误');
-    const where = {
-      ...(q.status && { status: q.status }),
-      ...(q.activity_id && { activity_id: q.activity_id }),
-    };
-    const [rows, total] = await Promise.all([
-      this.db.notificationEvent.findMany({
-        where,
-        orderBy: [{ created_at: 'desc' }, { id: 'asc' }],
-        skip,
-        take: page_size,
-      }),
-      this.db.notificationEvent.count({ where }),
-    ]);
-    const data: NotificationEventPage = {
-      items: rows.map((row) => eventView(row)),
-      page,
-      page_size,
-      total,
-    };
-    return envelope(data);
+    if (q.status && !['pending', 'running', 'delivered', 'failed', 'superseded'].includes(q.status))
+      invalid('status', '事件状态无效');
+    const where = { status: q.status, activity_id: uuid(q, 'activity_id') };
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.notificationEvent.findMany({
+          where,
+          orderBy: [{ created_at: 'desc' }, { id: 'asc' }],
+          skip,
+          take: page_size,
+        }),
+        this.db.notificationEvent.count({ where }),
+      ],
+      snapshot,
+    );
+    return envelope<NotificationEventPage>({ items: rows.map(eventView), page, page_size, total });
   }
 
   @Post('admin/notification-events/:id/retry')
   @HttpCode(202)
-  async retry(
-    @Req() req: SessionRequest,
-    @Param('id', new ParseUUIDPipe()) id: string,
-    @Body() body: unknown,
-  ) {
-    // 契约要求带版本与原因：版本对不上说明事件已被别的操作改过，原因要留在事件上备查。
-    const { expected_version, reason } = retryInput(body);
+  retry(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.workflow.run(req, null, 'review', async (tx) => {
-      await tx.$executeRaw`SELECT 1 FROM notification_event WHERE id = ${id}::uuid FOR UPDATE`;
+      const { expected_version, reason } = validate<ReasonAction>('reason_action', body);
+      if (!reason.trim()) invalid('reason', '请填写重试原因');
+      await tx.$queryRaw`SELECT 1 FROM notification_event WHERE id = ${id}::uuid FOR UPDATE`;
       const event = await tx.notificationEvent.findUnique({ where: { id } });
       if (!event) invisible();
       checkVersion(event.version, expected_version);
       if (event.status !== 'failed') wrongState();
-      // 复用原事件排队，业务状态不重做；投递时会再次核对公开版本。
       const updated = await tx.notificationEvent.update({
         where: { id },
         data: {
           status: 'pending',
           attempt_count: 0,
-          next_retry_at: this.clock.now(),
+          next_retry_at: null,
           last_error: null,
-          last_retry_reason: reason,
+          last_retry_reason: reason.trim(),
           version: { increment: 1 },
         },
       });
       return eventView(updated);
     });
   }
-
-  // 活动管理范围：负责人只能触达自己管理的活动，审核员与管理员触达全部，其余一律不可见。
-  private async managed(activity_id: string, actor: Actor) {
-    const row = await this.db.activity.findFirst({
-      where: { id: activity_id, ...managedScope(actor) },
-      select: { id: true },
-    });
-    if (!row) invisible();
-  }
-
-  // 只操作本人回执时先锁定该行，避免并发确认写入两个不同的首次时间。
-  private async lock(tx: Tx, notice_id: string, student_id: string) {
-    await tx.$executeRaw`SELECT 1 FROM notice_receipt WHERE notice_id = ${notice_id}::uuid AND student_id = ${student_id}::uuid FOR UPDATE`;
-    return tx.noticeReceipt.findUnique({
-      where: { notice_id_student_id: { notice_id, student_id } },
-      include: { notice: true },
-    });
-  }
-}
-
-function retryInput(body: unknown) {
-  const input = (body ?? {}) as Record<string, unknown>;
-  const expected_version = input.expected_version;
-  if (typeof expected_version !== 'number' || !Number.isSafeInteger(expected_version) || expected_version < 1)
-    invalid('expected_version', '需要当前事件的版本号（正整数）');
-  const value = input.reason;
-  if (typeof value !== 'string' || !value.trim()) invalid('reason', '请填写重试原因');
-  if (value.length > 2000) invalid('reason', '重试原因最多 2000 个字符');
-  return { expected_version, reason: value.trim() };
 }

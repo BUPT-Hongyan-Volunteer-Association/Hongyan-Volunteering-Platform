@@ -276,6 +276,7 @@ model ActivityChangeEvent {
   created_at     DateTime @default(now()) @db.Timestamptz(3)
 
   @@id([review_id, student_id])
+  @@index([activity_id, revision])
   @@map("activity_change_event")
 }
 
@@ -332,7 +333,7 @@ model NotificationEvent {
   event_type      String
   event_key       String    @unique
   activity_id     String?   @db.Uuid
-  resource_id     String?   @db.Uuid
+  resource_id     String    @db.Uuid
   source_revision Int?
   payload         Json
   status          String    @default("pending")
@@ -345,6 +346,7 @@ model NotificationEvent {
   updated_at      DateTime  @updatedAt @db.Timestamptz(3)
 
   @@index([status, next_retry_at])
+  @@index([activity_id, event_type, source_revision])
   @@map("notification_event")
 }
 
