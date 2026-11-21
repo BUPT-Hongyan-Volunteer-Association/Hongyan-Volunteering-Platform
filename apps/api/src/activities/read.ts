@@ -1,6 +1,7 @@
 import type { Activity as View, ActivityInput } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Actor } from '../auth/session.guard.js';
+import { campusName } from '@hongyan/contracts/activity';
 import { slots } from './schedule.js';
 import { denied, invalid } from '../http.js';
 
@@ -70,6 +71,7 @@ export function project(
   const t = now.getTime();
   const item: View = {
     ...input,
+    ...(input.campus && input.campus !== '沙河' && { campus: campusName(input.campus) }),
     id: row.id,
     version: row.version,
     activity_code: row.activity_code,

@@ -7751,10 +7751,10 @@ components:
       - reason
     activity_contacts:
       type: array
-      description: 按负责人填写顺序列出手机号或微信号，每项填写一个号码，可填写多条同类联系方式。
+      description: 按填写顺序保存联系方式，每项为非空文本。
       items:
         type: string
-        pattern: '^(?:1[3-9][0-9]{9}|[A-Za-z][A-Za-z0-9_-]{5,19})$'
+        pattern: '\S'
     activity_input:
       type: object
       properties:
@@ -11889,7 +11889,7 @@ components:
       - accepted_count
       - capacity
     activity_publication_content:
-      description: 送审和批准要求完整内容。入群文字或二维码至少一项，联系方式至少一项，旧活动兼容 phone、wechat 和原联系文本。日期活动的起止日须齐全，校区限沙河、海淀或两个校区，报名时刻按整分钟填写，预计结果公布使用 result_expected_date，旧结果时刻按北京时间取日期，预计导入日使用 hours_import_date。精确安排兼容原联系方式和导入时间。预计小时数与口径必须成对填写。
+      description: 送审和批准要求完整内容。入群文字或二维码至少一项，联系方式至少一项，旧活动兼容 phone、wechat 和原联系文本。日期活动的起止日须齐全，校区限沙河校区、西土城校区或沙河及西土城校区，报名时刻按整分钟填写，预计结果公布使用 result_expected_date，旧结果时刻按北京时间取日期，预计导入日使用 hours_import_date。精确安排兼容原联系方式和导入时间。预计小时数与口径必须成对填写。
       allOf:
       - $ref: '#/components/schemas/activity_input'
       - required: [title, description, beneficiaries, campus, location, meeting_point, transport_notes, registration_opens_at, registration_closes_at, capacity, hours_rule_text, schedule]

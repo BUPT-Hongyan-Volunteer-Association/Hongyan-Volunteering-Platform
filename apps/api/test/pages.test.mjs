@@ -1239,12 +1239,12 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await button(owner, '新增联系方式').click();
       await owner.getByLabel('联系方式 2', {exact:true}).fill('Library_old');
       await button(owner, '新增联系方式').click();
-      await owner.getByLabel('联系方式 3', {exact:true}).fill('Library_team');
+      await owner.getByLabel('联系方式 3', {exact:true}).fill('library@example.org');
       await button(owner, '删除联系方式 2').click();
-      assert.equal(await owner.getByLabel('联系方式 2',{exact:true}).inputValue(), 'Library_team');
+      assert.equal(await owner.getByLabel('联系方式 2',{exact:true}).inputValue(), 'library@example.org');
       await button(owner, '新增联系方式').click();
       await owner.getByLabel('联系方式 3',{exact:true}).fill('13900000000');
-      await pickOption(owner, '校区', '两个校区');
+      await pickOption(owner, '校区', '沙河及西土城校区');
       await owner.getByLabel('群二维码', { exact: true }).setInputFiles({
         name: 'group.png',
         mimeType: 'image/png',
@@ -1316,7 +1316,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       assert.equal(await student.locator('dt').filter({hasText:'结果公布'}).locator('+ dd').innerText(),'2027-05-01');
       await button(student,'联系负责人').click();
       const contactDialog = student.getByRole('dialog',{name:'联系负责人'});
-      for (const text of ['手机号　13800000000','微信号　Library_team','手机号　13900000000'])
+      for (const text of ['13800000000','library@example.org','13900000000'])
         await visible(contactDialog.getByText(text,{exact:true}));
       await button(contactDialog,'关闭').click();
       for (const unit of ['hour', 'day', 'week', 'month']) {

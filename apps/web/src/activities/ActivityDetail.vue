@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import UiIcon, { type IconName } from '@hongyan/ui/UiIcon.vue';
-import { activityTypes as types, activityContacts, contactLabel, resultDate, serviceTime, localDateTime as date } from '@hongyan/ui/activityDisplay';
+import { activityTypes as types, activityContacts, resultDate, serviceTime, localDateTime as date } from '@hongyan/ui/activityDisplay';
 import {
   applyForActivity,
   createCommand,
@@ -245,7 +245,7 @@ const conditions: [keyof Activity, string, IconName][] = [
     </footer>
     <dialog ref="contact" aria-labelledby="contact-title">
       <h2 id="contact-title">联系负责人</h2>
-      <p v-for="(value,index) in activityContacts(activity)" :key="index">{{ contactLabel(value) }}　{{ value }}</p>
+      <p v-for="(value,index) in activityContacts(activity)" :key="index">{{ value }}</p>
       <p v-if="activity.contact_text">{{ activity.contact_text }}</p>
       <form method="dialog"><button autofocus>关闭</button></form>
     </dialog>

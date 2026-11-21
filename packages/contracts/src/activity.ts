@@ -1,8 +1,10 @@
 import type { Activity } from './generated/types.gen.js';
 
-export const campuses = ['沙河校区', '海淀校区', '两个校区'];
+export const campuses = ['沙河校区', '西土城校区', '沙河及西土城校区'];
 export function campusName(value?: string) {
-  if (value === '沙河' || value === '海淀') return value + '校区';
+  if (value === '沙河') return campuses[0];
+  if (['海淀', '海淀校区', '西土城'].includes(value ?? '')) return campuses[1];
+  if (value === '两个校区') return campuses[2];
   return value ?? '';
 }
 export function matchesCampus(value: string | undefined, filter: string) {
@@ -10,7 +12,7 @@ export function matchesCampus(value: string | undefined, filter: string) {
     selected = campusName(filter);
   return (
     name === selected ||
-    (name === '两个校区' && (selected === campuses[0] || selected === campuses[1]))
+    (name === campuses[2] && (selected === campuses[0] || selected === campuses[1]))
   );
 }
 
@@ -24,7 +26,6 @@ export function activityContacts(
     [activity?.phone, activity?.wechat].filter((value): value is string => !!value)
   );
 }
-export const contactLabel = (value: string) => (/^\d/.test(value) ? '手机号' : '微信号');
 export function resultDate(
   activity?: Pick<Activity, 'result_expected_date' | 'result_expected_at'>,
 ) {

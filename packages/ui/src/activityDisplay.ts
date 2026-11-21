@@ -1,5 +1,5 @@
 import { localDate } from '@hongyan/contracts/activity';
-export { localDate, activityContacts, contactLabel, resultDate } from '@hongyan/contracts/activity';
+export { localDate, activityContacts, resultDate } from '@hongyan/contracts/activity';
 import type { Activity } from '@hongyan/contracts';
 
 export const activityTypes = { date_range: '单次活动', continuous: '单次活动', weekly: '每周活动', custom: '多时段活动' };

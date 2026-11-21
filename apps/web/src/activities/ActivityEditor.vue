@@ -213,7 +213,7 @@ function report(e: unknown) {
           );
           return [
             'contacts',
-            '第 ' + filledRows[Number(field.split('.')[1])] + ' 项须为有效手机号或微信号',
+            '第 ' + filledRows[Number(field.split('.')[1])] + ' 项联系方式不能为空',
           ];
         }
         return [field, d.message];
@@ -502,8 +502,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
                   v-model="contactRows[index]"
                   :aria-label="'联系方式 ' + (index + 1)"
                   :aria-invalid="!!fieldErrors.contacts"
-                  :aria-describedby="fieldErrors.contacts ? 'error-contacts' : 'contact-help'"
-                  placeholder="手机号或微信号"
+                  :aria-describedby="fieldErrors.contacts ? 'error-contacts' : undefined"
                   autocomplete="off"
                 />
                 <button
@@ -524,10 +523,6 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
               >
                 新增联系方式
               </button>
-              <small id="contact-help" class="hint"
-                >每项填一个手机号或微信号。手机号为 11 位，微信号为字母开头的 6–20
-                位字母、数字、下划线或短横线。</small
-              >
             </template>
             <template v-else-if="type === 'qr'">
               <img

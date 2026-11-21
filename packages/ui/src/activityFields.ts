@@ -1,4 +1,4 @@
-import { activityTypes, contactLabel, localDate, localDateTime } from './activityDisplay';
+import { activityTypes, localDate, localDateTime } from './activityDisplay';
 import type { IconName } from './UiIcon.vue';
 
 type Field = [
@@ -87,7 +87,6 @@ export function fieldValue(key: string, value: unknown): string {
       .map(([k, v]) => fieldLabel(k) + '　' + fieldValue(k, v))
       .join('\n');
   const part = key.split('.').at(-1) || key;
-  if (key === 'contacts' || key.startsWith('contacts.')) return contactLabel(String(value)) + '　' + value;
   if (part === 'result_expected_at' && typeof value === 'string') return localDate(value);
   if (part.endsWith('_at') && typeof value === 'string' && Number.isFinite(Date.parse(value)))
     return localDateTime(value) + '（北京时间）';

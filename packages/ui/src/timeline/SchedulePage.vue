@@ -128,7 +128,7 @@ const statusOptions = computed(() => [
 ]);
 const campusOptions = computed(() => {
   const values = new Set(page.value?.items.map(r => r.campus).filter((c): c is string => !!c));
-  if (values.has('两个校区')) {
+  if (values.has(campuses[2])) {
     const names = [...values].map(campusName);
     for (const campus of campuses) if (!names.includes(campus)) values.add(campus);
   }

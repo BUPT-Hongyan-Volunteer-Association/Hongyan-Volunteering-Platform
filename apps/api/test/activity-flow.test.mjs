@@ -414,7 +414,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
           missing.details.some((d) => d.field === key),
           key,
         );
-      const invalidContacts = await save({ contacts: ['13800000000','invalid wechat'] });
+      const invalidContacts = await save({ contacts: ['13800000000','  '] });
       assert.equal(invalidContacts.status, 422);
       assert.ok(invalidContacts.details.some(d => d.field === 'contacts.1'));
       assert.equal((await save({result_expected_date:'2027-01-01T09:30:00+08:00'})).status,422);
@@ -435,7 +435,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
         meeting_point: '服务台',
         transport_notes: '步行到馆',
         capacity: 10,
-        contacts: ['13800000000', 'Library_team', '13900000000'],
+        contacts: ['13800000000', '志协办公室 A205', '13900000000'],
         schedule: {
           schedule_type: 'date_range',
           duration_start_date: '2025-05-01',
@@ -455,7 +455,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal((await teacher.raw(image)).headers.get('content-type'), 'image/png');
       assert.equal((await other.raw(image)).status, 404);
       assert.equal((await decide(review.data, 'approved')).status, 200);
-      for (const campus of ['沙河', '海淀校区']) {
+      for (const campus of ['沙河', '西土城校区', '海淀校区']) {
         const items = (
           await student.request(
             '/activities?q=' +
@@ -466,7 +466,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
         ).data.items;
         assert.equal(items.length, 1);
         assert.equal(items[0].group_qr_id, undefined);
-        assert.deepEqual(items[0].contacts, ['13800000000', 'Library_team', '13900000000']);
+        assert.deepEqual(items[0].contacts, ['13800000000', '志协办公室 A205', '13900000000']);
         assert.equal(items[0].result_expected_date, '2025-05-01');
         assert.equal(items[0].result_expected_at, undefined);
       }
