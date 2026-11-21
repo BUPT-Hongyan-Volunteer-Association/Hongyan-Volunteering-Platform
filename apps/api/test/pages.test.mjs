@@ -235,7 +235,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
     });
 
     await t.test('老师从后台导入学生名单并在学生档案中查到新学生', async () => {
-      await checkStudentImportPages(teacher, admin, { fits });
+      await checkStudentImportPages(teacher, admin, { fits, db });
     });
 
     await t.test('时间轴保留筛选、分钟比例和当前线，并按角色定位时段', async () => {

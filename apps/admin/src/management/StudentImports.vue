@@ -4,16 +4,18 @@ import { useRoute, useRouter } from 'vue-router';
 import Pager from '@hongyan/ui/Pager.vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import {
+  ApiError,
   commitStudentImport,
   createCommand,
   getStudentImport,
   getStudentImportRows,
   retryStudentImportValidation,
   uploadStudentImport,
+  type FieldError,
   type StudentImport,
   type StudentImportRow,
 } from '@hongyan/contracts';
-import templateUrl from '../../../../packages/contracts/templates/学生建档导入模板_v1.4.xlsx?url';
+import templateUrl from '../../../../packages/contracts/templates/学生建档导入模板_v1.5.xlsx?url';
 
 const route = useRoute(),
   router = useRouter(),
@@ -43,7 +45,10 @@ const loading = ref(false);
 const busy = ref(false);
 const error = ref('');
 const notice = ref('');
+const conflictMessage = ref('');
+const conflictRows = ref<FieldError[]>([]);
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
+let loadSerial = 0;
 let disposed = false;
 onUnmounted(() => {
   disposed = true;
@@ -52,7 +57,14 @@ onUnmounted(() => {
 
 const batchId = computed(() => (route.params.item ? String(route.params.item) : ''));
 const statusText = computed(() => (batch.value ? statusLabels[batch.value.status] : ''));
-const canCommit = computed(() => batch.value?.status === 'ready' && batch.value.error_count === 0);
+const canCommit = computed(
+  () =>
+    !!batch.value &&
+    batch.value.id === batchId.value &&
+    batch.value.status === 'ready' &&
+    batch.value.error_count === 0 &&
+    !loading.value,
+);
 const rowPages = computed(() => Math.max(1, Math.ceil(rowTotal.value / rowSize)));
 
 function message(reason: unknown) {
@@ -72,7 +84,10 @@ function display(
   if (!value) return '—';
   return field === 'grade' ? value + '级' : value;
 }
-async function loadRows(page = rowPage.value) {
+function stillCurrent(id: string, serial: number) {
+  return !disposed && serial === loadSerial && String(route.params.item ?? '') === id;
+}
+async function loadRows(page = rowPage.value, serial = loadSerial) {
   const current = batch.value;
   if (!current) return;
   const result = (
@@ -82,25 +97,33 @@ async function loadRows(page = rowPage.value) {
       throwOnError: true,
     })
   ).data.data;
-  if (disposed) return;
+  if (!stillCurrent(current.id, serial)) return;
   rowPage.value = result.page;
   rowTotal.value = result.total;
   rows.value = result.items;
 }
 async function loadBatch(id: string, { quiet = false } = {}) {
-  if (!quiet) loading.value = true;
+  const serial = ++loadSerial;
+  if (!quiet) {
+    loading.value = true;
+    batch.value = undefined;
+    rows.value = [];
+    rowTotal.value = 0;
+    rowPage.value = 1;
+  }
   error.value = '';
   try {
     const data = (await getStudentImport({ path: { id }, throwOnError: true })).data.data;
-    if (disposed) return;
+    if (!stillCurrent(id, serial)) return;
     batch.value = data;
-    await loadRows(1);
+    await loadRows(1, serial);
+    if (!stillCurrent(id, serial)) return;
     if (data.status === 'validating') schedulePoll();
     else stopPolling();
   } catch (reason) {
-    if (!disposed) error.value = message(reason);
+    if (stillCurrent(id, serial)) error.value = message(reason);
   } finally {
-    if (!disposed) loading.value = false;
+    if (stillCurrent(id, serial)) loading.value = false;
   }
 }
 function schedulePoll() {
@@ -142,6 +165,8 @@ async function uploadFile(source: File) {
   if (busy.value) return;
   busy.value = true;
   error.value = '';
+  conflictMessage.value = '';
+  conflictRows.value = [];
   notice.value = '';
   try {
     const hash = Array.from(
@@ -168,8 +193,15 @@ async function uploadFile(source: File) {
 async function commit() {
   const current = batch.value;
   if (!current || !canCommit.value || busy.value) return;
+  if (current.id !== String(route.params.item ?? '')) {
+    error.value = '批次已切换，请重新确认当前批次。';
+    void loadBatch(String(route.params.item ?? ''));
+    return;
+  }
   busy.value = true;
   error.value = '';
+  conflictMessage.value = '';
+  conflictRows.value = [];
   const body = { expected_version: current.version, source_hash: current.source_hash };
   try {
     const result = await commitStudentImport({
@@ -179,13 +211,20 @@ async function commit() {
       throwOnError: true,
     });
     command.confirmed();
-    if (disposed) return;
+    if (disposed || current.id !== String(route.params.item ?? '')) return;
     batch.value = result.data.data;
     notice.value = '已确认建档，可在学生档案中查到新学生。';
     await loadRows(1);
   } catch (reason) {
     if (!disposed) {
-      error.value = message(reason);
+      const apiError = reason instanceof ApiError ? reason : undefined;
+      const details = apiError?.status === 409 ? (apiError.body?.details ?? []) : [];
+      if (details.length) {
+        conflictMessage.value = apiError?.message ?? message(reason);
+        conflictRows.value = details;
+      } else {
+        error.value = message(reason);
+      }
       void loadBatch(current.id, { quiet: true });
     }
   } finally {
@@ -195,6 +234,7 @@ async function commit() {
 async function retry() {
   const current = batch.value;
   if (!current || busy.value) return;
+  if (current.id !== String(route.params.item ?? '')) return;
   busy.value = true;
   error.value = '';
   const body = { expected_version: current.version };
@@ -220,15 +260,17 @@ watch(
   () => route.params.item,
   (value) => {
     stopPolling();
-    if (value) {
-      void loadBatch(String(value));
-      return;
-    }
+    loadSerial++;
     batch.value = undefined;
     rows.value = [];
     rowTotal.value = 0;
     rowPage.value = 1;
+    error.value = '';
     notice.value = '';
+    conflictMessage.value = '';
+    conflictRows.value = [];
+    loading.value = false;
+    if (value) void loadBatch(String(value));
   },
   { immediate: true },
 );
@@ -243,7 +285,7 @@ watch(
         neutral: batch.status === 'validating',
       }">{{ statusText }}</span>
     </div>
-    <a class="button" :href="templateUrl" download="学生建档导入模板_v1.4.xlsx">下载空白模板</a>
+    <a class="button" :href="templateUrl" download="学生建档导入模板_v1.5.xlsx">下载空白模板</a>
   </div>
   <input
     ref="picker"
@@ -272,6 +314,15 @@ watch(
   </div>
   <p v-if="error" role="alert">{{ error }} <button type="button" @click="batchId && loadBatch(batchId)">重试读取</button></p>
   <p v-if="notice" role="status" class="notice">{{ notice }}</p>
+  <section v-if="conflictMessage" class="conflict-panel" role="alert">
+    <p><strong>确认未完成：</strong>{{ conflictMessage }}</p>
+    <ul>
+      <li v-for="(item, index) in conflictRows" :key="index">
+        <template v-if="item.row">原表第 {{ item.row }} 行：</template>{{ item.message }}
+      </li>
+    </ul>
+    <p>请按原表行号修正文件后重新上传，整批未写入。</p>
+  </section>
   <p v-if="loading && !batch" role="status">正在读取批次…</p>
   <section v-else-if="batch" class="batch-summary">
     <div class="page-title">
@@ -286,7 +337,7 @@ watch(
     </dl>
     <p v-if="batch.error_message" role="alert">{{ batch.error_message }}</p>
     <div v-if="canCommit" class="page-actions">
-      <button class="primary" type="button" :disabled="busy" @click="commit">
+      <button class="primary" type="button" :disabled="busy || loading" @click="commit">
         {{ busy ? '正在确认…' : '确认建档' }}
       </button>
     </div>
@@ -441,5 +492,19 @@ watch(
 }
 .row-errors p {
   margin: 0;
+}
+.conflict-panel {
+  margin: 16px 0;
+  padding: 12px 16px;
+  background: #fff4f0;
+  color: var(--danger);
+  border-radius: var(--radius);
+}
+.conflict-panel p {
+  margin: 4px 0;
+}
+.conflict-panel ul {
+  margin: 8px 0;
+  padding-left: 20px;
 }
 </style>

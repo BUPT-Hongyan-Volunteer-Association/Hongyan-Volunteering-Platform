@@ -3,10 +3,10 @@ import { buildWorkbook, rosterSheet } from './xlsx-fixture.mjs';
 
 const mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const workbook = (rows) =>
-  buildWorkbook({ sheets: [rosterSheet(rows)], prefix: true, sharedStrings: true });
+  buildWorkbook({ sheets: [rosterSheet(rows, { includeCohort: false })], prefix: true, sharedStrings: true });
 
 /** 老师从后台真实上传名单、按原表行定位错误、修正后确认，并在学生档案中查到新学生。 */
-export async function checkStudentImportPages(page, admin, { fits }) {
+export async function checkStudentImportPages(page, admin, { fits, db }) {
   const button = (name) => page.getByRole('button', { name, exact: true });
   const chip = (text) =>
     page.locator('.page-heading .state-chip').filter({ hasText: text }).first();
@@ -51,6 +51,76 @@ export async function checkStudentImportPages(page, admin, { fits }) {
   await page.getByText('已确认建档，可在学生档案中查到新学生。').waitFor();
   await fits(page);
 
+  // 切换批次：旧批次详情响应较慢时不得覆盖新批次，确认必须作用于当前批次
+  const uploadReady = async (name, studentNo) => {
+    const before = new URL(page.url()).pathname;
+    await page.getByLabel('名单文件', { exact: true }).setInputFiles({
+      name,
+      buffer: workbook([{ number: 2, values: [studentNo, '切换学生' + studentNo.slice(-2), '', '2026', ''] }]),
+      mimeType,
+    });
+    await page.waitForURL(
+      (url) => url.pathname !== before && /^\/manage\/imports\/[0-9a-f-]{36}$/.test(url.pathname),
+    );
+    await chip('待确认').waitFor();
+    return new URL(page.url()).pathname.split('/').pop();
+  };
+  const firstId = await uploadReady('切换甲.xlsx', '0000001202');
+  const secondId = await uploadReady('切换乙.xlsx', '0000001203');
+  let delayedDetail = false;
+  await page.route('**/admin/student-imports/' + firstId, async (route) => {
+    delayedDetail = true;
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    await route.continue();
+  }, { times: 1 });
+  const navigateInApp = async (path) => {
+    await page.evaluate((target) => {
+      window.history.pushState({}, '', target);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, path);
+  };
+  await navigateInApp('/manage/imports/' + firstId);
+  await page.waitForTimeout(120);
+  await navigateInApp('/manage/imports/' + secondId);
+  await page.waitForURL('**/manage/imports/' + secondId);
+  await chip('待确认').waitFor();
+  await page.waitForTimeout(1600);
+  assert.ok(delayedDetail);
+  const batchHeading = page.locator('.batch-summary h2');
+  await batchHeading.waitFor();
+  assert.match(await batchHeading.innerText(), new RegExp(secondId.slice(0, 8)));
+  await button('确认建档').click();
+  await chip('已建档').waitFor();
+  assert.equal(await db.account.count({ where: { username: '0000001202' } }), 0);
+  assert.equal(await db.account.count({ where: { username: '0000001203' } }), 1);
+
+  // 确认冲突：校验后另一老师先建档，当前批次确认返回 409 并保留原表行号
+  const conflictNo = '0000001204';
+  const beforeConflict = new URL(page.url()).pathname;
+  await page.getByLabel('名单文件', { exact: true }).setInputFiles({
+    name: '资料冲突.xlsx',
+    buffer: workbook([{ number: 2, values: [conflictNo, '页面冲突甲', '', '2026', ''] }]),
+    mimeType,
+  });
+  await page.waitForURL((url) => url.pathname !== beforeConflict);
+  await chip('待确认').waitFor();
+  await db.account.create({
+    data: {
+      username: conflictNo,
+      display_name: '另一老师版本',
+      password_hash: 'fixture',
+      student: { create: { student_no: conflictNo } },
+    },
+  });
+  await button('确认建档').click();
+  const conflict = page.locator('.conflict-panel');
+  await conflict.waitFor();
+  assert.match(await conflict.innerText(), /原表第 2 行/);
+  assert.match(await conflict.innerText(), /不一致/);
+  await page.waitForTimeout(600);
+  assert.ok(await conflict.isVisible());
+  assert.equal(await chip('待确认').count(), 1);
+
   // 学生档案列表读取真实数据
   await page.getByRole('navigation', { name: '后台导航' }).getByRole('link', { name: '学生档案', exact: true }).click();
   await page.waitForURL('**/manage/students');
@@ -60,7 +130,6 @@ export async function checkStudentImportPages(page, admin, { fits }) {
   const studentRow = page.getByRole('row', { name: /0000001201/ });
   await studentRow.waitFor();
   assert.match(await studentRow.innerText(), /页面导入学生/);
-  assert.match(await studentRow.innerText(), /本科生/);
   assert.match(await studentRow.innerText(), /2026级/);
   assert.match(await studentRow.innerText(), /启用/);
   await fits(page);
