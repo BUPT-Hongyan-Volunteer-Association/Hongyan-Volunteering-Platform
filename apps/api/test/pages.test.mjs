@@ -371,9 +371,17 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await owner.goto(web + '/managed/' + first.id + '/edit');
       await visible(button(owner, '保存草稿'));
       assert.ok(await button(owner, '保存草稿').isDisabled());
+      const oldContent = (await db.activityRevision.findFirstOrThrow({
+        where: { activity_id: first.id }, orderBy: { revision:'desc' },
+      })).content;
       await owner.getByLabel('活动地点', { exact: true }).fill('活动室 B');
       await button(owner, '保存草稿').click();
       await visible(owner.getByText('草稿已保存', { exact: true }));
+      const savedContent = (await db.activityRevision.findFirstOrThrow({
+        where: { activity_id:first.id }, orderBy: { revision:'desc' },
+      })).content;
+      for (const key of ['schedule','registration_opens_at','registration_closes_at','result_expected_at','hours_import_expected_at'])
+        assert.deepEqual(savedContent[key], oldContent[key]);
       await button(owner, '提交审核').click();
       await visible(owner.getByText('已送审，内容已冻结'));
       await student.reload();
@@ -1203,6 +1211,127 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(student.getByText('单次活动', { exact: true }));
       assert.equal(await student.getByText('每周参加报名在活动群内完成。').count(), 0);
     });
+    await t.test('新建按日活动：标题草稿、补全送审、分钟滚轮和管理日程', async () => {
+      await owner.setViewportSize({ width: 1440, height: 900 });
+      await owner.goto(web + '/managed/new');
+      await owner.getByLabel('活动标题', { exact: true }).fill('跨校区图书整理');
+      await button(owner, '保存草稿').click();
+      await owner.waitForURL(/managed\/[\w-]+\/edit/);
+      const editUrl = owner.url();
+      await owner.goto(web + '/managed');
+      await visible(owner.getByText('日期待定', { exact: true }));
+      await owner.goto(editUrl);
+      await button(owner, '提交审核').click();
+      await visible(owner.getByRole('list', { name: '待修正字段' }));
+      await owner.waitForFunction(() => document.activeElement?.id === 'activity-beneficiaries');
+      for (const [label, value] of Object.entries({
+        服务对象: '全校师生',
+        服务内容: '整理书架',
+        活动地点: '图书馆',
+        集合地点: '一层服务台',
+        交通说明: '校内步行',
+        计划名额: '10',
+        '联系方式 1': '13800000000',
+        入群方式: '群号 123456',
+        时长认定说明: '以实际服务为准',
+      }))
+        await owner.getByLabel(label, { exact: true }).fill(value);
+      await button(owner, '新增联系方式').click();
+      await owner.getByLabel('联系方式 2', {exact:true}).fill('Library_old');
+      await button(owner, '新增联系方式').click();
+      await owner.getByLabel('联系方式 3', {exact:true}).fill('Library_team');
+      await button(owner, '删除联系方式 2').click();
+      assert.equal(await owner.getByLabel('联系方式 2',{exact:true}).inputValue(), 'Library_team');
+      await button(owner, '新增联系方式').click();
+      await owner.getByLabel('联系方式 3',{exact:true}).fill('13900000000');
+      await pickOption(owner, '校区', '两个校区');
+      await owner.getByLabel('群二维码', { exact: true }).setInputFiles({
+        name: 'group.png',
+        mimeType: 'image/png',
+        buffer: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6kSAAAAAASUVORK5CYII=',
+          'base64',
+        ),
+      });
+      await visible(owner.getByAltText('入群二维码预览'));
+      await owner.waitForFunction(() => document.querySelector('.group-qr')?.naturalWidth > 0);
+      async function chooseDate(label, day) {
+        await button(owner, label).click();
+        const panel = owner.locator('.schedule-date-menu:visible');
+        await panel.getByLabel('输入日期').fill(day);
+        await button(panel, '确定').click();
+        await panel.waitFor({ state: 'hidden' });
+      }
+      for (const [label, day] of [
+        ['活动开始日期', '2027-05-01'],
+        ['活动结束日期', '2027-05-02'],
+        ['预计时长导入日期', '2027-05-06'],
+        ['报名开放日期', '2027-04-30'],
+        ['报名截止日期', '2027-05-01'],
+        ['预计结果公布日期', '2027-05-01'],
+      ])
+        await chooseDate(label, day);
+      assert.equal(await owner.locator('.field.invalid').count(), 0);
+      assert.equal(await owner.locator('.field').filter({hasText:'预计结果公布日期'}).getByRole('combobox').count(), 0);
+      const time = owner.getByRole('combobox', { name: '报名截止时分' });
+      await time.click();
+      const clock = owner.locator('.activity-clock:visible');
+      await visible(clock);
+      assert.equal(await clock.locator('.el-time-spinner__list').count(), 2);
+      const minutes = clock.locator('.el-time-spinner__list').nth(1);
+      await minutes.locator('.is-active').hover();
+      await owner.mouse.wheel(0, 64);
+      await owner.waitForFunction(() => {
+        const list = document.querySelectorAll('.activity-clock .el-time-spinner__list')[1];
+        return !!list && list.querySelector('.is-active')?.textContent?.trim() !== '00';
+      });
+      await time.press('ArrowRight');
+      await time.press('ArrowDown');
+      await clock.getByText('确定', { exact: true }).click();
+      const chosen = await time.inputValue();
+      assert.match(chosen, /^\d{2}:\d{2}$/);
+      assert.notEqual(chosen, '09:00');
+      await owner.setViewportSize({ width: 390, height: 844 });
+      await time.click();
+      await time.press('ArrowDown');
+      await clock.getByText('取消', { exact: true }).click();
+      assert.equal(await time.inputValue(), chosen);
+      await fits(owner);
+      await button(owner, '保存草稿').click();
+      await visible(owner.getByText('草稿已保存', { exact: true }));
+      await owner.reload();
+      assert.equal(await owner.getByLabel('联系方式 3',{exact:true}).inputValue(),'13900000000');
+      assert.match(await button(owner,'预计结果公布日期').innerText(),/2027-05-01/);
+      assert.equal(await time.inputValue(), chosen);
+      await owner.waitForFunction(() => document.querySelector('.group-qr')?.naturalWidth > 0);
+      await button(owner, '提交审核').click();
+      await visible(owner.getByText('已送审，内容已冻结', { exact: true }));
+      const activityId = new URL(editUrl).pathname.split('/')[2];
+      const review = await db.activityReview.findFirstOrThrow({where:{activity_id:activityId,status:'pending'}});
+      await teacher.goto(admin + '/reviews/' + review.id);
+      await button(teacher,'批准发布').click();
+      await visible(teacher.getByText('已批准发布',{exact:true}));
+      await student.goto(web + '/activities/' + activityId);
+      await student.getByText('录取、时长与报名时间',{exact:true}).click();
+      assert.equal(await student.locator('dt').filter({hasText:'结果公布'}).locator('+ dd').innerText(),'2027-05-01');
+      await button(student,'联系负责人').click();
+      const contactDialog = student.getByRole('dialog',{name:'联系负责人'});
+      for (const text of ['手机号　13800000000','微信号　Library_team','手机号　13900000000'])
+        await visible(contactDialog.getByText(text,{exact:true}));
+      await button(contactDialog,'关闭').click();
+      for (const unit of ['hour', 'day', 'week', 'month']) {
+        await owner.goto(web + '/managed-schedule?date=2026-11-18&view=chart&unit=' + unit);
+        const row = owner.locator('.chart tbody tr').filter({ hasText: '校园服务甲' });
+        await visible(row);
+        assert.equal(
+          await owner.locator('.now-line, .chart thead path[fill="#003399"]').count(),
+          0,
+        );
+        await row.getByRole('button').first().click();
+        await visible(owner.getByRole('complementary', { name: '时段详情' }));
+      }
+    });
+
     await t.test('负责人上传并逐行核对时长、下载报告、修正重传和原批重试', async () => {
       await checkHourPages(owner, web, db, first.id, { pickOption, fits });
     });

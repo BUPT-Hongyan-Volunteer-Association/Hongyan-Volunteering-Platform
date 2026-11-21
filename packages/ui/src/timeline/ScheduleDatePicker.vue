@@ -7,7 +7,7 @@ import UiIcon from '../UiIcon.vue';
 import { dropdownPosition } from '../dropdownPosition';
 import { validDate } from './window';
 
-const props = defineProps<{ date: string; period: string; highlighted?: boolean }>();
+const props = defineProps<{ date: string; period: string; highlighted?: boolean; label?: string }>();
 const emit = defineEmits<{ select: [date: string] }>();
 const expanded = ref(false);
 const trigger = ref<HTMLButtonElement>();
@@ -90,8 +90,8 @@ function select(date: string) {
         type="button"
         class="date-picker"
         :class="{ highlighted }"
-        :aria-label="'查看日期，' + period"
-        title="查看日期"
+        :aria-label="label || ('查看日期，' + period)"
+        :title="label || '查看日期'"
         :aria-expanded="expanded"
         @click="toggle"
         @keydown.esc="escape"

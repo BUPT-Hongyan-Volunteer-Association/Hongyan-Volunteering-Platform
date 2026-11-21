@@ -18,6 +18,8 @@ import { AccountController } from './auth/account.controller.js';
 import { SessionGuard, type SessionRequest } from './auth/session.guard.js';
 import { BusinessError } from './http.js';
 import { ReviewController } from './activities/review.controller.js';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { GroupImageController } from './activities/group-image.js';
 import { DraftController } from './activities/draft.controller.js';
 import { Workflow } from './activities/workflow.js';
 import { Database } from './database.js';
@@ -80,6 +82,7 @@ class HttpErrorFilter implements ExceptionFilter {
     ManagedController,
     PublicController,
     DraftController,
+    GroupImageController,
     ReviewController,
     RegistrationController,
     NoticeController,
@@ -101,11 +104,18 @@ class HttpErrorFilter implements ExceptionFilter {
 class AppModule {}
 
 export async function createApp() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.use((req: SessionRequest, _res: Response, next: NextFunction) => {
     req.receivedAt = new Date();
     next();
   });
+  app.useBodyParser('json', {
+    limit: '7mb',
+    type: req => !!req.headers['content-type']?.startsWith('application/json') &&
+      /^(POST|PATCH)$/.test(req.method ?? '') &&
+      /^\/api\/v1\/organizer\/activities(?:\/[a-f0-9-]+)?\/?(?:\?|$)/i.test(req.url ?? ''),
+  });
+  app.useBodyParser('json', { limit: '100kb' });
   app.useGlobalGuards(app.get(SessionGuard));
   app.setGlobalPrefix('api/v1');
   app.useGlobalFilters(new HttpErrorFilter());

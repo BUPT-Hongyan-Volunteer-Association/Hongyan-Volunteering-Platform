@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import type { ActivityInput } from '@hongyan/contracts/types';
+import { activityContacts, resultDate } from '@hongyan/contracts/activity';
 import { Injectable } from '@nestjs/common';
 import type { Prisma, ActivityRevision, ActivityReview } from '../generated/prisma/client.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
@@ -45,6 +47,11 @@ export function snapshot(r: ActivityRevision) {
     ...(r.approved_at && { approved_at: r.approved_at.toISOString() }),
   };
 }
+/** 比较业务值，旧快照的存储格式变化本身不属于活动变更。 */
+export function comparableContent(input: ActivityInput) {
+  const {phone, wechat, result_expected_at, ...rest} = input;
+  return { ...rest, contacts: activityContacts(input), result_expected_date: resultDate(input) };
+}
 function differences(
   before: unknown,
   after: unknown,
@@ -88,7 +95,10 @@ export function reviewResponse(
     ...(r.reviewed_at && { reviewed_at: r.reviewed_at.toISOString() }),
     snapshot: snapshot(current),
     ...(before && { previous_published_snapshot: snapshot(before) }),
-    changes: differences(before?.content, current.content),
+    changes: differences(
+      before && comparableContent(before.content as unknown as ActivityInput),
+      comparableContent(current.content as unknown as ActivityInput),
+    ),
   };
 }
 export function detail(row: LoadedActivity) {

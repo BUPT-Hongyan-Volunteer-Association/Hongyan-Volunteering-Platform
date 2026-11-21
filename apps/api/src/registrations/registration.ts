@@ -1,5 +1,5 @@
 import type {
-  ActivityInput,
+  ActivityPublicationContent,
   Registration as View,
   RegistrationDecision,
   RegistrationInput,
@@ -12,7 +12,7 @@ import { BusinessError, invalid, invisible } from '../http.js';
 
 function approvedContent(activity: LoadedActivity) {
   const revision = publishedRevision(activity);
-  return revision?.content as unknown as ActivityInput | undefined;
+  return revision?.content as unknown as ActivityPublicationContent | undefined;
 }
 
 export function registrationView(row: Registration): View {
@@ -124,7 +124,10 @@ export async function admit(
   if (!student?.active) throw new BusinessError(409, 'invalid_state', '学生已停用，无法录取');
   const approved = approvedContent(activity);
   const now = new Date();
-  if (!approved || !slots(approved.schedule).some((s) => Date.parse(s.starts_at) > now.getTime()))
+  if (approved?.schedule?.schedule_type === 'date_range') {
+    if (!slots(approved.schedule).some(s => now.getTime() < Date.parse(s.ends_at)))
+      throw new BusinessError(409, 'invalid_state', '活动已结束，无法录取');
+  } else if (!approved || !slots(approved.schedule).some((s) => Date.parse(s.starts_at) > now.getTime()))
     throw new BusinessError(409, 'invalid_state', '所有获批时段均已开始，无法录取');
   const occupied = await tx.registration.count({
     where: { activity_id: activity.id, status: 'accepted' },

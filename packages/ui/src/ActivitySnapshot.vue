@@ -8,7 +8,8 @@ defineProps<{ content: ActivitySnapshotContent }>();
     <template v-for="(value, key) in content" :key="key">
       <template v-if="value !== undefined && value !== null && value !== ''">
         <dt>{{ fieldLabel(String(key)) }}</dt>
-        <dd>{{ fieldValue(String(key), value) }}</dd>
+        <dd v-if="key === 'group_qr_id'"><img width="150" :src="'/api/v1/activity-group-images/' + value" alt="此版本的入群二维码" /></dd>
+        <dd v-else>{{ fieldValue(String(key), value) }}</dd>
       </template>
     </template>
   </dl>

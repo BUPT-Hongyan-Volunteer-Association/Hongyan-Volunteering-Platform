@@ -19,6 +19,7 @@
     "./ActivitySnapshot.vue": "./src/ActivitySnapshot.vue",
     "./timeWindow": "./src/timeline/window.ts",
     "./UiSelect.vue": "./src/UiSelect.vue",
+    "./ActivityDateField.vue": "./src/ActivityDateField.vue",
     "./ServiceCalendar.vue": "./src/ServiceCalendar.vue",
     "./RecordSummaryList.vue": "./src/RecordSummaryList.vue",
     "./RecordTable.vue": "./src/RecordTable.vue",

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { campuses, campusName, matchesCampus } from '@hongyan/contracts/activity';
 import UiSelect from '../UiSelect.vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -71,7 +72,7 @@ const rows = computed(() =>
       (r) =>
         (!route.query.q ||
           [r.title, r.activity_code].some((v) => v.includes(String(route.query.q)))) &&
-        (!route.query.campus || route.query.campus === r.campus) &&
+        (!route.query.campus || matchesCampus(r.campus, String(route.query.campus))) &&
         (!route.query.phase || route.query.phase === r.registration_phase) &&
         (!route.query.status || route.query.status === r.status) &&
         (!route.query.ongoing || r.is_ongoing) &&
@@ -125,10 +126,14 @@ const statusOptions = computed(() => [
   { value: '', label: '所有状态' },
   ...availableStates.value.map(([value, label]) => ({ value, label })),
 ]);
-const campusOptions = computed(() => [
-  { value: '', label: '所有校区' },
-  ...new Set(page.value?.items.map((r) => r.campus).filter((c): c is string => !!c)),
-]);
+const campusOptions = computed(() => {
+  const values = new Set(page.value?.items.map(r => r.campus).filter((c): c is string => !!c));
+  if (values.has('两个校区')) {
+    const names = [...values].map(campusName);
+    for (const campus of campuses) if (!names.includes(campus)) values.add(campus);
+  }
+  return [{value:'', label:'所有校区'}, ...values];
+});
 const ownerOptions = computed(() => [
   { value: '', label: '所有负责人' },
   ...new Set(page.value?.items.map((r) => r.owner_display_name)),
@@ -397,7 +402,7 @@ onUnmounted(() => {
               :unit="unit"
               :start="start"
               :end="end"
-              :now="scope === 'all' ? undefined : Date.parse(page!.state_evaluated_at)"
+              :now="managed ? undefined : Date.parse(page!.state_evaluated_at)"
               :selected="segment?.occurrence_key"
               @choose="choose"
             />

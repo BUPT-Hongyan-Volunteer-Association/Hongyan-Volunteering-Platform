@@ -128,6 +128,7 @@ model LoginWindow {
 }
 
 model Activity {
+  group_images ActivityGroupImage[]
   hour_batches HourImportBatch[]
   hour_files   HourImportFile[]
   hour_records HourRecord[]
@@ -420,4 +421,14 @@ model HourRecord {
 
   @@unique([student_id, service_date, activity_id])
   @@map("hour_record")
+}
+model ActivityGroupImage {
+  id          String   @id @db.Uuid
+  activity_id String   @db.Uuid
+  activity    Activity @relation(fields: [activity_id], references: [id], onDelete: Cascade)
+  media_type  String
+  contents    Bytes
+
+  @@index([activity_id])
+  @@map("activity_group_image")
 }

@@ -76,10 +76,12 @@ export function project(
     status: row.status as View['status'],
     owner_display_name: row.members[0].account.display_name,
     owner_account_id: row.members[0].account_id,
-    starts_at: new Date(Math.min(...times.map((s) => Date.parse(s.starts_at)))).toISOString(),
-    ends_at: new Date(Math.max(...times.map((s) => Date.parse(s.ends_at)))).toISOString(),
+    ...(times.length > 0 && {
+      starts_at: new Date(Math.min(...times.map((s) => Date.parse(s.starts_at)))).toISOString(),
+      ends_at: new Date(Math.max(...times.map((s) => Date.parse(s.ends_at)))).toISOString(),
+    }),
     registration_phase:
-      row.status !== 'published'
+      row.status !== 'published' || !input.registration_opens_at || !input.registration_closes_at
         ? 'unavailable'
         : t < Date.parse(input.registration_opens_at)
           ? 'not_open'
@@ -101,7 +103,10 @@ export function project(
   if (!management) {
     const own = row.registrations?.[0];
     if (own) item.my_registration_status = own.status as View['my_registration_status'];
-    if (scope !== 'public-detail' || own?.status !== 'accepted') delete item.group_join_instructions;
+    if (scope !== 'public-detail' || own?.status !== 'accepted') {
+      delete item.group_join_instructions;
+      delete item.group_qr_id;
+    }
   }
   return item;
 }

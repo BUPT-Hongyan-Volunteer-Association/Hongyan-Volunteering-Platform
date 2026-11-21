@@ -12,7 +12,8 @@ import {
   Req,
 } from '@nestjs/common';
 import type {
-  ActivityDraftPatch,
+  ActivityDraftPatchWritable,
+  ActivityInputWritable,
   ActivityInput,
   ReasonAction,
   VersionAction,
@@ -30,6 +31,8 @@ import {
   snapshot,
   json,
 } from './workflow.js';
+import { parseGroupImage } from './group-image.js';
+import { invalid } from '../http.js';
 import { content, validate } from './validation.js';
 
 @Controller('organizer')
@@ -95,8 +98,14 @@ export class DraftController {
   }
   @Post('activities') create(@Req() req: SessionRequest, @Body() body: unknown) {
     return this.workflow.run(req, null, 'create', async (tx) => {
-      const a = content(body),
-        owner = req.actor.account_id;
+      const { group_qr_upload, group_qr_id, ...input } = validate<ActivityInputWritable>(
+        'activity_input',
+        body,
+      );
+      if (group_qr_id) invalid('group_qr_id', '请上传本活动的群二维码');
+      const image = parseGroupImage(group_qr_upload);
+      const a = content({ ...input, ...(image && { group_qr_id: image.id }) });
+      const owner = req.actor.account_id;
       const [seq] = await tx.$queryRaw<{ n: bigint }[]>`SELECT nextval('activity_code_seq') AS n`;
       const year = new Date().toLocaleDateString('en', {
         year: 'numeric',
@@ -106,6 +115,7 @@ export class DraftController {
         data: {
           activity_code: 'P' + year + '-' + seq.n,
           working_revision: 1,
+          ...(image && { group_images: { create: image } }),
           members: { create: { account_id: owner, member_role: 'owner' } },
           revisions: {
             create: { revision: 1, content: json(a), revision_state: 'draft', created_by: owner },
@@ -123,7 +133,10 @@ export class DraftController {
   ) {
     return this.workflow.run(req, { activityId: id }, 'manage', async (tx, loaded) => {
       const row = loaded!,
-        { expected_version, ...patch } = validate<ActivityDraftPatch>('activity_draft_patch', body);
+        { expected_version, ...patch } = validate<ActivityDraftPatchWritable>(
+          'activity_draft_patch',
+          body,
+        );
       checkVersion(row.version, expected_version);
       if (
         !['draft', 'published'].includes(row.status) ||
@@ -132,11 +145,29 @@ export class DraftController {
         wrongState();
       if (!Object.keys(patch).length) return project(row, 'working', new Date());
       const old = workingRevision(row)!;
-      const merged = { ...(old.content as unknown as ActivityInput), ...patch };
-      if (patch.expected_hours === null && patch.expected_hours_basis === null) {
-        delete merged.expected_hours;
-        delete merged.expected_hours_basis;
+      const { group_qr_upload, ...changes } = patch;
+      const image = parseGroupImage(group_qr_upload);
+      if (
+        changes.group_qr_id &&
+        !(await tx.activityGroupImage.count({
+          where: { id: changes.group_qr_id, activity_id: id },
+        }))
+      )
+        invalid('group_qr_id', '请选择本活动的群二维码');
+      if (image) {
+        await tx.activityGroupImage.create({ data: { ...image, activity_id: id } });
+        changes.group_qr_id = image.id;
       }
+      const merged = Object.fromEntries(
+        Object.entries({ ...(old.content as object), ...changes }).filter(([, v]) => v !== null),
+      );
+      if (changes.contacts !== undefined) {
+        delete merged.phone;
+        delete merged.wechat;
+        if (!changes.contact_text) delete merged.contact_text;
+        else if (!changes.contacts.length) delete merged.contacts;
+      }
+      if (changes.result_expected_date !== undefined) delete merged.result_expected_at;
       const next = json(content(merged));
       let revision = old.revision;
       if (old.revision_state === 'draft')
@@ -155,6 +186,16 @@ export class DraftController {
             content: next,
           },
         });
+      }
+      const previousImage = (old.content as unknown as ActivityInput).group_qr_id;
+      if (old.revision_state === 'draft' && previousImage && previousImage !== merged.group_qr_id) {
+        const references = await tx.activityRevision.count({
+          where: {
+            activity_id: id,
+            content: { path: ['group_qr_id'], equals: previousImage },
+          },
+        });
+        if (!references) await tx.activityGroupImage.delete({ where: { id: previousImage } });
       }
       const updated = await tx.activity.update({
         where: { id },
