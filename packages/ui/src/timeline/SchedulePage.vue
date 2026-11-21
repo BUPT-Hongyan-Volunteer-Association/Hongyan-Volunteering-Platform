@@ -3,7 +3,7 @@ import { campuses, campusName } from '@hongyan/contracts/activity';
 import UiSelect from '../UiSelect.vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import type { TimelineActivity, TimelineItem } from '@hongyan/contracts';
+import { ApiError, type TimelineActivity, type TimelineItem } from '@hongyan/contracts';
 import UiIcon from '../UiIcon.vue';
 import {
   activityTypes,
@@ -27,9 +27,14 @@ const route = useRoute(),
 const media = window.matchMedia('(max-width: 700px)');
 const mobile = ref(media.matches);
 const items = ref<TimelineActivity[]>([]);
+const ownerChoices = ref<{ account_id: string; display_name: string }[]>([]);
 const evaluatedAt = ref('');
 const total = ref(0);
 const pages = ref(1);
+const loadedKey = ref('');
+const failedAppend = ref(0);
+const locating = ref(false);
+const switching = ref(false);
 const loading = ref(false),
   error = ref(''),
   stale = ref('');
@@ -89,15 +94,17 @@ const actionNotice = ref(
 );
 if (actionNotice.value)
   window.history.replaceState({ ...window.history.state, scheduleNotice: null }, '');
-watch([() => items.value, selected, () => route.query.item, () => route.query.slot], () => {
+/** 结果稳定后再判断选中项是否真的失效，避免恢复页期间误报。 */
+function checkSelection() {
   // 读取期间保留上一次结果，避免窗口或筛选切换时误报“所选时段已移出”。
-  if (!settled.value || !route.query.item || selected.value) return;
+  if (!settled.value || locating.value || !route.query.item || selected.value) return;
   selectionMessage.value =
     route.query.slot !== undefined ? '所选时段已移出当前窗口' : '所选活动已移出当前筛选。';
   void router.replace({
     query: { ...route.query, item: undefined, slot: undefined, detail: undefined },
   });
-});
+}
+watch([() => items.value, selected, () => route.query.item, () => route.query.slot], checkSelection);
 const revisionOptions = [
   { value: 'working', label: '工作版本' },
   { value: 'published', label: '获批版本' },
@@ -112,21 +119,23 @@ const statusOptions = computed(() => [
   ...availableStates.value.map(([value, label]) => ({ value, label })),
 ]);
 const campusOptions = computed(() => {
-  const values = new Set(items.value.map((r) => r.campus).filter((c): c is string => !!c));
-  if (values.has(campuses[2])) {
-    const names = [...values].map(campusName);
-    for (const campus of campuses) if (!names.includes(campus)) values.add(campus);
-  }
-  return [{ value: '', label: '所有校区' }, ...values];
+  const selected = String(route.query.campus || '');
+  const options = campuses.map((campus) => ({ value: campus, label: campus }));
+  // 保留筛选值：历史链接可能带旧简称，仍能显示并区分。
+  if (selected && !options.some((option) => option.value === selected))
+    options.unshift({ value: selected, label: campusName(selected) });
+  return [{ value: '', label: '所有校区' }, ...options];
 });
 const ownerOptions = computed(() => {
-  const owners = new Map<string, string>();
-  for (const row of items.value)
-    if (row.owner_account_id) owners.set(row.owner_account_id, row.owner_display_name);
-  return [
-    { value: '', label: '所有负责人' },
-    ...[...owners].map(([value, label]) => ({ value, label })),
-  ];
+  const selected = String(route.query.owner || '');
+  const options = ownerChoices.value.map((owner) => ({
+    value: owner.account_id,
+    label: owner.display_name,
+  }));
+  // 服务端候选按授权范围独立取得，不随当前页或筛选收缩；已选值缺失时也保留。
+  if (selected && !options.some((option) => option.value === selected))
+    options.push({ value: selected, label: '所选负责人' });
+  return [{ value: '', label: '所有负责人' }, ...options];
 });
 const pageQuery = (page: number) => ({
   scope: props.scope,
@@ -143,40 +152,99 @@ const pageQuery = (page: number) => ({
   pending: route.query.pending ? '1' : undefined,
 });
 let request = 0;
+/** 版本或范围变化后旧结果不再适用，直接清空；其余条件变化先隐藏旧结果。 */
+let loadedRevision = '';
+let loadedScope = '';
+/** 丢弃与当前查询不再匹配的结果，避免版本、窗口或筛选切换时展示上一条件的数据。 */
+function discard(dropSelection = true) {
+  items.value = [];
+  ownerChoices.value = [];
+  total.value = 0;
+  pages.value = 1;
+  failedAppend.value = 0;
+  loadedKey.value = '';
+  switching.value = false;
+  if (dropSelection && route.query.item)
+    void router.replace({
+      query: { ...route.query, item: undefined, slot: undefined, detail: undefined },
+    });
+}
+const pageNumbers = (count: number) => Array.from({ length: count }, (_, i) => i + 1);
 async function load(options: { append?: boolean; silent?: boolean } = {}) {
   const { append = false, silent = false } = options;
+  const key = requestKey.value;
   const n = ++request;
   if (!silent) {
     loading.value = true;
     settled.value = false;
+    if (key !== loadedKey.value) {
+      const sourceChanged = loadedKey.value === ''
+        || revision.value !== loadedRevision
+        || props.scope !== loadedScope;
+      if (sourceChanged) discard(loadedKey.value !== '');
+      else switching.value = true;
+    }
   }
   error.value = '';
+  const numbers = append
+    ? [failedAppend.value || pages.value + 1]
+    : silent && pages.value > 1
+      ? pageNumbers(pages.value)
+      : [1];
   try {
-    const numbers = append
-      ? [pages.value + 1]
-      : silent && pages.value > 1
-        ? Array.from({ length: pages.value }, (_, i) => i + 1)
-        : [1];
     const results = await Promise.all(numbers.map((page) => loadTimeline(pageQuery(page))));
     if (n !== request) return;
-    items.value = results.flatMap((result) => result.items);
+    // 追加时合并已加载结果，不能只保留新一页。
+    items.value = append
+      ? [...items.value, ...results[0].items]
+      : results.flatMap((result) => result.items);
     total.value = results[0].total;
     evaluatedAt.value = results[0].state_evaluated_at;
-    pages.value = append ? pages.value + 1 : numbers.length;
+    if (results[0].owner_options) ownerChoices.value = results[0].owner_options;
+    pages.value = append ? numbers[0] : numbers.length;
+    loadedKey.value = key;
+    loadedRevision = revision.value;
+    loadedScope = props.scope;
+    switching.value = false;
+    failedAppend.value = 0;
     stale.value = '';
     settled.value = true;
   } catch (e) {
     if (n !== request) return;
+    switching.value = false;
     const message = e instanceof Error ? e.message : '读取活动日程失败';
-    if (silent && items.value.length) stale.value = '状态待刷新，请重试';
-    else if (append && items.value.length) stale.value = '未能加载更多，请重试';
-    else {
+    if (e instanceof ApiError && e.status === 403) {
+      // 权限被收回：旧管理数据和详情一并清空。
+      discard();
+      error.value = '当前身份无权查看该日程范围，请重新登录或返回。';
+    } else if (silent && items.value.length) stale.value = '状态待刷新，请重试';
+    else if (append && items.value.length) {
+      failedAppend.value = numbers[0];
+      stale.value = '未能加载更多，请重试';
+    } else {
       items.value = [];
+      ownerChoices.value = [];
       total.value = 0;
+      pages.value = 1;
+      loadedKey.value = '';
       error.value = message;
     }
   } finally {
     if (n === request) loading.value = false;
+  }
+}
+/** 从活动详情返回时，继续读取后续页，直到定位到选中活动所在页。 */
+async function locate() {
+  if (!route.query.item || rows.value.some((row) => row.activity_id === route.query.item)) return;
+  while (
+    route.query.item &&
+    items.value.length &&
+    items.value.length < total.value &&
+    pages.value < 50
+  ) {
+    const before = items.value.length;
+    await load({ append: true });
+    if (items.value.length === before) break;
   }
 }
 /** 页面可见时每 60 秒按服务端时刻校准；切回页面立即刷新。 */
@@ -245,7 +313,18 @@ const requestKey = computed(() =>
     route.query.pending,
   ].join('|'),
 );
-watch(requestKey, () => load(), { immediate: true });
+watch(
+  requestKey,
+  async () => {
+    // 返回详情链接时先恢复页，再判断所选时段是否真的失效。
+    if (route.query.item) locating.value = true;
+    await load();
+    await locate();
+    locating.value = false;
+    checkSelection();
+  },
+  { immediate: true },
+);
 onMounted(() => {
   media.addEventListener('change', resized);
   window.addEventListener('keydown', keydown);
@@ -430,20 +509,27 @@ onUnmounted(() => {
         </div>
       </div>
     </template>
+    <p v-if="switching && loading" class="notice" role="status">正在读取活动日程…</p>
     <p v-if="loading && !items.length" class="notice" role="status">正在读取活动日程…</p>
     <p v-else-if="error && !items.length" role="alert">
       {{ error }} <button @click="load()">重新读取</button>
     </p>
     <template v-else>
       <p v-if="stale" class="notice" role="status">
-        {{ stale }} <button @click="load({ silent: true })">重试</button>
+        {{ stale }}
+        <button @click="failedAppend ? load({ append: true }) : load({ silent: true })">重试</button>
       </p>
       <p v-if="selectionMessage" role="status" class="notice">{{ selectionMessage }}</p>
       <div v-if="!rows.length" class="empty-state">
         <UiIcon name="Calendar" />
         <p>该窗口和筛选条件下没有活动</p>
       </div>
-      <div v-else class="schedule-view" :class="{ split: selected && !mobile }">
+      <div
+        v-else
+        class="schedule-view"
+        :class="{ split: selected && !mobile, switching }"
+        :aria-busy="switching"
+      >
         <section v-show="!fullMobileDetail" aria-label="筛选结果">
           <div class="view-caption">
             <h2>活动计划</h2>
@@ -556,7 +642,7 @@ onUnmounted(() => {
               ><dt>所选时段</dt>
               <dd>进行中</dd></template
             >
-            <template v-if="selected.has_planned_overlap"
+            <template v-if="segment.has_planned_overlap"
               ><dt>计划提示</dt>
               <dd>与本人其他已录取活动的计划时段重叠</dd></template
             >
@@ -708,6 +794,11 @@ onUnmounted(() => {
 }
 .schedule-more {
   margin-top: 12px;
+}
+/* 条件切换期间隐藏旧结果并禁止交互，避免错把上一窗口或筛选的数据当成当前结果。 */
+.schedule-view.switching {
+  visibility: hidden;
+  pointer-events: none;
 }
 .split {
   display: grid;

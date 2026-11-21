@@ -18,7 +18,15 @@ const scopes: TimelineScope[] = ['public', 'mine', 'managed', 'all'];
 const statuses = ['draft', 'pending_review', 'published', 'cancelled', 'completed', 'archived'];
 const publicStatuses = ['published', 'cancelled', 'completed'];
 const phases = ['not_open', 'open', 'closed', 'unavailable'];
+const reviewStatuses = ['draft', 'pending_review', 'approved', 'rejected', 'withdrawn', 'cancelled'];
+const overlappingStatuses = ['published', 'completed'];
 const day = 86_400_000;
+const dateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/** 契约要求带时区的完整 date-time；分段统一补足秒并按北京时间输出。 */
+function instant(value: string) {
+  return new Date(Date.parse(value) + 8 * 3600_000).toISOString().slice(0, 19) + '+08:00';
+}
 
 type Query = Record<string, string>;
 
@@ -31,10 +39,12 @@ export function colorIndex(id: string) {
 }
 
 function window(q: Query) {
-  const from = Date.parse(q.from ?? ''),
-    to = Date.parse(q.to ?? '');
-  if (!q.from || !q.to || !Number.isFinite(from) || !Number.isFinite(to))
-    invalid('from', '起止时刻须成对填写');
+  if (!q.from || !q.to) invalid('from', '起止时刻须成对填写');
+  if (!dateTime.test(q.from)) invalid('from', '开始时刻须为带时区的完整日期时间');
+  if (!dateTime.test(q.to)) invalid('to', '结束时刻须为带时区的完整日期时间');
+  const from = Date.parse(q.from),
+    to = Date.parse(q.to);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) invalid('from', '起止时刻须成对填写');
   if (!(from < to)) invalid('to', '结束时刻必须晚于开始时刻');
   if (to - from > 31 * day) invalid('to', '日期窗口最长 31 天');
   return { from, to };
@@ -85,14 +95,16 @@ function toActivity(
   const segments = segmentsOf(view, from, to);
   if (!segments.length || !view.schedule) return null;
   const others = plan?.filter((slot) => slot.activity_id !== view.id);
+  // 取消活动不参与计划重叠：无论它作为当前活动还是比较对象，都不提示重叠。
+  const overlapping = plan !== undefined && overlappingStatuses.includes(view.status);
   const items: TimelineItem[] = segments.map((slot) => {
-    const overlap = others?.some((o) => slot.start < o.end && slot.end > o.start);
+    const overlap = overlapping && others!.some((o) => slot.start < o.end && slot.end > o.start);
     return {
       activity_id: view.id,
       activity_code: view.activity_code,
       title: view.title,
-      starts_at: slot.starts_at,
-      ends_at: slot.ends_at,
+      starts_at: instant(slot.starts_at),
+      ends_at: instant(slot.ends_at),
       status: view.status,
       occurrence_key: [view.id, view.schedule_revision, slot.starts_at].join('/'),
       schedule_revision: view.schedule_revision,
@@ -130,6 +142,22 @@ function toActivity(
   };
 }
 
+/** 负责人候选按当前身份的授权范围独立计算，不受分页、窗口和筛选影响。 */
+async function ownerChoices(db: Database, actor: Actor, scope: TimelineScope) {
+  const rows = await db.activityMember.findMany({
+    where: { member_role: 'owner', activity: managedScope(actor, scope) },
+    select: { account_id: true, account: { select: { display_name: true } } },
+    distinct: ['account_id'],
+  });
+  return rows
+    .map((row) => ({ account_id: row.account_id, display_name: row.account.display_name }))
+    .sort(
+      (a, b) =>
+        a.display_name.localeCompare(b.display_name, 'zh-Hans-CN') ||
+        a.account_id.localeCompare(b.account_id),
+    );
+}
+
 export async function timelinePage(
   db: Database,
   actor: Actor,
@@ -147,6 +175,8 @@ export async function timelinePage(
     invalid('owner_account_id', '负责人编号无效');
 
   const management = scope === 'managed' || scope === 'all';
+  if (management && q.review_status && !reviewStatuses.includes(q.review_status))
+    invalid('review_status', '审核状态筛选值无效');
   if (!management) {
     // 公开与本人范围固定读取获批版本，管理字段与筛选不对前台开放。
     if (q.revision_scope === 'working' || q.review_status || q.owner_account_id) denied();
@@ -188,6 +218,7 @@ export async function timelinePage(
     scope === 'mine' && studentId
       ? await plannedSlots(db, studentId, from, to)
       : undefined;
+  const owners = management ? await ownerChoices(db, actor, scope) : undefined;
   const items = views.items
     .map((view) => toActivity(view, views.now, from, to, management, plan))
     .filter((item): item is TimelineActivity => item !== null);
@@ -197,5 +228,6 @@ export async function timelinePage(
     page: views.page,
     page_size: views.page_size,
     state_evaluated_at: views.now.toISOString(),
+    ...(owners && { owner_options: owners }),
   };
 }

@@ -4,7 +4,7 @@ info:
   version: 1.2.5
   description: 2026-11-18 PRD v1.3.4配套规格，尚未实现。沿用/api/v1，本次校订后按本文件重新生成客户端。确认学生初始密码为学号后六位，首次登录强制改密。学号和班级均为十位数字，建档不含在校状态。时长以录入单为准，整数部分最多三位、最多一位小数。本轮聚焦平台搭建与功能实现，暂不考虑部署维护。业务字段、枚举及错误码使用snake_case，自动限制固定off。
     沿用：时长模板末列是否有违纪情况，时长与违规核实合并审批。规则未确定时正常审核时长，处罚固定未启用。按表头识别七列与兼容六列，不仅依赖文件名或版本号。
-  x-document-revision: 2026-11-21-r6
+  x-document-revision: 2026-11-21-r7
 servers:
 - url: /api/v1
   description: 同源相对路径，不指向已部署服务
@@ -1376,7 +1376,7 @@ paths:
       summary: 查询活动日程时间轴
       description: 按活动分页，page_size默认20最大100，total为活动数。按角色和统一筛选选活动，完整返回查询窗口内该活动全部segments，不截断同活动分段。from/to必填，窗口最多31日且from <
         to。按activity_code、activity_id稳定排序。public默认published，可显式查看曾公开的completed/cancelled。mine为本人accepted及退出待处理活动，默认不过滤生命周期状态。public/mine仅获批版本，不返回管理字段。managed为有效角色且当前成员，all为授权后台，默认不按生命周期或审核状态过滤。managed/all默认working，依次选待审版本、可编辑草稿、获批版本，均不存在时回退最近终态快照且仅供查看。published只选获批版本，没有获批版本则不返回该活动。所有内容字段与segments取所选版本，revision_state和schedule_revision明确所选版本。review_status按当前工作版本筛选，has_pending_review及current_review_id独立于展示版本。is_ongoing始终按完整获批安排计算，取消活动不计计划重叠。列表与日程共用权限、筛选、窗口及排序语义，禁止前端仅筛当前页。color_index为活动ID标准小写UUID字符串的UTF-8字节FNV-1a
-        32位无符号散列模6。segments保留真实起止，前端按窗口裁剪。无人员名单或异常。 managed在兼任后台时仍限本人有效管理的活动，与管理列表的显式scope相同。每页返回统一的state_evaluated_at，空页也返回此值。
+        32位无符号散列模6。segments保留真实起止，统一输出含秒与+08:00时区的date-time，前端按窗口裁剪。无人员名单或异常。 managed在兼任后台时仍限本人有效管理的活动，与管理列表的显式scope相同。每页返回统一的state_evaluated_at，空页也返回此值。
       tags:
       - 日程
       x-requirement: FR07
@@ -11448,6 +11448,11 @@ components:
           type: string
           format: date-time
           description: 本页同一服务端评估时刻，与每个活动的state_evaluated_at相同。空页也提供。
+        owner_options:
+          type: array
+          description: 仅managed/all返回。按当前身份的授权管理范围独立计算的负责人候选，不受分页、窗口和筛选影响，供筛选控件使用；同一负责人只出现一次，按显示名称排序。
+          items:
+            $ref: '#/components/schemas/timeline_owner_option'
       additionalProperties: false
       required:
       - items
@@ -11455,6 +11460,18 @@ components:
       - page_size
       - total
       - state_evaluated_at
+    timeline_owner_option:
+      type: object
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+      additionalProperties: false
+      required:
+      - account_id
+      - display_name
     hour_warning:
       type: object
       properties:

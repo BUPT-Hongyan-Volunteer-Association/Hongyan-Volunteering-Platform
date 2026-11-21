@@ -139,6 +139,29 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
     const review = await db.activityReview.create({
       data: { activity_id: revised.id, revision: 2, submitted_by: ownerId },
     });
+    // 已取消活动与本人已录取安排重叠：两侧都不应产生计划重叠提示。
+    const cancelled = await create(
+      'TL-0007',
+      '已取消重叠演示',
+      {
+        schedule_type: 'custom',
+        duration_start_date: anchor,
+        duration_end_date: anchor,
+        slots: [{ starts_at: at(anchor, '09:45'), ends_at: at(anchor, '10:30') }],
+      },
+      'cancelled',
+    );
+    // 每周规则含排除日与补充时段：核对起止统一为含秒和时区的 date-time。
+    const weekly = await create('TL-0008', '周常规演示', {
+      schedule_type: 'weekly',
+      duration_start_date: '2026-12-07',
+      duration_end_date: '2026-12-20',
+      weekly_slots: [{ weekday: 1, start_time: '09:00', end_time: '11:30', end_day_offset: 0 }],
+      excluded_dates: ['2026-12-14'],
+      additional_slots: [
+        { starts_at: '2026-12-16T13:00:00+08:00', ends_at: '2026-12-16T15:00:00+08:00' },
+      ],
+    });
 
     const timeline = (client, query) => client.request('/timeline?' + query);
     const codes = (response) => response.data.items.map((item) => item.activity_code).sort();
@@ -200,7 +223,7 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       const completed = await publicQuery('&status=completed');
       assert.deepEqual(codes(completed), ['TL-0003']);
       const cancelled = await publicQuery('&status=cancelled');
-      assert.deepEqual(codes(cancelled), []);
+      assert.deepEqual(codes(cancelled), ['TL-0007']);
       assert.equal((await publicQuery('&status=draft')).status, 422);
       const ongoingOnly = await publicQuery('&is_ongoing=true');
       assert.deepEqual(codes(ongoingOnly), ['TL-0002', 'TL-0005']);
@@ -357,6 +380,107 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       const publicItem = (await publicQuery())
         .data.items.find((row) => row.activity_code === 'TL-0001');
       assert.equal(publicItem.has_planned_overlap, undefined);
+
+      // 取消活动作为当前活动：自身分段与汇总都不提示重叠。
+      await db.registration.create({
+        data: { activity_id: cancelled.id, student_id: studentRow2.id, status: 'accepted' },
+      });
+      const withCancelled = await timeline(shared, 'scope=mine&' + window);
+      const cancelledItem = withCancelled.data.items.find(
+        (row) => row.activity_code === 'TL-0007',
+      );
+      assert.equal(cancelledItem.status, 'cancelled');
+      assert.equal(cancelledItem.has_planned_overlap, false);
+      assert.ok(cancelledItem.segments.every((segment) => segment.has_planned_overlap === false));
+      // 取消活动作为比较对象：仍不影响本人其他活动的重叠提示。
+      const still = withCancelled.data.items.find((row) => row.activity_code === 'TL-0001');
+      assert.equal(still.has_planned_overlap, true);
+      assert.equal(
+        still.segments.find((segment) => segment.starts_at === at(anchor, '14:15'))
+          .has_planned_overlap,
+        false,
+      );
+    });
+
+    await t.test('周规则与补充时段统一输出含秒和时区的起止', async () => {
+      const response = await timeline(
+        student,
+        'scope=public&from=' + encodeURIComponent('2026-12-01T00:00:00+08:00') +
+          '&to=' + encodeURIComponent('2026-12-31T00:00:00+08:00'),
+      );
+      assert.equal(response.status, 200, JSON.stringify(response));
+      const item = response.data.items.find((row) => row.activity_code === 'TL-0008');
+      assert.equal(item.schedule_type, 'weekly');
+      assert.deepEqual(
+        item.segments.map((segment) => [segment.starts_at, segment.ends_at]),
+        [
+          ['2026-12-07T09:00:00+08:00', '2026-12-07T11:30:00+08:00'],
+          ['2026-12-16T13:00:00+08:00', '2026-12-16T15:00:00+08:00'],
+        ],
+      );
+      // 排除日不生成场次。
+      assert.equal(
+        item.segments.some((segment) => segment.starts_at.startsWith('2026-12-14')),
+        false,
+      );
+      for (const segment of item.segments)
+        for (const value of [segment.starts_at, segment.ends_at])
+          assert.match(value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$/);
+    });
+
+    await t.test('审核状态枚举和带时区时刻不合法时返回 422 并指出字段', async () => {
+      const typo = await timeline(teacher, 'scope=all&' + window + '&review_status=typo');
+      assert.equal(typo.status, 422);
+      assert.equal(typo.details[0].field, 'review_status');
+      const dateOnlyFrom = await timeline(student, 'scope=public&from=2026-11-18&to=' + iso(to));
+      assert.equal(dateOnlyFrom.status, 422);
+      assert.equal(dateOnlyFrom.details[0].field, 'from');
+      const noZoneTo = await timeline(
+        student,
+        'scope=public&from=' + iso(from) + '&to=2026-11-25T00:00:00',
+      );
+      assert.equal(noZoneTo.status, 422);
+      assert.equal(noZoneTo.details[0].field, 'to');
+      // 带时区的偏移格式被接受。
+      const offset = await timeline(
+        student,
+        'scope=public&from=' + encodeURIComponent('2026-11-19T00:00:00+08:00') +
+          '&to=' + encodeURIComponent('2026-11-26T00:00:00+08:00'),
+      );
+      assert.equal(offset.status, 200);
+    });
+
+    await t.test('负责人候选按授权范围独立于分页、窗口和筛选', async () => {
+      const other = await db.account.findUniqueOrThrow({ where: { username: '0000000003' } });
+      const firstPage = await timeline(teacher, 'scope=all&' + window + '&page_size=1');
+      assert.equal(firstPage.data.items.length, 1);
+      const ids = firstPage.data.owner_options.map((option) => option.account_id);
+      assert.deepEqual(ids.slice().sort(), [ownerId, other.id].sort());
+      assert.ok(
+        firstPage.data.owner_options.every(
+          (option) => typeof option.display_name === 'string' && option.display_name.length > 0,
+        ),
+      );
+      // 换一页、换窗口或加筛选，候选都不变。
+      const secondPage = await timeline(teacher, 'scope=all&' + window + '&page_size=1&page=2');
+      assert.deepEqual(secondPage.data.owner_options, firstPage.data.owner_options);
+      const far = await timeline(
+        teacher,
+        'scope=all&from=' + iso(Date.parse('2027-01-01T00:00:00Z')) +
+          '&to=' + iso(Date.parse('2027-01-08T00:00:00Z')),
+      );
+      assert.equal(far.data.items.length, 0);
+      assert.deepEqual(far.data.owner_options, firstPage.data.owner_options);
+      const filtered = await timeline(teacher, 'scope=all&' + window + '&owner_account_id=' + other.id);
+      assert.deepEqual(filtered.data.owner_options, firstPage.data.owner_options);
+      // 负责人范围只含本人，公开范围不返回候选。
+      const managed = await timeline(owner, 'scope=managed&' + window);
+      assert.deepEqual(
+        managed.data.owner_options.map((option) => option.account_id),
+        [ownerId],
+      );
+      const publicPage = await publicQuery();
+      assert.equal(publicPage.data.owner_options, undefined);
     });
   } finally {
     await app?.close();

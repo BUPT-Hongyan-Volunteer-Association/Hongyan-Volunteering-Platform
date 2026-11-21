@@ -56,5 +56,49 @@ export async function createScheduleDemo(db) {
     starts_at: new Date(Date.now() - 3600_000).toISOString(),
     ends_at: new Date(Date.now() + 3600_000).toISOString(),
   });
-  return { multi, ongoing, anchor, before, at };
+  // 分页演示：同一天 21 项，前 20 项归活动协作者，第 21 项归乙负责人，用于核对追加与候选。
+  const firstOwner = await db.account.findUniqueOrThrow({ where: { username: '0000000004' } });
+  const lastOwner = await db.account.findUniqueOrThrow({ where: { username: '0000000003' } });
+  const paged = dateAt(anchorOffset + 35);
+  const pagedItems = [];
+  for (let index = 1; index <= 21; index++) {
+    const code = 'TL-92' + String(index).padStart(2, '0');
+    const account = index === 21 ? lastOwner : firstOwner;
+    const row = await db.activity.create({
+      data: {
+        activity_code: code,
+        status: 'published',
+        working_revision: 1,
+        published_revision: 1,
+        members: { create: { account_id: account.id, member_role: 'owner' } },
+        revisions: {
+          create: {
+            revision: 1,
+            revision_state: 'approved',
+            approved_at: new Date(),
+            created_by: account.id,
+            content: {
+              ...template,
+              title: '分页演示 ' + String(index).padStart(2, '0'),
+              schedule: {
+                schedule_type: 'continuous',
+                starts_at: at(paged, '10:00'),
+                ends_at: at(paged, '12:00'),
+              },
+            },
+          },
+        },
+      },
+    });
+    pagedItems.push(row);
+  }
+  return {
+    multi,
+    ongoing,
+    anchor,
+    before,
+    paged,
+    pagedLast: pagedItems[pagedItems.length - 1],
+    pagedOwner: lastOwner,
+  };
 }

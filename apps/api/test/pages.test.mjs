@@ -795,7 +795,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await teacher.goto(admin + '/schedule');
       const ownerAccount = await db.account.findUniqueOrThrow({ where: { username: '0000000003' } });
       for (const [label, initial, choice, key, value] of [
-        ['校区', '所有校区', '沙河', 'campus', '沙河'],
+        ['校区', '所有校区', '沙河校区', 'campus', '沙河校区'],
         ['活动状态', '所有状态', '已发布', 'status', 'published'],
         ['展示版本', '工作版本', '获批版本', 'revision', 'published'],
         ['负责人', '所有负责人', '乙负责人', 'owner', ownerAccount.id],
@@ -961,6 +961,194 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         await touch.close();
       }
       await teacher.setViewportSize({ width: 1440, height: 900 });
+    });
+
+    await t.test('日程追加保留已加载页，返回详情恢复第 21 项，负责人候选不受分页影响', async () => {
+      await student.setViewportSize({ width: 1440, height: 900 });
+      const listUrl =
+        web + '/schedule?date=' + demo.paged + '&unit=day&view=list&q=' +
+        encodeURIComponent('分页演示');
+      await student.goto(listUrl);
+      const rows = student.locator('.schedule-list li');
+      await visible(rows.first());
+      assert.equal(await rows.count(), 20);
+      await visible(student.getByText(/21 项（已显示 20）/));
+      await student.locator('.schedule-more').getByRole('button').click();
+      await student.waitForFunction(() => document.querySelectorAll('.schedule-list li').length === 21);
+      assert.equal(await student.locator('.schedule-more').count(), 0);
+      // 追加不能覆盖前页。
+      assert.match(await rows.first().innerText(), /分页演示 01/);
+      const last = rows.filter({ hasText: '分页演示 21' }).getByRole('button').first();
+      await last.click();
+      await visible(student.getByRole('complementary', { name: '时段详情' }));
+      const selectedUrl = student.url();
+      await student.getByRole('link', { name: '查看真实获批详情' }).click();
+      await visible(student.getByRole('heading', { name: '分页演示 21', exact: true }));
+      await link(student, '返回日程').click();
+      await student.waitForURL(selectedUrl);
+      // 返回后按选中活动所在页恢复，既不误报移出窗口，也不回退到第 1 页。
+      await visible(student.getByRole('complementary', { name: '时段详情' }));
+      await student.waitForFunction(() => document.querySelectorAll('.schedule-list li').length === 21);
+      assert.equal(await rows.filter({ hasText: '分页演示 21' }).count(), 1);
+      assert.equal(await student.getByText('所选时段已移出当前窗口').count(), 0);
+
+      // 第 21 项的负责人只在第 2 页出现，首屏仍应可选。
+      await teacher.setViewportSize({ width: 1440, height: 900 });
+      await teacher.goto(
+        admin + '/schedule?date=' + demo.paged + '&unit=day&view=list&q=' +
+          encodeURIComponent('分页演示'),
+      );
+      await visible(teacher.locator('.schedule-list li').first());
+      assert.equal(await teacher.locator('.schedule-list li').count(), 20);
+      const { list } = await openOptions(teacher, '负责人');
+      await list.getByRole('option', { name: '乙负责人', exact: true }).click();
+      await teacher.waitForURL((u) => u.searchParams.get('owner') === demo.pagedOwner.id);
+      await visible(teacher.locator('.schedule-list li').first());
+      assert.equal(await teacher.locator('.schedule-list li').count(), 1);
+      await pickOption(teacher, '负责人', '所有负责人');
+      assert.equal(await teacher.locator('.schedule-list li').count(), 20);
+      // 只服务本用例，移除后不影响后续公开列表分页。
+      await db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-92' } } });
+    });
+
+    await t.test('切换展示版本不展示旧稿，权限收回时清空数据和详情', async () => {
+      const pending = await db.activity.findUniqueOrThrow({
+        where: { activity_code: 'P2026-0002' },
+      });
+      const latest = await db.activityRevision.findFirstOrThrow({
+        where: { activity_id: pending.id },
+        orderBy: { revision: 'desc' },
+      });
+      const title = latest.content.title;
+      await teacher.setViewportSize({ width: 1440, height: 900 });
+      await teacher.goto(
+        admin + '/schedule?date=' + demo.anchor + '&unit=week&view=list&revision=working&q=' +
+          encodeURIComponent(title),
+      );
+      await visible(teacher.locator('.schedule-list li').first());
+      // 获批版本响应延迟期间，不能继续展示工作版本的结果。
+      const delayed = async (route) => {
+        try {
+          if (!route.request().url().includes('revision_scope=published'))
+            return await route.continue();
+          const response = await route.fetch();
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          await route.fulfill({ response });
+        } catch {
+          // 页面在延迟期间切换时路由可能已失效，忽略即可。
+        }
+      };
+      await teacher.route('**/api/v1/timeline**', delayed);
+      try {
+        await pickOption(teacher, '展示版本', '获批版本');
+        await teacher.waitForURL((u) => u.searchParams.get('revision') === 'published');
+        await visible(teacher.getByText('正在读取活动日程…'));
+        assert.equal(await teacher.locator('.schedule-list li').count(), 0);
+        // 该活动没有获批版本，获批视图不返回它。
+        await visible(teacher.getByText('该窗口和筛选条件下没有活动'));
+      } finally {
+        await teacher.unroute('**/api/v1/timeline**');
+      }
+
+      // 权限被收回：清空旧管理数据与已打开详情。
+      await teacher.goto(
+        admin + '/schedule?date=' + demo.anchor + '&unit=week&view=list&revision=working&q=' +
+          encodeURIComponent(title),
+      );
+      await visible(teacher.locator('.schedule-list li').first());
+      await teacher.locator('.schedule-list li').first().getByRole('button').first().click();
+      await visible(teacher.getByRole('complementary', { name: '时段详情' }));
+      await teacher.route('**/api/v1/timeline**', (route) =>
+        route.fulfill({
+          status: 403,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 'forbidden',
+            message: '当前身份无权执行此操作',
+            request_id: randomUUID(),
+          }),
+        }),
+      );
+      try {
+        await pickOption(teacher, '展示版本', '获批版本');
+        await visible(teacher.getByText(/无权查看该日程范围/));
+      } finally {
+        await teacher.unroute('**/api/v1/timeline**');
+      }
+      assert.equal(await teacher.locator('.schedule-list li').count(), 0);
+      assert.equal(await teacher.locator('.schedule-detail').count(), 0);
+      assert.equal(new URL(teacher.url()).searchParams.has('item'), false);
+    });
+
+    await t.test('审核日程时间轴同时显示进行中与待审核', async () => {
+      const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+      const account = await db.account.findUniqueOrThrow({ where: { username: '0000000003' } });
+      const approved = await db.activityRevision.findFirstOrThrow({
+        where: { activity_id: first.id, revision: 1 },
+      });
+      const dayMs = 86400000;
+      const revised = await db.activity.create({
+        data: {
+          activity_code: 'TL-9301',
+          status: 'published',
+          working_revision: 2,
+          published_revision: 1,
+          members: { create: { account_id: account.id, member_role: 'owner' } },
+          revisions: {
+            create: [
+              {
+                revision: 1,
+                revision_state: 'approved',
+                approved_at: new Date(),
+                created_by: account.id,
+                content: {
+                  ...approved.content,
+                  title: '待审修订演示',
+                  schedule: {
+                    schedule_type: 'continuous',
+                    starts_at: new Date(Date.now() - 1800_000).toISOString(),
+                    ends_at: new Date(Date.now() + 1800_000).toISOString(),
+                  },
+                },
+              },
+              {
+                revision: 2,
+                revision_state: 'pending_review',
+                created_by: account.id,
+                content: {
+                  ...approved.content,
+                  title: '待审修订演示',
+                  schedule: {
+                    schedule_type: 'continuous',
+                    starts_at: new Date(Date.now() + 5 * dayMs).toISOString(),
+                    ends_at: new Date(Date.now() + 5 * dayMs + 5400_000).toISOString(),
+                  },
+                },
+              },
+            ],
+          },
+        },
+      });
+      await db.activityReview.create({
+        data: { activity_id: revised.id, revision: 2, submitted_by: account.id },
+      });
+      try {
+        await teacher.setViewportSize({ width: 1200, height: 900 });
+        for (const revision of ['working', 'published']) {
+          await teacher.goto(
+            admin + '/schedule?date=' + today + '&unit=month&view=chart&revision=' + revision +
+              '&q=' + encodeURIComponent('待审修订演示'),
+          );
+          const row = teacher.locator('.chart tbody tr').filter({ hasText: '待审修订演示' });
+          await visible(row);
+          const meta = await row.locator('small').innerText();
+          assert.match(meta, /进行中/);
+          assert.match(meta, /待审核/);
+        }
+      } finally {
+        await db.activityReview.deleteMany({ where: { activity_id: revised.id } });
+        await db.activity.delete({ where: { id: revised.id } });
+      }
     });
 
     await t.test('撤回或驳回后工作区和表单回到获批版本，原内容可再次选用', async () => {
