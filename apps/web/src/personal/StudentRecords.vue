@@ -9,24 +9,19 @@ const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).fo
 const route = useRoute();
 const section = computed(() => route.name as keyof typeof personalRecords);
 const titles = {
-  notices: '通知',
   hours: '我的时长',
   feedback: '本人记录与反馈',
 };
 const paths = {
-  notices: '/notices',
   hours: '/mine/hours',
   feedback: '/mine/feedback',
 };
 const message = ref('');
 const kind = ref('漏记反馈');
-watch(
-  () => route.fullPath,
-  () => {
-    message.value = '';
-    kind.value = '漏记反馈';
-  },
-);
+watch([section, () => route.params.item], () => {
+  message.value = '';
+  kind.value = '漏记反馈';
+});
 function preview() {
   message.value = '当前为表单预览，正式提交待接入。';
 }
@@ -39,6 +34,7 @@ function preview() {
     :title="titles[section]"
     :records="personalRecords[section]"
     :base="paths[section]"
+    :table-heading="section === 'hours' ? '活动' : undefined"
     :selected="String(route.params.item || '')"
   >
     <template #summary
@@ -46,11 +42,6 @@ function preview() {
         当前累计 <strong>{{ totalHours }} 小时</strong>
       </p></template
     >
-    <template #detail="{ record }">
-      <button v-if="section === 'notices' && record.status === '未读'" @click="preview">
-        预览确认回执
-      </button>
-    </template>
     <template #after-list>
       <details v-if="section === 'feedback'">
         <summary>填写反馈（预览）</summary>

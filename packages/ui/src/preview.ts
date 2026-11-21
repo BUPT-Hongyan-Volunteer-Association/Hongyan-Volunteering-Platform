@@ -5,3 +5,14 @@ export interface PreviewRecord {
   status: string;
   fields: [string, string][];
 }
+
+export interface SummaryRecord {
+  id: string;
+  title: string;
+  status: string;
+  context?: string;
+  summary: string;
+  date: string;
+  dateLabel?: string;
+  unread?: boolean;
+}

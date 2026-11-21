@@ -28,57 +28,59 @@ onMounted(load);
 </script>
 
 <template>
-  <h1>待办</h1>
-  <section class="inbox-section">
-    <div class="queue-heading">
-      <div class="page-title">
-        <UiIcon name="DocumentChecked" />
-        <h2>活动待审</h2>
+  <div class="reading-area">
+    <h1>待办</h1>
+    <section class="inbox-section">
+      <div class="queue-heading">
+        <div class="page-title">
+          <UiIcon name="DocumentChecked" />
+          <h2>活动待审</h2>
+        </div>
+        <RouterLink class="button compact" to="/reviews"
+          >查看活动审核队列<UiIcon name="ArrowRight"
+        /></RouterLink>
       </div>
-      <RouterLink class="button compact" to="/reviews"
-        >查看活动审核队列<UiIcon name="ArrowRight"
-      /></RouterLink>
-    </div>
-    <p v-if="busy" role="status">正在读取待审版本…</p>
-    <p v-else-if="error" role="alert">{{ error }} <button @click="load">重试</button></p>
-    <template v-else>
-      <div class="queue-count" :class="{ empty: !total }">
-        <span class="state-chip" v-if="total">待审 {{ total }} 项</span
-        ><span v-else>暂无待审活动</span>
+      <p v-if="busy" role="status">正在读取待审版本…</p>
+      <p v-else-if="error" role="alert">{{ error }} <button @click="load">重试</button></p>
+      <template v-else>
+        <div class="queue-count" :class="{ empty: !total }">
+          <span class="state-chip" v-if="total">待审 {{ total }} 项</span
+          ><span v-else>暂无待审活动</span>
+        </div>
+        <div class="entry-list" v-if="rows.length">
+          <RouterLink v-for="r in rows" :key="r.id" :to="'/reviews/' + r.id"
+            ><strong>{{ r.snapshot.content.title }}</strong>
+            <span class="row-end"
+              ><span>版本 {{ r.revision }}</span
+              ><UiIcon name="ArrowRight"
+            /></span>
+          </RouterLink>
+        </div>
+      </template>
+    </section>
+    <section class="inbox-section">
+      <div class="queue-heading">
+        <div class="page-title">
+          <UiIcon name="Files" />
+          <h2>其他审核待办</h2>
+        </div>
+        <span class="sample-label">示例数据</span>
       </div>
-      <div class="entry-list" v-if="rows.length">
-        <RouterLink v-for="r in rows" :key="r.id" :to="'/reviews/' + r.id"
-          ><strong>{{ r.snapshot.content.title }}</strong>
+      <div class="entry-list">
+        <RouterLink to="/hours"
+          >时长批次<span class="row-end"
+            ><span class="state-chip attention">待审核</span><UiIcon name="ArrowRight" /></span
+        ></RouterLink>
+        <RouterLink v-for="key in previews" :key="key" :to="'/manage/' + key"
+          >{{ sections[key].title }}
           <span class="row-end"
-            ><span>版本 {{ r.revision }}</span
+            ><span class="state-chip neutral">{{ sections[key].records[0].status }}</span
             ><UiIcon name="ArrowRight"
           /></span>
         </RouterLink>
       </div>
-    </template>
-  </section>
-  <section class="inbox-section">
-    <div class="queue-heading">
-      <div class="page-title">
-        <UiIcon name="Files" />
-        <h2>其他审核待办</h2>
-      </div>
-      <span class="sample-label">示例数据</span>
-    </div>
-    <div class="entry-list">
-      <RouterLink to="/hours"
-        >时长批次<span class="row-end"
-          ><span class="state-chip attention">待审核</span><UiIcon name="ArrowRight" /></span
-      ></RouterLink>
-      <RouterLink v-for="key in previews" :key="key" :to="'/manage/' + key"
-        >{{ sections[key].title }}
-        <span class="row-end"
-          ><span class="state-chip neutral">{{ sections[key].records[0].status }}</span
-          ><UiIcon name="ArrowRight"
-        /></span>
-      </RouterLink>
-    </div>
-  </section>
+    </section>
+  </div>
 </template>
 <style scoped>
 .inbox-section + .inbox-section {

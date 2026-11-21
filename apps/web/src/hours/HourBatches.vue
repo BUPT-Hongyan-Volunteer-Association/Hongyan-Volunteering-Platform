@@ -18,7 +18,7 @@ const { data, loading, error, refresh } = useHourRead(page, async (signal) =>
   (await listActivityHourBatches({path:{id:activityId},query:{page:page.value,page_size:size},signal,throwOnError:true})).data.data, () => emit('denied'));
 </script>
 <template>
-  <section class="hour-list">
+  <section class="hour-list reading-area">
     <h2>时长批次</h2>
     <HourUpload :activity-id="activityId" :writes-paused="writesPaused" @denied="refresh()" />
     <header><h3>批次历史</h3><button :disabled="loading" @click="refresh()">刷新历史</button></header>
@@ -37,7 +37,7 @@ const { data, loading, error, refresh } = useHourRead(page, async (signal) =>
   </section>
 </template>
 <style scoped>
-header,li { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+header,li { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
 header { margin-top:20px; }
 ul { padding:0; margin:0; list-style:none; }
 li { padding:12px 0; border-top:1px solid var(--line); }

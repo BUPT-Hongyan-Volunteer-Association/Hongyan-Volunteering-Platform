@@ -34,4 +34,4 @@
 
 时长工作簿解析测试用 `pnpm --filter @hongyan/api test:hour-workbook`，逐行预览测试用 `pnpm --filter @hongyan/api test:hour-preview`。两者均可在本地离线运行。
 
-[工程协作约定](AGENTS.md) · [界面规范](DESIGN.md) · [界面复验](docs/ui-samples/README.md) · [接口契约与导入模板](packages/contracts/)
+[工程协作约定](AGENTS.md) · [界面规范](DESIGN.md) · [共享 UI 组件](packages/ui/README.md) · [三端运行示例](docs/ui-samples/README.md) · [接口契约与导入模板](packages/contracts/)

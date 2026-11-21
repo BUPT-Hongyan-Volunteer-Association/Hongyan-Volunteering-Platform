@@ -290,3 +290,11 @@ p[role='alert'] {
     gap: 0 14px;
   }
 }
+
+/* The shell fills the window. Short records keep a readable line length. */
+:root {
+  --reading-width: 64rem;
+}
+.reading-area {
+  max-width: var(--reading-width);
+}

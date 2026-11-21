@@ -172,8 +172,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           await fits(student);
         }
         await link(student, '我的时长').click();
-        await student.locator('.entry-list a').first().click();
-        await visible(student.getByText('2026-11-14'));
+        await visible(student.getByRole('table', { name: '我的时长' }).getByText('2026-11-14'));
         await fits(student);
         await link(student, '返回我的').click();
         await link(student, '本人记录与反馈').click();
@@ -235,6 +234,18 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
             await fits(owner);
             continue;
           }
+          if (tab === '现场人员记录' || tab === '漏记反馈') {
+            const table = owner.getByRole('table', { name: tab });
+            await visible(table);
+            if (tab === '现场人员记录') {
+              await visible(table.getByRole('row', { name: /许同学.*已请假.*本人提前联系本活动负责人/ }));
+              if (width === 1440) await capture(owner, 'attendance-register');
+              await pickOption(owner, '服务日期', '2026-11-15');
+              assert.equal(await table.getByText('林同学').count(), 0);
+            }
+            await fits(owner);
+            continue;
+          }
           await owner.locator('.entry-list a').first().click();
           await visible(owner.locator('article dl'));
           await fits(owner);
@@ -256,6 +267,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           '审计记录',
         ]) {
           await nav.getByRole('link', { name: section, exact: true }).click();
+          if (section === '审计记录') {
+            await visible(teacher.getByRole('table', { name: section }).getByText('活动交接'));
+            await fits(teacher);
+            continue;
+          }
           await teacher.locator('main .entry-list a').first().click();
           await visible(teacher.locator('article dl'));
           await fits(teacher);
@@ -309,7 +325,30 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(student.getByText('已提交，等待老师核查'));
       await teacher.goto(admin + '/manage/appeals');
       await teacher.getByRole('link', { name: /A2026-014/ }).click();
-      await visible(teacher.getByText('待受理', { exact: true }));
+      await visible(teacher.locator('.record-detail-pane').getByText('待受理', { exact: true }));
+      const queue = teacher.locator('main .record-list-pane');
+      const panel = teacher.locator('main .record-detail-pane');
+      for (const width of [390, 1024, 1920, 1440]) {
+        await teacher.setViewportSize({ width, height: 900 });
+        assert.equal(await queue.isVisible(), width >= 1024);
+        await visible(panel);
+        if (width >= 1024) {
+          const a = await queue.boundingBox(), b = await panel.boundingBox();
+          assert.ok(a.x + a.width <= b.x + 1 && Math.abs(a.y - b.y) < 1);
+        }
+        await fits(teacher);
+      }
+      await capture(teacher, 'appeal-workspace');
+      await teacher.getByLabel('处理意见').fill('仅用于当前申请');
+      const search = queue.getByRole('searchbox', { name: '筛选记录' });
+      await search.fill('A2026');
+      await teacher.waitForURL(url => url.searchParams.get('search') === 'A2026');
+      assert.equal(await teacher.getByLabel('处理意见').inputValue(), '仅用于当前申请');
+      await queue.getByRole('link', { name: /A2026-012/ }).click();
+      await visible(panel.getByText('资料整理时长未显示'));
+      assert.equal(await teacher.getByLabel('处理意见').inputValue(), '');
+      await teacher.goBack();
+      await visible(panel.getByText('待受理', { exact: true }));
       await visible(teacher.getByText('本人已提前联系负责人，请复核签到说明。'));
     });
 
@@ -372,7 +411,21 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await student.goto(web);
       for (const p of [student, owner, tech]) p.on('request', collect);
       await link(student, '通知').click();
-      await student.getByRole('link', { name: /集合地点调整/ }).click();
+      await student.setViewportSize({ width: 1440, height: 900 });
+      await visible(student.getByText('11 月 21 日请到一层服务台集合。'));
+      await capture(student, 'notice-summary');
+      const list = student.locator('.summary-list');
+      const desktopWidth = (await list.boundingBox()).width;
+      await student.setViewportSize({ width: 1920, height: 1080 });
+      assert.equal((await list.boundingBox()).width, desktopWidth);
+      await fits(student);
+      await link(student, '未读 1').click();
+      assert.equal(await student.locator('.summary-list li').count(), 1);
+      await student.getByRole('searchbox', { name: '搜索通知' }).fill('不存在');
+      await visible(student.getByText('暂无匹配通知。'));
+      await student.getByRole('searchbox', { name: '搜索通知' }).fill('');
+      await link(student, '全部 3').click();
+      await visible(student.getByText('你的整项活动报名已录取。'));
       await button(student, '预览确认回执').click();
       await visible(student.getByText(/正式提交待接入/));
       await owner.goto(web + '/managed/' + first.id + '/roster');
@@ -565,7 +618,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         await button(owner, '收起记录').click();
         for (const label of ['录取所选（待接入）', '设为候补（待接入）', '导出名单（待接入）'])
           assert.ok(await button(owner, label).isDisabled());
-        await capture(owner, 'roster');
         await button(owner, '已录取 18').click();
         await visible(owner.getByText('已选 0 人', { exact: true }));
         assert.equal(await owner.locator('tbody tr.selected').count(), 0);
@@ -604,7 +656,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         assert.equal(await teacher.locator('tbody tr.selected th').innerText(), '4');
         assert.equal(await teacher.getByLabel('整批意见').inputValue(), '');
         await visible(teacher.getByText('全批 5 条 · 合计 10.0 小时'));
-        await capture(teacher, 'hours');
         await button(teacher, '预览通过整批').click();
         await visible(teacher.getByText('输入完整，可通过整批（预览）'));
         assert.deepEqual(writes, []);
@@ -665,7 +716,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await segment.focus();
       await student.keyboard.press('Enter');
       await visible(student.getByRole('complementary', { name: '时段详情' }));
-      await capture(student, 'schedule-week');
       const week = student.url();
       await link(student, '查看真实获批详情').click();
       await link(student, '返回日程').click();
@@ -680,7 +730,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(student.locator('.chart rect[aria-pressed=true]'));
       await visible(button(student, '查看活动'));
       await fits(student);
-      await capture(student, 'schedule-hour');
       await button(student, '今天').click();
       assert.equal(
         await scale.getByRole('button', { name: '小时' }).getAttribute('aria-pressed'),
@@ -945,10 +994,12 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
 
       await student.goto(web);
       await link(student, '我的报名').click();
-      await student.getByRole('link', { name: /校园服务甲.*已录取/ }).click();
+      await visible(student.locator('.summary-list li').filter({ hasText: '校园服务甲' }).getByText('可准时到场', { exact: false }));
       await visible(student.getByText('已录取', { exact: true }));
       await link(student, '查看活动详情').click();
       await visible(student.getByText(instructions, { exact: true }));
+      await link(student, '返回我的报名').click();
+      await visible(student.locator('.summary-list').getByText('已录取'));
       const row = await db.registration.findFirstOrThrow({
         where: { activity_id: first.id, student: { student_no: '0000000001' } },
       });
@@ -1089,10 +1140,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await student.setViewportSize({ width: 1440, height: 900 });
       await student.goto(web);
       await visible(link(student, content.title));
-      await capture(student, 'discovery');
       await student.setViewportSize({ width: 390, height: 844 });
       await fits(student);
-      await capture(student, 'discovery-phone');
       await student.goto(web + '/?page=1&q=' + encodeURIComponent(content.title));
       const request = student.waitForResponse((r) =>
         r.url().endsWith('/api/v1/activities/' + weekly.id),
@@ -1109,7 +1158,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         cutoff && action && cutoff.y + cutoff.height < action.y && action.y + action.height <= 844,
       );
       assert.ok(await button(student, '申请报名').isEnabled());
-      await capture(student, 'student');
       await link(student, '返回活动列表').click();
       assert.equal(new URL(student.url()).searchParams.get('q'), content.title);
       assert.equal(new URL(student.url()).searchParams.get('page'), '1');

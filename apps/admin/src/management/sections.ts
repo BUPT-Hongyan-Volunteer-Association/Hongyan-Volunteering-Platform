@@ -9,7 +9,7 @@ export const sections = {
     records: [
       {
         id: 'G2026-003',
-        title: 'G2026-003 · 服务日期更正',
+        title: '服务日期更正',
         status: '待审核',
         fields: [
           ['源记录', 'L-021 · 林同学 · 11 月 14 日 · 2.0 小时'],
@@ -25,7 +25,7 @@ export const sections = {
     records: [
       {
         id: 'I2026-014',
-        title: 'I2026-014 · 到场情况',
+        title: '到场情况',
         status: '待核实',
         fields: [
           ['学生', '周同学'],
@@ -43,7 +43,7 @@ export const sections = {
     records: [
       {
         id: 'A2026-012',
-        title: 'A2026-012 · 漏记反馈',
+        title: '漏记反馈',
         status: '处理中',
         fields: [
           ['申请人', '周同学'],
@@ -54,7 +54,7 @@ export const sections = {
       },
       {
         id: 'A2026-014',
-        title: 'A2026-014 · 异常申诉',
+        title: '异常申诉',
         status: '待受理',
         fields: [
           ['关联事实', '11 月 14 日迟到十分钟'],
@@ -86,7 +86,7 @@ export const sections = {
     records: [
       {
         id: 'ST2026-001',
-        title: 'ST2026-001 · 秋季名单',
+        title: '秋季名单',
         status: '待确认',
         fields: [
           ['文件', '学生建档导入模板_v1.3.xlsx'],
@@ -125,7 +125,7 @@ export const sections = {
     records: [
       {
         id: 'EV2026-009',
-        title: 'EV2026-009 · 集合通知',
+        title: '集合通知',
         status: '投递失败',
         fields: [
           ['事件来源', '集合信息版本 2'],

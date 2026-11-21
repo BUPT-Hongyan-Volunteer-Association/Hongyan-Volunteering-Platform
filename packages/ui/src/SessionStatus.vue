@@ -25,7 +25,7 @@ onMounted(connect);
 </script>
 
 <template>
-  <section class="connection" :aria-busy="status === 'loading'">
+  <section class="connection reading-area" :aria-busy="status === 'loading'">
     <div role="status" aria-live="polite">
       <h2>
         <span aria-hidden="true" class="signal" :class="status"></span>
@@ -41,7 +41,7 @@ onMounted(connect);
 </template>
 
 <style scoped>
-.connection { display: flex; align-items: center; justify-content: space-between; gap: 24px;
+.connection { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 24px;
   padding: 24px 0; border-top: 1px solid var(--line); }
 h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 18px; }
 .signal { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }

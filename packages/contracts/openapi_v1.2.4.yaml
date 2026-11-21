@@ -1867,7 +1867,7 @@ paths:
                 - request_id
               examples:
                 pending_roster:
-                  summary: 图21-2 待处理名单，第1页
+                  summary: 待处理名单，第1页
                   value:
                     data:
                       items:
@@ -2978,7 +2978,7 @@ paths:
                 - request_id
               examples:
                 review_header:
-                  summary: 图21-3 送审快照
+                  summary: 时长审核送审快照
                   value:
                     data:
                       id: 00000000-0000-4000-8000-000000000032
@@ -3119,7 +3119,7 @@ paths:
                       total: 1
                     request_id: 00000000-0000-4000-8000-000000000001
                 review_rows:
-                  summary: 图21-3 七列导入，第三条数据对应工作表第4行
+                  summary: 七列时长导入，第三条数据对应工作表第4行
                   value:
                     data:
                       items:
@@ -3420,7 +3420,7 @@ paths:
                   expected_version: 2
                   decision: approved
               screen_approval:
-                summary: 图21-3 无时长警告，只核实第4行
+                summary: 无时长警告，只核实第4行
                 value:
                   expected_version: 2
                   decision: approved

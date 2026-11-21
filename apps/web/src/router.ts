@@ -9,6 +9,7 @@ import ActivityWorkspace from './activities/ActivityWorkspace.vue';
 import MyRegistrations from './registrations/MyRegistrations.vue';
 import Roster from './registrations/Roster.vue';
 import PersonalPage from './PersonalPage.vue';
+import NoticeInbox from './personal/NoticeInbox.vue';
 import StudentRecords from './personal/StudentRecords.vue';
 import SchedulePage from '@hongyan/ui/SchedulePage.vue';
 export const router = createRouter({
@@ -68,7 +69,7 @@ export const router = createRouter({
     {
       path: '/notices/:item?',
       name: 'notices',
-      component: StudentRecords,
+      component: NoticeInbox,
       meta: { personal: true },
     },
     {

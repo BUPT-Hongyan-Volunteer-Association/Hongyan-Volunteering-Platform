@@ -152,7 +152,7 @@ onUnmounted(() => {
         :key="route.name === 'hour-batch' ? base + '/' + route.params.item : base"
       />
     </RouterView>
-    <section v-else>
+    <section v-else class="reading-area">
       <h2>活动成员</h2>
       <ul class="member-list">
         <li v-for="m in members" :key="m.account_id">
@@ -197,9 +197,6 @@ onUnmounted(() => {
   gap: 10px;
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
-}
-.member-list .state-chip {
-  margin-left: auto;
 }
 @media (max-width: 700px) {
   .workspace-tools {

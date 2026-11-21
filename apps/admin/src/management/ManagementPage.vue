@@ -44,7 +44,7 @@ const actions = computed(() => {
   }
 });
 watch(
-  () => [route.fullPath, isAdmin.value],
+  [key, () => route.params.item, isAdmin],
   () => {
     message.value = '';
     reason.value = '';
@@ -57,6 +57,9 @@ watch(
   <PreviewRecords
     :title="section.title"
     :records="rows"
+    :table-heading="key === 'audit' ? '审计事项' : undefined"
+    :status-heading="key === 'audit' ? '状态' : undefined"
+    :show-id="key !== 'audit'"
     :base="'/manage/' + key"
     :selected="String(route.params.item || '')"
   >
@@ -84,7 +87,7 @@ watch(
       </div>
       <form
         v-if="actions.length"
-        class="preview-form"
+        class="preview-form management-form"
         @submit.prevent="message = '当前为示例预览，' + action + '尚未提交。'"
       >
         <label>操作<UiSelect label="操作" v-model="action" :options="actions" /></label>
@@ -95,3 +98,19 @@ watch(
     </template>
   </PreviewRecords>
 </template>
+
+<style scoped>
+@media (min-width: 1024px) {
+  .management-form {
+    max-width: 42rem;
+  }
+  .management-form label {
+    grid-template-columns: 5em minmax(0, 1fr);
+    align-items: start;
+    gap: 20px;
+  }
+  .management-form button {
+    margin-left: calc(5em + 20px);
+  }
+}
+</style>

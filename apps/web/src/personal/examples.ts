@@ -5,7 +5,7 @@ export const title = '图书馆志愿服务';
 export const activityId = '71000000-0000-4000-8000-000000000001';
 const student = '71000000-0000-4000-8000-000000000002';
 const common = { version: 1, student_id: student, activity_id: activityId };
-const notices: Notice[] = [
+export const notices: Notice[] = [
   { title: '集合地点调整', notice_kind: 'change', body: '11 月 21 日请到一层服务台集合。' },
   {
     title: '时长审核结果',
@@ -68,17 +68,7 @@ const incidentAppeal: Appeal = {
   status: 'pending',
 };
 export const totalHours = hour.credited_hours;
-export const personalRecords: Record<'notices' | 'hours' | 'feedback', PreviewRecord[]> = {
-  notices: notices.map((n) => ({
-    id: n.id,
-    title: n.title,
-    status: n.acknowledged_at ? '已确认' : n.read_at ? '已读' : '未读',
-    fields: [
-      ['所属活动', title],
-      ['发布日期', n.published_at.slice(0, 10)],
-      ['通知内容', n.body],
-    ],
-  })),
+export const personalRecords: Record<'hours' | 'feedback', PreviewRecord[]> = {
   hours: [
     {
       id: hour.id,
