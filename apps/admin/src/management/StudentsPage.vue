@@ -88,19 +88,9 @@ function apply() {
     },
   });
 }
-function setCohort(value: string) {
+function setFilter(field: 'cohort' | 'grade' | 'status', value: string) {
   void router.push({
-    query: { ...route.query, ...(value === 'all' ? { cohort: undefined } : { cohort: value }), page: 1 },
-  });
-}
-function setGrade(value: string) {
-  void router.push({
-    query: { ...route.query, ...(value === 'all' ? { grade: undefined } : { grade: value }), page: 1 },
-  });
-}
-function setStatus(value: string) {
-  void router.push({
-    query: { ...route.query, ...(value === 'all' ? { status: undefined } : { status: value }), page: 1 },
+    query: { ...route.query, [field]: value === 'all' ? undefined : value, page: 1 },
   });
 }
 function goPage(next: number) {
@@ -118,13 +108,13 @@ function goPage(next: number) {
   <form class="filters" @submit.prevent="apply">
     <label>学号或姓名<input v-model="search" type="search" placeholder="输入学号或姓名" /></label>
     <label class="filter-select">级部
-      <UiSelect :model-value="selectedCohort" label="级部" :options="cohortChoices" @update:model-value="setCohort" />
+      <UiSelect :model-value="selectedCohort" label="级部" :options="cohortChoices" @update:model-value="setFilter('cohort', $event)" />
     </label>
     <label class="filter-select">年级
-      <UiSelect :model-value="selectedGrade" label="年级" :options="gradeChoices" @update:model-value="setGrade" />
+      <UiSelect :model-value="selectedGrade" label="年级" :options="gradeChoices" @update:model-value="setFilter('grade', $event)" />
     </label>
     <label class="filter-select">账号状态
-      <UiSelect :model-value="status" label="账号状态" :options="statusOptions" @update:model-value="setStatus" />
+      <UiSelect :model-value="status" label="账号状态" :options="statusOptions" @update:model-value="setFilter('status', $event)" />
     </label>
     <button class="primary" type="submit">查询</button>
   </form>

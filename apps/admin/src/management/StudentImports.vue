@@ -41,6 +41,8 @@ const rows = ref<StudentImportRow[]>([]);
 const rowTotal = ref(0);
 const rowPage = ref(1);
 const rowSize = 100;
+const rowFailure = ref<{ page: number; message: string }>();
+let rowRequest = 0;
 const loading = ref(false);
 const busy = ref(false);
 const error = ref('');
@@ -63,9 +65,9 @@ const canCommit = computed(
     batch.value.id === batchId.value &&
     batch.value.status === 'ready' &&
     batch.value.error_count === 0 &&
+    rows.value.length > 0 &&
     !loading.value,
 );
-const rowPages = computed(() => Math.max(1, Math.ceil(rowTotal.value / rowSize)));
 
 function message(reason: unknown) {
   return reason instanceof Error ? reason.message : '操作失败，请重试。';
@@ -80,9 +82,11 @@ function display(
   row: StudentImportRow,
   field: 'student_no' | 'name' | 'cohort' | 'grade' | 'class_name' | 'college',
 ) {
-  const value = row[field] ?? row.raw_values?.[field];
-  if (!value) return '—';
-  return field === 'grade' ? value + '级' : value;
+  if (field === 'grade') {
+    if (row.errors?.some(issue => issue.field === 'grade')) return row.raw_values?.grade || '—';
+    if (row.grade) return row.grade + '级';
+  }
+  return row[field] || row.raw_values?.[field] || '—';
 }
 function currentRoute(version: number) {
   return !disposed && version === routeVersion;
@@ -90,24 +94,38 @@ function currentRoute(version: number) {
 function stillCurrent(id: string, serial: number) {
   return !disposed && serial === loadSerial && batchId.value === id;
 }
-async function loadRows(page = rowPage.value, serial = loadSerial) {
+async function loadRows(page: number, serial = loadSerial) {
   const current = batch.value;
   if (!current) return;
-  const result = (
-    await getStudentImportRows({
+  const request = ++rowRequest;
+  const isCurrent = () => request === rowRequest && stillCurrent(current.id, serial);
+  rowFailure.value = undefined;
+  try {
+    const { data } = await getStudentImportRows({
       path: { id: current.id },
       query: { page, page_size: rowSize },
       throwOnError: true,
-    })
-  ).data.data;
-  if (!stillCurrent(current.id, serial)) return;
-  rowPage.value = result.page;
-  rowTotal.value = result.total;
-  rows.value = result.items;
+    });
+    if (!isCurrent()) return;
+    rowPage.value = data.data.page;
+    rowTotal.value = data.data.total;
+    rows.value = data.data.items;
+  } catch (reason) {
+    if (!isCurrent()) return;
+    if (reason instanceof ApiError && [401, 403, 404].includes(reason.status ?? 0)) {
+      batch.value = undefined;
+      rows.value = [];
+      writeFailure.value = undefined;
+      error.value = message(reason);
+    } else {
+      rowFailure.value = { page, message: message(reason) };
+    }
+  }
 }
 async function loadBatch(id: string, { quiet = false } = {}) {
   const serial = ++loadSerial;
   error.value = '';
+  rowFailure.value = undefined;
   if (!quiet) {
     loading.value = !!id;
     batch.value = undefined;
@@ -122,7 +140,7 @@ async function loadBatch(id: string, { quiet = false } = {}) {
     batch.value = data;
     await loadRows(1, serial);
     if (!stillCurrent(id, serial)) return;
-    if (data.status === 'validating') schedulePoll();
+    if (batch.value && data.status === 'validating') schedulePoll();
     else stopPolling();
   } catch (reason) {
     if (stillCurrent(id, serial)) error.value = message(reason);
@@ -337,6 +355,10 @@ watch(
       已建档。可在 <RouterLink to="/manage/students">学生档案</RouterLink> 查看新学生。
     </p>
   </section>
+  <p v-if="batch && rowFailure" role="alert">
+    第 {{ rowFailure.page }} 页明细读取失败。{{ rowFailure.message }}
+    <button type="button" @click="loadRows(rowFailure.page)">重试第 {{ rowFailure.page }} 页</button>
+  </p>
   <section v-if="batch && rows.length" class="batch-rows">
     <h2>逐行预览</h2>
     <div class="scroll-table">
@@ -387,15 +409,10 @@ watch(
       </table>
     </div>
     <Pager v-if="rowTotal > rowSize" :page="rowPage" :size="rowSize" :total="rowTotal" @change="loadRows" />
-    <p v-if="rowPages > 1" class="hint">共 {{ rowTotal }} 行，第 {{ rowPage }} / {{ rowPages }} 页。</p>
   </section>
 </template>
 
 <style scoped>
-.hint {
-  color: var(--muted);
-  font-size: 13px;
-}
 .file-input {
   position: absolute;
   width: 1px;

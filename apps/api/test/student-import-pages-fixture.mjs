@@ -6,7 +6,7 @@ const workbook = (rows) =>
   buildWorkbook({ sheets: [rosterSheet(rows, { includeCohort: false })], prefix: true, sharedStrings: true });
 
 /** 老师从后台真实上传名单、按原表行定位错误、修正后确认，并在学生档案中查到新学生。 */
-export async function checkStudentImportPages(page, admin, { fits, db }) {
+export async function checkStudentImportPages(page, admin, { fits, pickOption, db }) {
   const button = (name) => page.getByRole('button', { name, exact: true });
   const chip = (text) =>
     page.locator('.page-heading .state-chip').filter({ hasText: text }).first();
@@ -14,6 +14,10 @@ export async function checkStudentImportPages(page, admin, { fits, db }) {
   const invalid = workbook([
     { number: 2, values: profile },
     { number: 3, values: profile, extra: { G: '多余列' } },
+    ...Array.from({ length: 99 }, (_, index) => ({
+      number: index + 4,
+      values: [String(2026940000 + index), '分页学生' + index, '', index === 0 ? '大一' : '2026', ''],
+    })),
   ]);
   const fixed = workbook([{ number: 2, values: profile }]);
 
@@ -36,8 +40,24 @@ export async function checkStudentImportPages(page, admin, { fits, db }) {
   assert.match(await errorRow.innerText(), /错误/);
   assert.match(await errorRow.innerText(), /G/);
   assert.match(await errorRow.innerText(), /多余列|未知列|表格之外/);
+  const badGradeRow = page.locator('tr[data-row="4"]');
+  assert.equal(await badGradeRow.getByRole('cell', { name: '大一', exact: true }).count(), 1);
   assert.equal(await button('确认建档').count(), 0);
   await fits(page);
+
+  // 第二页暂不可用时保留第一页，重试时仍请求第二页。
+  await page.route(
+    url => url.pathname.endsWith('/rows') && url.searchParams.get('page') === '2',
+    route => route.fulfill({ status: 503, json: { message: '明细服务暂不可用' } }),
+    { times: 1 },
+  );
+  await button('下一页').click();
+  const retryPage = button('重试第 2 页');
+  await retryPage.waitFor();
+  assert.ok(await errorRow.isVisible());
+  await retryPage.click();
+  await page.locator('tr[data-row="102"]').waitFor();
+  assert.equal(await retryPage.count(), 0);
 
   // 修正文件后重新上传，待确认批次可确认
   await page.getByLabel('名单文件', { exact: true }).setInputFiles({
@@ -162,6 +182,13 @@ export async function checkStudentImportPages(page, admin, { fits, db }) {
   assert.match(await studentRow.innerText(), /页面导入学生/);
   assert.match(await studentRow.innerText(), /2026级/);
   assert.match(await studentRow.innerText(), /启用/);
+  await pickOption(page, '年级', '2026级');
+  await page.waitForURL(url => url.searchParams.get('grade') === '2026');
+  assert.equal(new URL(page.url()).searchParams.get('q'), '0000001201');
+  await studentRow.waitFor();
+  await pickOption(page, '年级', '全部年级');
+  await page.waitForURL(url => !url.searchParams.has('grade'));
+  await studentRow.waitFor();
   await fits(page);
 
   // 手机视口不产生横向溢出

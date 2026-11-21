@@ -820,11 +820,13 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const badGrade = await uploadImport(
         teacher,
         workbook([
-          { number: 2, values: ['0000001902', '非法年级', '', '大一', ''] },
+          { number: 2, values: ['2026001902', '非法年级', '', '大一', ''] },
         ]),
       );
       assert.equal(badGrade.status, 'invalid');
       const badRows = (await teacher.request('/admin/student-imports/' + badGrade.id + '/rows')).data;
+      assert.equal(badRows.items[0].grade, undefined);
+      assert.equal(badRows.items[0].raw_values.grade, '大一');
       assert(
         badRows.items[0].errors.some(
           (error) => error.field === 'grade' && error.code === 'format',

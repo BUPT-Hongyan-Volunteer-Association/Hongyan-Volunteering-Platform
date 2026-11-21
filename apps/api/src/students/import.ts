@@ -180,6 +180,7 @@ function parseRow(row: SheetRow, columns: Map<ImportField, number>): ParsedRow {
     if (field === 'grade') {
       const grade = /^(\d{4})(?:级)?$/.exec(value)?.[1];
       if (value && !grade) {
+        signature.grade = value;
         errors.push({
           field: 'grade',
           code: 'format',
@@ -200,7 +201,7 @@ function parseRow(row: SheetRow, columns: Map<ImportField, number>): ParsedRow {
     }
     if (value) values[field] = value;
   }
-  if (!values.grade) {
+  if (!raw_values.grade?.trim()) {
     const derived = values.student_no ? gradeFromStudentNo(values.student_no) : undefined;
     if (derived) {
       values.grade = derived;

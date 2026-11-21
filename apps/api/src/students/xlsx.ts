@@ -43,20 +43,19 @@ interface ZipEntry {
   local: number;
 }
 
-const archive = (buffer: Buffer, cache: Map<string, Buffer>) => ({
-  get(name: string) {
-    const cached = cache.get(name);
-    if (cached) return cached;
-    const bytes = readZipEntry(buffer, name);
-    cache.set(name, bytes);
-    return bytes;
-  },
-});
-
-function readZipEntry(buffer: Buffer, wanted: string) {
+function openArchive(buffer: Buffer) {
   const entries = zipEntries(buffer);
-  const entry = entries.get(wanted);
-  if (!entry) throw new XlsxContentError('工作簿缺少必要的部件：' + wanted);
+  return {
+    has: (name: string) => entries.has(name),
+    get(name: string) {
+      const entry = entries.get(name);
+      if (!entry) throw new XlsxContentError('工作簿缺少必要的部件：' + name);
+      return readZipEntry(buffer, entry);
+    },
+  };
+}
+
+function readZipEntry(buffer: Buffer, entry: ZipEntry) {
   if (entry.local + 30 > buffer.length || buffer.readUInt32LE(entry.local) !== 0x04034b50)
     throw new XlsxContentError('工作簿压缩目录已损坏');
   const nameLength = buffer.readUInt16LE(entry.local + 26);
@@ -289,14 +288,10 @@ function sharedStringText(source: string) {
   }
 }
 
-function sharedStrings(files: ReturnType<typeof archive>) {
-  let source: string;
-  try {
-    source = xml(files.get('xl/sharedStrings.xml'));
-  } catch {
-    // 共享文本是可选部件；没有它时单元格应使用内联文本或公式结果。
-    return [];
-  }
+function sharedStrings(files: ReturnType<typeof openArchive>) {
+  const part = 'xl/sharedStrings.xml';
+  if (!files.has(part)) return [];
+  const source = xml(files.get(part));
   const values: string[] = [];
   let cursor = 0;
   let item = nextElement(source, cursor, 'si');
@@ -313,7 +308,7 @@ interface WorkbookSheet {
   target: string;
 }
 
-function workbookSheets(files: ReturnType<typeof archive>): WorkbookSheet[] {
+function workbookSheets(files: ReturnType<typeof openArchive>): WorkbookSheet[] {
   const book = xml(files.get('xl/workbook.xml'));
   const rels = xml(files.get('xl/_rels/workbook.xml.rels'));
   const targets = new Map<string, string>();
@@ -395,8 +390,7 @@ function columnIndex(letters: string) {
 
 /** 读取指定名称的工作表；文件结构不合法时抛出 XlsxContentError。 */
 export function readXlsxSheet(buffer: Buffer, name: string, headerOnly = false): Sheet {
-  const cache = new Map<string, Buffer>();
-  const files = archive(buffer, cache);
+  const files = openArchive(buffer);
   const sheet = workbookSheets(files).find((entry) => entry.name === name);
   if (!sheet) throw new XlsxContentError('工作簿缺少「' + name + '」工作表');
   const source = xml(files.get(sheet.target));
