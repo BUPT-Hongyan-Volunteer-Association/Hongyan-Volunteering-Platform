@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { listActivityRegistrations } from '@hongyan/contracts';
-import { usePageRead } from '../usePageRead';
+import { usePageRead } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 
 const props = defineProps<{ activityId: string }>();

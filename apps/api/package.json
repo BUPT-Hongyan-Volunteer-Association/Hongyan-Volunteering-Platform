@@ -11,6 +11,7 @@
     "test:accounts": "node --test test/demo-accounts.test.mjs",
     "test:hour-workbook": "tsc && node --test test/hour-workbook.test.mjs",
     "test:hour-preview": "tsc && node --test test/hour-preview.test.mjs",
+    "test:hour-ledger": "tsc && node --env-file=.env --test test/hour-ledger.test.mjs",
     "test:flow": "tsc && node --env-file=.env --test test/activity-flow.test.mjs test/attendance-flow.test.mjs",
     "test:notice": "tsc && node --env-file=.env --test test/notice-flow.test.mjs",
     "test:students": "tsc && node --env-file=.env --test test/student-import.test.mjs",

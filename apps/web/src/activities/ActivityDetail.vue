@@ -9,7 +9,7 @@ import {
   type Activity,
   type Registration,
 } from '@hongyan/contracts';
-import { usePageRead } from '../usePageRead';
+import { usePageRead } from '@hongyan/ui/usePageRead';
 import { registrationLabels } from '../registrations/labels';
 const props = defineProps<{
   activity: Activity;

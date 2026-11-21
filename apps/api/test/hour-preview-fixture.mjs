@@ -1,3 +1,4 @@
+import { seedApprovedHours } from './hour-ledger-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { previewActivityHours } from '../dist/hours/preview-context.js';
@@ -27,7 +28,7 @@ export async function prepareHourPreviewFixture(db, sample) {
   const students = await db.student.findMany({ include: { account: true }, orderBy: { student_no: 'asc' }, take: 3 });
   const activityId = await db.$transaction(async (tx) => {
     const owner = students[1].account_id;
-    const future = sample.revisions[0].content;
+    const future = { ...sample.revisions[0].content, title: '时长导入预览样本' };
     const past = { ...future, schedule: { schedule_type:'continuous',starts_at:date+'T08:00:00+08:00',ends_at:date+'T16:00:00+08:00' } };
     const submitted_at = new Date(date+'T07:00:00+08:00');
     const activity = await tx.activity.create({ data: {
@@ -42,7 +43,7 @@ export async function prepareHourPreviewFixture(db, sample) {
     } });
     const historical = { id:randomUUID(),version:1,activity_id:sample.id,student_id:students[2].id,service_date:new Date(date),
       status:'current',hours:'18.0',origin_schedule_revision:1,misconduct_reported:'none',misconduct_version:0 };
-    await tx.hourRecord.create({data:historical});
+    await seedApprovedHours(tx, historical, owner);
     return activity.id;
   },{isolationLevel:'RepeatableRead'});
   return { activityId, bytes:mixedWorkbook(students), fixed:mixedWorkbook(students,true), ownerId:students[1].account_id,

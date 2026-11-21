@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { factKey } from '../dist/hours/ledger-data.js';
 import { previewHourRows } from '../dist/hours/preview.js';
 import { serviceDate, hourTenths } from '../dist/hours/values.js';
 import { validate } from '../dist/activities/validation.js';
@@ -23,8 +24,15 @@ const snapshot = {
   activity_id: 'a', activity_code: activity, published_revision: 1,
   approved_schedules: [{ revision: 1, schedule: schedule(day+'T08:00:00+08:00', day+'T16:00:00+08:00') }],
   students: [{ id: studentId, student_no: '0000000001', name: '合成学生', registration: [{ status: 'accepted', submitted_at: new Date(day + 'T07:00:00+08:00') }] }],
+  fact_reviews: new Map(),
   history: [],
 };
+function reviewedFact(fact) {
+  return new Map([[factKey(existing(), fact), {
+    decision: 'rejected', reason: '已核实不成立', reviewed_by: studentId, reviewed_at: '2026-11-18T15:00:00Z',
+    source_batch_id: recordId, source_row_number: 2, discipline_status: 'not_enabled',
+  }]]);
+}
 function preview(rows, data = {}, options = {}) {
   return previewHourRows({ rows, date_system: '1900' }, { ...snapshot, ...data },
     { mode: 'new', now: new Date('2026-11-18T16:00:00Z'), ...options });
@@ -126,7 +134,7 @@ test('同键冲突逐行保留新的违纪事实，已有有效核实结论可�
     input(202, { credited_hours: number('5'), misconduct_reported: text('有'), remark: text('新事实') }),
     input(804, { credited_hours: number('6'), misconduct_reported: text('有'), remark: text('旧事实') }),
   ];
-  const batch = preview(rows, { history: [existing({ reusable_facts: ['旧事实'] })] });
+  const batch = preview(rows, { history: [existing()], fact_reviews: reviewedFact('旧事实') });
   assert.deepEqual(batch.rows.map(row => row.action), ['error', 'error', 'error']);
   assert.deepEqual(batch.rows.filter(row => row.misconduct_requires_review).map(row => row.row_number), [202]);
   assert.equal(batch.misconduct_review_required_count, 1);
@@ -222,8 +230,6 @@ test('时长精度错误仍能核对历史安排、旧值与独立的违纪上�
   assert.equal(result.misconduct_review_required_count, 1);
   assert.equal(result.projected_delta_hours, '0.0');
   assert.equal(first.delta_hours, undefined);
-  const reusable = preview([rowInput], {history:[existing({reusable_facts:['现场说明']})]}, {mode:'correction'});
-  assert.equal(reusable.rows[0].misconduct_requires_review, false);
   validate('hour_row', JSON.parse(JSON.stringify(first)));
 });
 
@@ -254,7 +260,7 @@ test('违纪标记与时长校验独立：有行错误时摘要与待核实筛�
 });
 
 test('库内重复、更正、恢复及仅核实：绑原版本，不因旧六列清除元信息', () => {
-  const data = {published_revision:2,history:[existing({misconduct_reported:'reported', misconduct_fact:'说明', reusable_facts:['说明']})]};
+  const data = {published_revision:2,history:[existing({misconduct_reported:'reported', misconduct_fact:'说明'})], fact_reviews:reviewedFact('说明')};
   for (const flag of ['not_provided',text('有')]) {
     const row = preview([input(2,{misconduct_reported:flag,remark:text('说明')})],data).rows[0];
     assert.equal(row.action,'skip_identical');
@@ -268,7 +274,7 @@ test('库内重复、更正、恢复及仅核实：绑原版本，不因旧六�
   assert.equal(row.delta_hours,'0.0');
   assert.equal(row.misconduct_requires_review,true);
   const withoutConclusion = preview([input(2,{misconduct_reported:text('有'),remark:text('说明')})],
-    {history:[{...data.history[0],reusable_facts:[]}]}).rows[0];
+    {history:data.history}).rows[0];
   assert.equal(withoutConclusion.action,'review_only');
   assert.equal(withoutConclusion.misconduct_requires_review,true);
   assert.equal(preview([input(2,{credited_hours:number('5')})],data).error_count,1);

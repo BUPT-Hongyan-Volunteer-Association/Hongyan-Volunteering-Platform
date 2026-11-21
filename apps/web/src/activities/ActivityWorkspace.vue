@@ -37,14 +37,17 @@ watch(
 );
 const memberMessage = ref('');
 const sections = [
-  ['requests', '退出与恢复'],
   ['notices', '通知与回执'],
   ['attendance', '现场人员记录'],
   ['batches', '时长批次'],
+  ['hours', '时长台账'],
   ['appeals', '漏记反馈'],
   ['corrections', '错账修复组'],
-  ['incidents', '异常上报'],
+  ['incidents', '异常记录'],
+  ['requests', '退出与恢复'],
 ];
+const deniedRefresh = ['activity-attendance', 'hour-batches', 'hour-batch', 'activity-hours',
+  'activity-hour-appeals', 'activity-hour-corrections', 'activity-hour-incidents'];
 const members = ref<ActivityMember[]>([]);
 const error = ref('');
 const verifying = ref(false);
@@ -124,7 +127,7 @@ onUnmounted(() => {
       >
       <details class="more" ref="more">
         <summary
-          :class="{ current: sections.slice(4).some(([path]) => route.params.area === path) }"
+          :class="{ current: sections.slice(4).some(([path]) => (route.params.area ?? route.meta.area) === path) }"
         >
           更多
         </summary>
@@ -141,13 +144,14 @@ onUnmounted(() => {
     <RouterView v-if="route.name !== 'managed-overview'" v-slot="{ Component }">
       <component
         :is="Component"
-        v-on="['activity-attendance', 'hour-batches', 'hour-batch'].includes(String(route.name)) ? { denied: refresh } : {}"
+        v-on="deniedRefresh.includes(String(route.name)) ? { denied: refresh } : {}"
         v-bind="
-          ['organizer-section', 'activity-notices'].includes(String(route.name))
+          ['organizer-section', 'activity-notices', 'activity-hour-incidents'].includes(String(route.name))
             ? {}
             : route.name === 'activity-edit'
               ? { writesPaused: verifying || !!error, snapshot: detail, onLoaded: showDetail }
-              : { writesPaused: verifying || !!error }
+              : { writesPaused: verifying || !!error,
+                  ...(route.name === 'activity-hour-corrections' && { accountId: profile.account_id }) }
         "
         :key="route.name === 'hour-batch' ? base + '/' + route.params.item : base"
       />

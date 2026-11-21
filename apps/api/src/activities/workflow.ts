@@ -3,7 +3,7 @@ import type { ActivityInput } from '@hongyan/contracts/types';
 import { activityContacts, resultDate } from '@hongyan/contracts/activity';
 import { Injectable } from '@nestjs/common';
 import type { Prisma, ActivityRevision, ActivityReview } from '../generated/prisma/client.js';
-import { studentId, type SessionRequest } from '../auth/session.guard.js';
+import { studentId, type Actor, type SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import { BusinessError, denied, envelope, expired, invalid, invisible } from '../http.js';
 import {
@@ -114,12 +114,14 @@ export function detail(row: LoadedActivity) {
 }
 
 export type Tx = Prisma.TransactionClient;
+export type Reauthorize = () => Promise<Actor>;
 export type Target =
   | { activityId: string }
+  | { activityIds: (tx: Tx) => Promise<string[]> }
   | { reviewId: string }
   | { registrationId: string }
   | null;
-async function targetActivityId(tx: Tx, target: NonNullable<Target>) {
+async function targetActivityId(tx: Tx, target: Exclude<Target, { activityIds: unknown } | null>) {
   if ('activityId' in target) return target.activityId;
   const reference =
     'reviewId' in target
@@ -142,7 +144,7 @@ export class Workflow {
     target: Target,
     // 'self' 用于本人资源操作（如通知已读/确认），不做活动范围校验。
     access: 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self',
-    execute: (tx: Tx, row: LoadedActivity | null) => Promise<unknown>,
+    execute: (tx: Tx, row: LoadedActivity | null, actor: Actor, reauthorize: Reauthorize) => Promise<unknown>,
     scope?: string,
     commandInput: unknown = req.body ?? {},
   ) {
@@ -159,7 +161,13 @@ export class Workflow {
     return this.db.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${stable(identity)},0))`;
       let row: LoadedActivity | null = null;
-      if (target) {
+      let ids: string[] | undefined;
+      if (target && 'activityIds' in target) {
+        ids = [...new Set(await target.activityIds(tx))];
+        const locked = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id FROM activity WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR UPDATE`;
+        if (!ids.length || locked.length !== ids.length) invisible();
+      } else if (target) {
         const id = await targetActivityId(tx, target);
         if (access === 'apply') {
           await tx.$queryRaw`SELECT id FROM activity WHERE id=${id}::uuid FOR SHARE`;
@@ -171,40 +179,37 @@ export class Workflow {
         row = await tx.activity.findUnique({ where: { id }, include: includeView });
         if (!row) invisible();
       }
-      const account = await tx.account.findFirst({
-        where: {
-          id: account_id,
-          active: true,
-          must_change_password: false,
-          sessions: { some: { id_hash: req.sessionHash, expires_at: { gt: new Date() } } },
-        },
-        include: {
-          student: { select: { id: true } },
-          roles: { where: { OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }] } },
-        },
-      });
-      if (!account) expired();
-      const actor = { ...req.actor, roles: account.roles.map((r) => r.role) };
-      if (
-        access === 'apply' &&
-        (studentId(actor) !== account.student?.id || !row?.published_revision)
-      )
-        invisible();
-      if (access === 'self' && studentId(actor) !== account.student?.id) invisible();
-      if (access === 'create' && !actor.roles.includes('organizer')) denied();
-      if (access === 'review' && !staff(actor)) denied();
-      if (
-        (access === 'manage' || access === 'workspace') &&
-        row &&
-        !(await tx.activity.findFirst({
+      const reauthorize: Reauthorize = async () => {
+        const now = new Date();
+        const account = await tx.account.findFirst({
           where: {
-            id: row.id,
-            ...(access === 'workspace' ? workspaceScope(actor, scope) : managedScope(actor)),
+            id: account_id,
+            active: true,
+            must_change_password: false,
+            sessions: { some: { id_hash: req.sessionHash, expires_at: { gt: now } } },
           },
+          include: {
+            student: { select: { id: true } },
+            roles: { where: { OR: [{ expires_at: null }, { expires_at: { gt: now } }] } },
+          },
+        });
+        if (!account) expired();
+        const actor = { ...req.actor, roles: account.roles.map((r) => r.role) };
+        if (access === 'apply' && (studentId(actor) !== account.student?.id || !row?.published_revision))
+          invisible();
+        if (access === 'self' && studentId(actor) !== account.student?.id) invisible();
+        if (access === 'create' && !actor.roles.includes('organizer')) denied();
+        if (access === 'review' && !staff(actor)) denied();
+        if (ids && access === 'manage' && await tx.activity.count({
+          where: { id: { in: ids }, ...managedScope(actor) },
+        }) !== ids.length) invisible();
+        if ((access === 'manage' || access === 'workspace') && row && !await tx.activity.findFirst({
+          where: { id: row.id, ...(access === 'workspace' ? workspaceScope(actor, scope) : managedScope(actor)) },
           select: { id: true },
-        }))
-      )
-        invisible();
+        })) invisible();
+        return actor;
+      };
+      const actor = await reauthorize();
       const cached = await tx.commandReceipt.findUnique({
         where: { account_id_method_path_key: identity },
       });
@@ -213,7 +218,7 @@ export class Workflow {
           throw new BusinessError(409, 'conflict', '同一幂等键的请求内容已变化');
         return cached.response;
       }
-      const response = json(envelope(await execute(tx, row)));
+      const response = json(envelope(await execute(tx, row, actor, reauthorize)));
       await tx.commandReceipt.create({ data: { ...identity, digest, response } });
       return response;
     });

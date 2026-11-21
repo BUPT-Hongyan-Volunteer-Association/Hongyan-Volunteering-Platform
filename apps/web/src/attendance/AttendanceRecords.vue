@@ -16,7 +16,7 @@ import Pager from '@hongyan/ui/Pager.vue';
 import RecordTable from '@hongyan/ui/RecordTable.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import type { PreviewRecord } from '@hongyan/ui/preview';
-import { message, noAccess, usePageRead } from '../usePageRead';
+import { message, noAccess, usePageRead } from '@hongyan/ui/usePageRead';
 import AttendanceRoster from './AttendanceRoster.vue';
 
 const props = defineProps<{ writesPaused: boolean }>();

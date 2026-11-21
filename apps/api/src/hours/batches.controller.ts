@@ -1,20 +1,23 @@
+import { approvedOrigin } from './read-ledger.js';
 import { Body, CallHandler, CanActivate, Controller, ExecutionContext, Get, Header, HttpCode, Injectable, Param, ParseUUIDPipe, PayloadTooLargeException,
   Post, Query, Req, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
 import type { Response } from 'express';
-import type { ActivityInput, VersionAction } from '@hongyan/contracts/types';
+import type { ActivityInput, HourBatchReviewDecision, HourBatchSubmit, ReasonAction, VersionAction } from '@hongyan/contracts/types';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
-import { envelope, invalid, invisible } from '../http.js';
-import { managedScope, pagination } from '../activities/read.js';
+import { denied, envelope, invalid, invisible } from '../http.js';
+import { managedScope, pagination, staff } from '../activities/read.js';
 import { Workflow, checkVersion, json, wrongState } from '../activities/workflow.js';
 import { validate } from '../activities/validation.js';
 import { batchView, digest, emptySummary, mime } from './batch-data.js';
 import { HourValidationWorker } from './validation-worker.js';
+import { requestVoid, reviewBatch, submitBatch } from './batch-review.js';
 
 const maxSize = 5242880;
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const statuses = ['validating','invalid','ready','pending_review','approved','rejected','failed'];
 const metadataOnly = { id: true, name: true, size: true, purpose: true, created_at: true } as const;
 type QueryValues = Record<string,string>;
 type Upload = { originalname: string; buffer: Buffer };
@@ -100,11 +103,22 @@ export class HourBatchesController {
 
   @Get('organizer/activities/:id/hour-imports')
   async list(@Param('id', ParseUUIDPipe) id: string, @Req() req: SessionRequest, @Query() query: QueryValues) {
+    return this.page(req, query, id, false);
+  }
+
+  @Get('admin/hour-imports')
+  async queue(@Req() req: SessionRequest, @Query() query: QueryValues) {
+    if (!staff(req.actor)) denied();
+    if (query.activity_id !== undefined && !uuid.test(query.activity_id)) invalid('activity_id', '活动 ID 无效');
+    return this.page(req, query, query.activity_id, true);
+  }
+
+  private page(req: SessionRequest, query: QueryValues, id: string | undefined, admin: boolean) {
     const {page,page_size,skip} = pagination(query);
-    const status = query.status === undefined ? undefined : choice(query.status,'status',['validating','invalid','ready','pending_review','approved','rejected','failed']);
+    const status = query.status === undefined ? undefined : choice(query.status,'status',statuses);
     const mode = query.mode === undefined ? undefined : choice(query.mode,'mode',['new','correction','void']);
     return this.db.$transaction(async (tx) => {
-      if (!await tx.activity.findFirst({where:{id,...managedScope(req.actor)},select:{id:true}})) return invisible();
+      if (!admin && !await tx.activity.findFirst({where:{id,...managedScope(req.actor)},select:{id:true}})) return invisible();
       const where = {activity_id:id,status,mode};
       const total = await tx.hourImportBatch.count({ where });
       const batches = await tx.hourImportBatch.findMany({where,skip,take:page_size,orderBy:[{created_at:'desc'},{id:'desc'}]});
@@ -121,7 +135,7 @@ export class HourBatchesController {
   @Get('hour-imports/:id/rows')
   async rows(@Param('id', ParseUUIDPipe) id: string, @Req() req: SessionRequest, @Query() query: QueryValues) {
     const {page,page_size,skip} = pagination(query);
-    const action = query.action === undefined ? undefined : choice(query.action,'action',['add','correct','void','error','skip_identical']);
+    const action = query.action === undefined ? undefined : choice(query.action,'action',['add','correct','void','error','skip_identical','review_only']);
     const flag = query.misconduct_requires_review;
     const needs_review = flag === undefined ? undefined : choice(flag,'misconduct_requires_review',['true','false']) === 'true';
     return this.db.$transaction(async (tx) => {
@@ -131,6 +145,36 @@ export class HourBatchesController {
       const rows = await tx.hourImportRow.findMany({where,skip,take:page_size,orderBy:{row_number:'asc'},select:{detail:true}});
       return envelope({items:rows.map((row) => row.detail),page,page_size,total});
     },{isolationLevel:'RepeatableRead'});
+  }
+
+  @Post('hour-imports/:id/submit') @HttpCode(200)
+  async submit(@Param('id', ParseUUIDPipe) id: string, @Req() req: SessionRequest) {
+    const batch = await this.db.hourImportBatch.findFirst({ where: { id, activity: managedScope(req.actor) } });
+    if (!batch) invisible();
+    const input = validate<HourBatchSubmit>('hour_batch_submit', req.body);
+    return this.commands.run(req, { activityId: batch.activity_id }, 'manage', (tx, activity, actor, reauthorize) =>
+      submitBatch(tx, activity!, id, input, actor, req.receivedAt, reauthorize));
+  }
+
+  @Post('admin/hour-imports/:id/decision') @HttpCode(200)
+  async decision(@Param('id', ParseUUIDPipe) id: string, @Req() req: SessionRequest) {
+    if (!staff(req.actor)) denied();
+    const batch = await this.db.hourImportBatch.findUnique({ where: { id }, select: { activity_id: true } });
+    if (!batch) invisible();
+    const input = validate<HourBatchReviewDecision>('hour_batch_review_decision', req.body);
+    return this.commands.run(req, { activityId: batch.activity_id }, 'review', (tx, activity, actor, reauthorize) =>
+      reviewBatch(tx, activity!, id, input, actor, req.receivedAt, reauthorize));
+  }
+
+  @Post('organizer/hour-records/:id/void-requests')
+  async voidRequest(@Param('id', ParseUUIDPipe) id: string, @Req() req: SessionRequest) {
+    const record = await this.db.hourRecord.findFirst({
+      where: { id, activity: managedScope(req.actor), ...approvedOrigin }, select: { activity_id: true },
+    });
+    if (!record) invisible();
+    const input = validate<ReasonAction>('reason_action', req.body);
+    return this.commands.run(req, { activityId: record.activity_id }, 'manage', (tx, activity, actor, reauthorize) =>
+      requestVoid(tx, activity!, id, input, actor, req.receivedAt, reauthorize));
   }
 
   @Post('hour-imports/:id/retry') @HttpCode(202)

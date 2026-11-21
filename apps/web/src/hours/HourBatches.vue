@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import Pager from '@hongyan/ui/Pager.vue';
 import { listActivityHourBatches } from '@hongyan/contracts';
 import HourUpload from './HourUpload.vue';
-import { beijing, statuses, useHourRead } from './display';
+import { beijing, statuses, useHourRead } from '@hongyan/ui/hourDisplay';
 
 defineProps<{ writesPaused:boolean }>();
 const emit = defineEmits<{ denied:[] }>();

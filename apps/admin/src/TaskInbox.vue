@@ -1,9 +1,22 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { listActivityReviews, type ActivityReview } from '@hongyan/contracts';
+import { listActivityReviews, listAppeals, listHourBatchesForReview, listHourCorrectionGroups, listIncidentsForReview,
+  type ActivityReview } from '@hongyan/contracts';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
-import { sections } from './management/sections';
-const previews = ['corrections', 'incidents', 'appeals'] as const;
+import { usePageRead } from '@hongyan/ui/usePageRead';
+const tasks = [
+  { to: '/hours', label: '时长批次', read: (signal: AbortSignal) =>
+    listHourBatchesForReview({ query: { status: 'pending_review', page_size: 1 }, signal, throwOnError: true }) },
+  { to: '/manage/corrections?group_status=pending_review', label: '错账修复组', read: (signal: AbortSignal) =>
+    listHourCorrectionGroups({ query: { status: 'pending_review', page_size: 1 }, signal, throwOnError: true }) },
+  { to: '/manage/incidents', label: '异常复核', read: (signal: AbortSignal) =>
+    listIncidentsForReview({ query: { status: 'pending', page_size: 1 }, signal, throwOnError: true }) },
+  { to: '/manage/appeals?appeal_status=pending', label: '申诉与更正', read: (signal: AbortSignal) =>
+    listAppeals({ query: { status: 'pending', page_size: 1 }, signal, throwOnError: true }) },
+];
+const { data: counts, error: workError, refresh: loadWork } = usePageRead(() => true, async (signal) =>
+  Promise.all(tasks.map(async (item) => (await item.read(signal)).data.data.total)),
+);
 const rows = ref<ActivityReview[]>([]);
 const total = ref(0);
 const busy = ref(true);
@@ -64,17 +77,13 @@ onMounted(load);
           <UiIcon name="Files" />
           <h2>其他审核待办</h2>
         </div>
-        <span class="sample-label">示例数据</span>
       </div>
+      <p v-if="workError" role="alert">{{ workError }} <button @click="loadWork()">重读待办</button></p>
       <div class="entry-list">
-        <RouterLink to="/hours"
-          >时长批次<span class="row-end"
-            ><span class="state-chip attention">待审核</span><UiIcon name="ArrowRight" /></span
-        ></RouterLink>
-        <RouterLink v-for="key in previews" :key="key" :to="'/manage/' + key"
-          >{{ sections[key].title }}
+        <RouterLink v-for="(item, index) in tasks" :key="item.to" :to="item.to"
+          >{{ item.label }}
           <span class="row-end"
-            ><span class="state-chip neutral">{{ sections[key].records[0].status }}</span
+            ><span v-if="counts" class="state-chip" :class="{ neutral: !counts[index] }">待处理 {{ counts[index] }} 项</span
             ><UiIcon name="ArrowRight"
           /></span>
         </RouterLink>

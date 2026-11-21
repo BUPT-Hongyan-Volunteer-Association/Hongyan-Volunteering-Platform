@@ -11,6 +11,7 @@ import { Database } from '../dist/database.js';
 import { slots } from '../dist/activities/schedule.js';
 import { checkHourPages } from './hour-pages-fixture.mjs';
 import { checkStudentImportPages } from './student-import-pages-fixture.mjs';
+import { checkLedgerPages } from './hour-ledger-pages.mjs';
 
 const link = (page, name) => page.getByRole('link', { name, exact: true });
 const button = (page, name) => page.getByRole('button', { name, exact: true });
@@ -176,12 +177,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           await fits(student);
         }
         await link(student, '我的时长').click();
-        await visible(student.getByRole('table', { name: '我的时长' }).getByText('2026-11-14'));
+        await visible(student.getByText('0.0 小时', { exact: true }));
         await fits(student);
         await link(student, '返回我的').click();
         await link(student, '本人记录与反馈').click();
-        await student.locator('.entry-list a').first().click();
-        await visible(student.getByText('处罚', { exact: true }));
+        await visible(link(student, '提交漏记反馈'));
         await fits(student);
         await link(student, '返回我的').click();
         await link(student, '我的日程').click();
@@ -225,9 +225,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           '通知与回执',
           '现场人员记录',
           '时长批次',
+          '时长台账',
           '漏记反馈',
           '错账修复组',
-          '异常上报',
+          '异常记录',
         ]) {
           if (!(await link(owner, tab).isVisible()))
             await owner.getByText('更多', { exact: true }).click();
@@ -249,8 +250,14 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
             await fits(owner);
             continue;
           }
-          if (tab === '漏记反馈') {
-            await visible(owner.getByRole('table', { name: tab }));
+          const empty = {
+            漏记反馈: '当前没有反馈。',
+            错账修复组: '当前没有修复组。',
+            时长台账: '当前条件下没有时长记录。',
+            异常记录: '没有异常记录。',
+          }[tab];
+          if (empty) {
+            await visible(owner.getByText(empty, { exact: true }));
             await fits(owner);
             continue;
           }
@@ -275,6 +282,16 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           await nav.getByRole('link', { name: section, exact: true }).click();
           if (section === '审计记录') {
             await visible(teacher.getByRole('table', { name: section }).getByText('活动交接'));
+            await fits(teacher);
+            continue;
+          }
+          const empty = {
+            错账修复组: '当前没有修复组。',
+            异常复核: '没有异常记录。',
+            申诉与更正: '当前没有反馈。',
+          }[section];
+          if (empty) {
+            await visible(teacher.getByText(empty, { exact: true }));
             await fits(teacher);
             continue;
           }
@@ -326,40 +343,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(student.getByRole('heading', { name: '校园服务甲' }));
       await button(student, '返回日程').click();
       await fits(student);
-    });
-
-    await t.test('学生与老师能打开同一条待受理的异常申诉', async () => {
-      await student.goto(web + '/mine/feedback');
-      await student.getByRole('link', { name: /异常申诉/ }).click();
-      await visible(student.getByText('A2026-014', { exact: true }));
-      await visible(student.getByText('已提交，等待老师核查'));
-      await teacher.goto(admin + '/manage/appeals');
-      await teacher.getByRole('link', { name: /A2026-014/ }).click();
-      await visible(teacher.locator('.record-detail-pane').getByText('待受理', { exact: true }));
-      const queue = teacher.locator('main .record-list-pane');
-      const panel = teacher.locator('main .record-detail-pane');
-      for (const width of [390, 1024, 1920, 1440]) {
-        await teacher.setViewportSize({ width, height: 900 });
-        assert.equal(await queue.isVisible(), width >= 1024);
-        await visible(panel);
-        if (width >= 1024) {
-          const a = await queue.boundingBox(), b = await panel.boundingBox();
-          assert.ok(a.x + a.width <= b.x + 1 && Math.abs(a.y - b.y) < 1);
-        }
-        await fits(teacher);
-      }
-      await capture(teacher, 'appeal-workspace');
-      await teacher.getByLabel('处理意见').fill('仅用于当前申请');
-      const search = queue.getByRole('searchbox', { name: '筛选记录' });
-      await search.fill('A2026');
-      await teacher.waitForURL(url => url.searchParams.get('search') === 'A2026');
-      assert.equal(await teacher.getByLabel('处理意见').inputValue(), '仅用于当前申请');
-      await queue.getByRole('link', { name: /A2026-012/ }).click();
-      await visible(panel.getByText('资料整理时长未显示'));
-      assert.equal(await teacher.getByLabel('处理意见').inputValue(), '');
-      await teacher.goBack();
-      await visible(panel.getByText('待受理', { exact: true }));
-      await visible(teacher.getByText('本人已提前联系负责人，请复核签到说明。'));
     });
 
     await t.test('公开地点获批后更新，学生确认变更，负责人可刷新回执', async () => {
@@ -670,43 +653,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         assert.deepEqual(writes, []);
       } finally {
         owner.off('request', collect);
-      }
-    });
-
-    await t.test('按原表行核实，筛选与分页保留意见，合计覆盖全批', async () => {
-      await teacher.setViewportSize({ width: 1440, height: 900 });
-      await teacher.goto(admin + '/hours');
-      await teacher.getByRole('link', { name: /H2026-001/ }).click();
-      const writes = [];
-      const collect = (r) => {
-        if (r.url().includes('/api/v1/') && r.method() !== 'GET') writes.push(r.method());
-      };
-      teacher.on('request', collect);
-      try {
-        await button(teacher, '预览通过整批').click();
-        await visible(teacher.getByText('请核实原表第 4、6 行并填写意见'));
-        await pickOption(teacher, '每页', '3 条');
-        await button(teacher, '核实原表第4行').click();
-        await teacher.getByLabel('属实', { exact: true }).check();
-        await teacher.getByLabel('第4行意见').fill('已核实，未按时签到。');
-        await button(teacher, '预览通过整批').click();
-        await visible(teacher.getByText('请核实原表第 6 行并填写意见'));
-        await teacher.getByLabel('不成立', { exact: true }).check();
-        await teacher.getByLabel('第6行意见').fill('已核实补签记录。');
-        await teacher.getByLabel('只看待核实行').check();
-        await teacher.getByLabel('只看待核实行').uncheck();
-        await pickOption(teacher, '每页', '5 条');
-        await button(teacher, '核实原表第4行').click();
-        assert.equal(await teacher.getByLabel('第4行意见').inputValue(), '已核实，未按时签到。');
-        await visible(teacher.locator('.verify').getByText('示例学生 3', { exact: true }));
-        assert.equal(await teacher.locator('tbody tr.selected th').innerText(), '4');
-        assert.equal(await teacher.getByLabel('整批意见').inputValue(), '');
-        await visible(teacher.getByText('全批 5 条 · 合计 10.0 小时'));
-        await button(teacher, '预览通过整批').click();
-        await visible(teacher.getByText('输入完整，可通过整批（预览）'));
-        assert.deepEqual(writes, []);
-      } finally {
-        teacher.off('request', collect);
       }
     });
 
@@ -1449,6 +1395,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(supplemented.nth(1));
       assert.equal(await supplemented.count(), 2);
       await fits(owner);
+    });
+    await t.test('四个账号完成真实送审、入账、错账修复和分别结案，逐行审核跨页保留意见', async () => {
+      await checkLedgerPages({ db, web, admin, owner, teacher, student, secondStudent: helper,
+        worker: api.get(NoticeWorker), fits, pickOption, capture, holdResponse, settleRender });
     });
   } finally {
     try {

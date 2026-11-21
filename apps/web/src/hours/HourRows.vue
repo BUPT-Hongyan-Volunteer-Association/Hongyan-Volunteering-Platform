@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import { getHourBatchRows, type GetHourBatchRowsData } from '@hongyan/contracts';
 import Pager from '@hongyan/ui/Pager.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
-import { actions, fields, signed, useHourRead } from './display';
+import { actions, fields, misconductLabels, signed, useHourRead } from '@hongyan/ui/hourDisplay';
 
 const props = defineProps<{ batchId:string }>();
 const emit = defineEmits<{ denied:[] }>();
@@ -18,7 +18,7 @@ function showErrors() {
   heading.value?.focus();
 }
 defineExpose({ showErrors });
-const filters = [{value:'all',label:'全部动作'},...(['add','correct','skip_identical','error','void'] as const).map((value) => ({value,label:actions[value]}))];
+const filters = [{value:'all',label:'全部动作'},...(['add','correct','review_only','skip_identical','error','void'] as const).map((value) => ({value,label:actions[value]}))];
 const {data,error,loading,refresh} = useHourRead(() => [props.batchId,page.value,action.value,needsReview.value],async (signal) => {
   return (await getHourBatchRows({path:{id:props.batchId},query:{page:page.value,page_size:size,
       action:action.value === 'all' ? undefined : action.value, misconduct_requires_review:needsReview.value || undefined},
@@ -52,7 +52,10 @@ const {data,error,loading,refresh} = useHourRead(() => [props.batchId,page.value
               <small v-if="warning.projected_daily_hours">当日预计 {{ warning.projected_daily_hours }} 小时</small>
               <small v-if="warning.planned_hours">计划覆盖 {{ warning.planned_hours }} 小时</small>
               <small>{{ warning.explanation ? '说明：' + warning.explanation : '须在工作簿备注中补充说明' }}</small></p><span v-if="!row.warnings?.length">—</span></td>
-            <td>{{ row.misconduct_reported === 'reported' ? '有' : row.misconduct_reported === 'none' ? '无' : row.misconduct_reported === 'not_provided' ? '未提供' : row.raw_values?.misconduct_reported || '未填写' }}<small v-if="row.misconduct_requires_review">待核实</small></td>
+            <td>{{ row.misconduct_reported ? misconductLabels[row.misconduct_reported] : row.raw_values?.misconduct_reported || '未填写' }}
+              <small v-if="row.misconduct_review">{{ row.misconduct_review.decision === 'confirmed' ? '属实' : '不成立' }} · {{ row.misconduct_review.reason }}</small>
+              <small v-else-if="row.misconduct_requires_review">待核实</small>
+            </td>
             <td>{{ row.remark || row.raw_values?.remark || '—' }}<small v-if="row.bound_schedule_revision">获批版本 {{ row.bound_schedule_revision }}</small></td>
           </tr></tbody>
         </table>

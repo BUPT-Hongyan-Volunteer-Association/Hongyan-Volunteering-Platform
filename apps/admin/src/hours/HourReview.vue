@@ -1,415 +1,271 @@
 <script setup lang="ts">
+import { computed, onScopeDispose, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import {
+  ApiError, createCommand, getHourBatch, getHourBatchRows, listHourBatchesForReview,
+  listIncidentsForReview, reviewHourBatch, type HourBatch, type HourBatchReviewDecision,
+  type HourMisconductReviewInput, type Profile,
+} from '@hongyan/contracts';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
-import { computed, reactive, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
-import type { HourBatch, HourRow } from '@hongyan/contracts';
-import UiIcon from '@hongyan/ui/UiIcon.vue';
 import Pager from '@hongyan/ui/Pager.vue';
-const route = useRoute();
-const batch: HourBatch = {
-  id: '30000000-0000-4000-8000-000000000001',
-  version: 1,
-  activity_id: '40000000-0000-4000-8000-000000000001',
-  mode: 'new',
-  status: 'pending_review',
-  batch_code: 'H2026-001',
-  activity_code: 'P2026-0001',
-  activity_title: '校园服务甲',
-  submitted_by: '50000000-0000-4000-8000-000000000001',
-  submitted_by_name: '甲负责人',
-  submitted_at: '2026-11-18T09:00:00+08:00',
-  source_file_id: '60000000-0000-4000-8000-000000000001',
-  source_file_name: '校园服务甲时长.xlsx',
-  source_hash: 'a'.repeat(64),
-  valid_count: 5,
-  row_count: 5,
-  template_structure: 'hours_misconduct_7',
-  projected_delta_hours: '10.0',
-  misconduct_review_required_count: 2,
-  warnings: [],
-  warning_snapshot_hash: 'b'.repeat(64),
-};
-const rows: HourRow[] = Array.from({ length: 5 }, (_, i) => ({
-  row_number: i + 2,
-  action: 'add',
-  student_no: String(i + 1).padStart(10, '0'),
-  student_name: '示例学生 ' + (i + 1),
-  activity_code: batch.activity_code,
-  service_date: '2026-11-17',
-  credited_hours: '2.0',
-  remark: i === 2 || i === 4 ? '未按时签到' : '',
-  misconduct_reported: i === 2 || i === 4 ? 'reported' : 'none',
-  misconduct_requires_review: i === 2 || i === 4,
-}));
-const only = ref(false),
-  page = ref(1),
-  reason = ref(''),
-  warningBasis = ref(''),
-  result = ref('');
-const inputs = reactive(
-  Object.fromEntries(
-    rows.map((r) => [batch.id + '/' + r.row_number, { decision: '', opinion: '' }]),
-  ),
+import HourWarnings from '@hongyan/ui/HourWarnings.vue';
+import { actions, useReviewWarnings, beijing, misconductLabels, modes, signed, statuses } from '@hongyan/ui/hourDisplay';
+import { message, noAccess, pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
+
+const props = defineProps<{ profile: Profile }>();
+const route = useRoute(), router = useRouter();
+const id = computed(() => String(route.params.id ?? ''));
+const queuePage = computed(() => pageNumber(route.query.page));
+const status = computed(() => String(route.query.status ?? 'pending_review') as HourBatch['status'] | 'all');
+const filters = [{ value: 'all', label: '全部状态' },
+  ...Object.entries(statuses).map(([value, label]) => ({ value, label }))];
+const { data: queue, error: queueError, loading: queueLoading, refresh: loadQueue } = usePageRead(
+  () => [id.value, queuePage.value, status.value],
+  async (signal) => id.value ? undefined : (await listHourBatchesForReview({
+    query: { page: queuePage.value, status: status.value === 'all' ? undefined : status.value }, signal, throwOnError: true,
+  })).data.data,
 );
-const filtered = computed(() => rows.filter((r) => !only.value || r.misconduct_requires_review));
-const pageSize = ref(5);
-const activeRow = ref<number>();
-const visibleRows = computed(() =>
-  filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value),
+function setQueue(query: { status?: string; page: number }) {
+  void router.push({ path: '/hours', query: { ...route.query, ...query } });
+}
+const { data: batch, error: detailError, loading: detailLoading, refresh: loadBatch } = usePageRead(id, async (signal) =>
+  id.value ? (await getHourBatch({ path: { id: id.value }, signal, throwOnError: true })).data.data : undefined,
 );
-const active = computed(() =>
-  visibleRows.value.find((r) => r.row_number === activeRow.value && r.misconduct_requires_review),
+const page = ref(1), size = ref(20), only = ref(false), activeNumber = ref<number>();
+const { data: detail, error: rowsError, loading: rowsLoading, refresh: loadRows, clear: clearRows } = usePageRead(
+  () => [id.value, page.value, size.value, only.value], async (signal) => id.value ? (await getHourBatchRows({
+    path: { id: id.value }, query: { page: page.value, page_size: size.value, misconduct_requires_review: only.value || undefined },
+    signal, throwOnError: true,
+  })).data.data : undefined, () => void loadBatch(),
 );
-const activeInput = computed(() =>
-  active.value ? inputs[batch.id + '/' + active.value.row_number] : undefined,
-);
-const submitted = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Asia/Shanghai',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-}).format(new Date(batch.submitted_at!));
-watch([only, pageSize], () => {
-  page.value = 1;
-});
-watch(
-  visibleRows,
-  (list) => {
-    if (!list.some((r) => r.row_number === activeRow.value))
-      activeRow.value = list.find((r) => r.misconduct_requires_review)?.row_number;
+const rows = computed(() => detail.value?.items ?? []);
+const canDecide = computed(() => batch.value?.status === 'pending_review' && batch.value.submitted_by !== props.profile.account_id);
+type Draft = { decision: '' | 'confirmed' | 'rejected'; reason: string; incident?: { id: string; version: number } };
+const drafts = reactive<Record<number, Draft>>({});
+const active = computed(() => rows.value.find((row) => row.row_number === activeNumber.value && row.misconduct_requires_review));
+const selected = computed(() => active.value ? drafts[active.value.row_number] : undefined);
+const checked = computed(() => Object.values(drafts).filter((draft) => draft.decision && draft.reason.trim()).length);
+const { data: matches, error: matchesError, refresh: loadMatches } = usePageRead(
+  () => [active.value, selected.value?.decision, canDecide.value],
+  async (signal) => {
+    const row = active.value, current = batch.value;
+    if (!canDecide.value || selected.value?.decision !== 'confirmed' || !row?.student_id || !current) return [];
+    return (await listIncidentsForReview({ query: {
+      status: 'confirmed', student_id: row.student_id, activity_id: current.activity_id, service_date: row.service_date, page_size: 100,
+    }, signal, throwOnError: true })).data.data.items;
   },
-  { immediate: true },
 );
-watch(
-  [inputs, reason, warningBasis],
-  () => {
-    result.value = '';
-  },
-  { deep: true },
-);
-function preview() {
-  const missing = rows.filter(
-    (r) =>
-      r.misconduct_requires_review &&
-      (!inputs[batch.id + '/' + r.row_number].decision ||
-        !inputs[batch.id + '/' + r.row_number].opinion.trim()),
-  );
-  if (missing.length) {
-    const first = missing[0];
-    page.value = Math.floor(filtered.value.indexOf(first) / pageSize.value) + 1;
-    activeRow.value = first.row_number;
+function activate(number: number) {
+  activeNumber.value = number;
+  drafts[number] ??= { decision: '', reason: '' };
+}
+function linkIncident(event: Event) {
+  if (!selected.value) return;
+  const linked = matches.value?.find((incident) => incident.id === (event.target as HTMLSelectElement).value);
+  selected.value.incident = linked ? { id: linked.id, version: linked.version } : undefined;
+}
+watch(detail, (current) => {
+  if (!current || !canDecide.value) return;
+  if (!current.items.some((row) => row.row_number === activeNumber.value)) {
+    const first = current.items.find((row) => row.misconduct_requires_review);
+    activeNumber.value = undefined;
+    if (first) activate(first.row_number);
   }
-  result.value = missing.length
-    ? '请核实原表第 ' + missing.map((r) => r.row_number).join('、') + ' 行并填写意见'
-    : batch.warnings.length && !warningBasis.value.trim()
-      ? '请填写警告接受依据'
-      : '输入完整，可通过整批（预览）';
+});
+watch([only, size], () => { page.value = 1; });
+
+const reviewWarnings = useReviewWarnings(() => batch.value);
+const { warnings } = reviewWarnings;
+const reason = ref(''), basis = ref(''), result = ref(''), problem = ref(''), busy = ref(false);
+const command = createCommand();
+let live = true;
+onScopeDispose(() => { live = false; });
+watch(id, () => {
+  for (const key of Object.keys(drafts)) delete drafts[Number(key)];
+  only.value = false; page.value = 1; activeNumber.value = undefined;
+  reviewWarnings.reset(); basis.value = ''; reason.value = '';
+  problem.value = ''; result.value = ''; busy.value = false;
+  command.confirmed();
+});
+async function decide(decision: 'approved' | 'rejected') {
+  const current = batch.value, target = id.value;
+  if (!current || !canDecide.value || busy.value) return;
+  result.value = ''; problem.value = '';
+  const remarks = Object.entries(drafts).flatMap(([number, draft]): HourMisconductReviewInput[] => {
+    if (!draft.decision || !draft.reason.trim()) return [];
+    const incident = draft.decision === 'confirmed' ? draft.incident : undefined;
+    return [{ row_number: Number(number), decision: draft.decision, reason: draft.reason.trim(),
+      ...(incident && { existing_incident_id: incident.id, existing_incident_version: incident.version }),
+    }];
+  });
+  if (decision === 'approved' && remarks.length !== (current.misconduct_review_required_count ?? 0)) {
+    problem.value = '请为全部待核实行填写结论与意见。';
+    return;
+  }
+  if (decision === 'approved' && warnings.value.length && !basis.value.trim()) {
+    problem.value = '请填写警告接受依据。';
+    return;
+  }
+  if (decision === 'rejected' && !reason.value.trim()) {
+    problem.value = '请在整批意见中填写驳回原因。';
+    return;
+  }
+  const decisionReason = decision === 'approved'
+    ? [basis.value.trim(), reason.value.trim()].filter(Boolean).join('\n') : reason.value.trim();
+  if ([...decisionReason].length > 2000) {
+    problem.value = '审批意见合计须在 2000 字以内。';
+    return;
+  }
+  const body: HourBatchReviewDecision = decision === 'rejected'
+    ? { expected_version: current.version, decision, reason: decisionReason }
+    : { expected_version: current.version, decision, ...(decisionReason && { reason: decisionReason }),
+      warning_snapshot_hash: reviewWarnings.hash.value,
+      misconduct_reviews: remarks };
+  busy.value = true;
+  try {
+    const { data } = await reviewHourBatch({ path: { id: target }, body,
+      headers: command.headers('review_hour_batch', target, body), throwOnError: true });
+    if (!live || id.value !== target) return;
+    command.confirmed();
+    batch.value = data.data;
+    reviewWarnings.reset();
+    result.value = decision === 'approved' ? '批次已批准，正式时长已更新。' : '批次已驳回。';
+    await loadRows(false);
+  } catch (error) {
+    if (!live || id.value !== target) return;
+    problem.value = message(error);
+    if (error instanceof ApiError && error.status === 409) {
+      command.confirmed();
+      if (reviewWarnings.refreshFrom(error)) {
+        basis.value = '';
+      } else await loadBatch();
+    } else if (noAccess(error)) {
+      clearRows();
+      await loadBatch();
+    }
+  } finally { if (live && id.value === target) busy.value = false; }
 }
 </script>
+
 <template>
-  <template v-if="!route.params.id">
-    <div class="page-heading">
-      <div class="page-title">
-        <h1>时长审核</h1>
-        <span class="sample-label">示例数据</span>
+  <section v-if="!id">
+    <h1>时长审核</h1>
+    <label class="queue-filter">批次状态
+      <UiSelect label="批次状态" :model-value="status" :options="filters" @update:model-value="setQueue({ status: String($event), page: 1 })" />
+    </label>
+    <p v-if="queueError" role="alert">{{ queueError }} <button @click="loadQueue()">重读队列</button></p>
+    <p v-else-if="queueLoading" role="status">正在读取时长批次…</p>
+    <p v-else-if="!queue?.total">当前条件下没有时长批次。</p>
+    <template v-else>
+      <div class="entry-list reading-area">
+        <RouterLink v-for="row in queue.items" :key="row.id" :to="{ path: '/hours/' + row.id, query: route.query }">
+          <div><strong>{{ row.activity_title }} · {{ row.source_file_name ?? modes[row.mode] + '申请' }}</strong>
+            <small class="meta-line">{{ row.batch_code }} · {{ row.submitted_by_name ?? '—' }} · {{ beijing(row.submitted_at ?? row.created_at) }} · {{ row.valid_count ?? 0 }} 条</small>
+          </div>
+          <span class="state-chip">{{ statuses[row.status] }}</span>
+        </RouterLink>
       </div>
-    </div>
-    <div class="entry-list reading-area">
-      <RouterLink :to="'/hours/' + batch.id">
-        <span class="item-icon"><UiIcon name="DocumentChecked" /></span>
-        <div>
-          <strong>{{ batch.batch_code }} · {{ batch.activity_title }}</strong
-          ><small class="meta-line"
-            >{{ batch.row_count }} 条 · 合计 {{ batch.projected_delta_hours }} 小时</small
-          >
-        </div>
-        <span class="row-end"
-          ><span class="state-chip attention">待审核</span><UiIcon name="ArrowRight"
-        /></span>
-      </RouterLink>
-    </div>
-  </template>
-  <template v-else-if="route.params.id !== batch.id"
-    ><RouterLink to="/hours">返回时长审核</RouterLink>
-    <p>批次不存在</p></template
-  >
+      <Pager v-if="queue.total > queue.page_size" :page="queuePage" :size="queue.page_size" :total="queue.total"
+        @change="setQueue({ page: $event })" />
+    </template>
+  </section>
   <article v-else class="hour-review">
-    <header>
-      <div class="page-title">
-        <h1>时长批次审核</h1>
-        <span class="state-chip attention">待审核</span>
+    <RouterLink class="back-link" :to="{ path: '/hours', query: route.query }">返回时长审核</RouterLink>
+    <p v-if="detailError" role="alert">{{ detailError }} <button @click="loadBatch()">重读批次</button></p>
+    <p v-else-if="detailLoading && !batch" role="status">正在读取审核详情…</p>
+    <template v-if="batch">
+      <header>
+        <div class="page-title"><h1>时长批次审核</h1><span class="state-chip">{{ statuses[batch.status] }}</span></div>
+        <p>{{ batch.activity_title }} · {{ batch.activity_code }}</p>
+        <p class="meta-line">{{ batch.batch_code }} · {{ modes[batch.mode] }} · 送审人 {{ batch.submitted_by_name ?? '—' }} · {{ beijing(batch.submitted_at) }}</p>
+        <a v-if="batch.source_file_id" :href="'/api/v1/files/' + batch.source_file_id + '/download'">下载原工作簿 · {{ batch.source_file_name }}</a>
+        <p v-if="batch.source_description">批次说明：{{ batch.source_description }}</p>
+        <p v-if="batch.reviewed_at">完成于 {{ beijing(batch.reviewed_at) }}<span v-if="batch.decision_reason"> · {{ batch.decision_reason }}</span></p>
+      </header>
+      <div class="page-actions review-tools">
+        <strong>全批 {{ batch.row_count ?? 0 }} 行 · 预计差额 {{ signed(batch.projected_delta_hours) }} 小时</strong>
+        <label><input type="checkbox" v-model="only" />只看待核实行</label>
+        <label class="size">每页
+          <UiSelect label="每页" v-model="size" :options="[5, 20, 50].map(value => ({ value, label: value + ' 条' }))" />
+        </label>
       </div>
-      <p class="batch-activity">{{ batch.activity_title }} · {{ batch.activity_code }}</p>
-      <p class="batch-meta">
-        {{ batch.batch_code }} · 新增导入 · 提交人 {{ batch.submitted_by_name }} · 送审
-        {{ submitted }}
-      </p>
-      <p class="source-file"><UiIcon name="Paperclip" />源文件　{{ batch.source_file_name }}</p>
-    </header>
-    <div class="page-actions review-tools">
-      <strong class="icon-label"
-        ><UiIcon name="CircleCheck" />校验通过 · 新增 {{ batch.valid_count }} 条</strong
-      ><span class="sample-label">示例数据</span>
-      <label><input type="checkbox" v-model="only" />只看待核实行</label>
-    </div>
-    <div class="scroll-table data-grid">
-      <table>
-        <thead>
-          <tr>
-            <th
-              v-for="h in [
-                '原表行',
-                '学号',
-                '姓名',
-                '活动编号',
-                '服务日期',
-                '认证时长（小时）',
-                '备注',
-                '是否有违纪情况',
-              ]"
-              :key="h"
-            >
-              {{ h }}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="r in visibleRows"
-            :key="r.row_number"
-            :class="{ selected: active?.row_number === r.row_number }"
-            @click="r.misconduct_requires_review && (activeRow = r.row_number)"
-          >
+      <p v-if="rowsError" role="alert">{{ rowsError }} <button @click="loadRows()">重读明细</button></p>
+      <p v-else-if="rowsLoading" role="status">正在读取原表行…</p>
+      <p v-else-if="!rows.length">当前条件下没有明细。</p>
+      <div v-if="rows.length" class="scroll-table" tabindex="0" aria-label="原表行审核明细">
+        <table>
+          <thead><tr><th>原表行</th><th>姓名与学号</th><th>服务日期</th><th>动作</th><th>原值 → 新值（小时）</th><th>获批安排</th><th>备注</th><th>违纪上报与结论</th></tr></thead>
+          <tbody><tr v-for="row in rows" :key="row.row_number" :class="{ selected: row.row_number === activeNumber }">
             <th scope="row">
-              <button
-                v-if="r.misconduct_requires_review"
-                :aria-label="'核实原表第' + r.row_number + '行'"
-                :aria-pressed="active?.row_number === r.row_number"
-                @click="activeRow = r.row_number"
-              >
-                {{ r.row_number }}</button
-              ><span v-else>{{ r.row_number }}</span>
+              <button v-if="row.misconduct_requires_review && canDecide" :aria-label="'核实原表第' + row.row_number + '行'"
+                :aria-pressed="row.row_number === activeNumber" @click="activate(row.row_number)">{{ row.row_number }}</button>
+              <span v-else>{{ row.row_number }}</span>
             </th>
-            <td>{{ r.student_no }}</td>
-            <td>{{ r.student_name }}</td>
-            <td>{{ r.activity_code }}</td>
-            <td>{{ r.service_date }}</td>
-            <td>{{ r.credited_hours }}</td>
-            <td>{{ r.remark || '—' }}</td>
-            <td>
-              <span :class="{ 'state-chip attention': r.misconduct_requires_review }">{{
-                r.misconduct_reported === 'reported' ? '有' : '无'
-              }}</span>
+            <td>{{ row.student_name }}<small>{{ row.student_no }}</small></td><td>{{ row.service_date }}</td>
+            <td>{{ actions[row.action] }}</td><td>{{ row.previous_hours ?? '—' }} → {{ row.credited_hours ?? '—' }}</td>
+            <td>版本 {{ row.bound_schedule_revision ?? '—' }}</td><td class="long-text">{{ row.remark || '—' }}</td>
+            <td>{{ row.misconduct_reported ? misconductLabels[row.misconduct_reported] : '—' }}
+              <small v-if="row.misconduct_review">{{ row.misconduct_review.decision === 'confirmed' ? '属实' : '不成立' }} · {{ row.misconduct_review.reason }}</small>
+              <small v-else-if="row.misconduct_requires_review">{{ drafts[row.row_number]?.reason.trim() && drafts[row.row_number]?.decision ? '已填写' : '待核实' }}</small>
             </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="page-actions table-end">
-      <strong>全批 {{ batch.row_count }} 条 · 合计 {{ batch.projected_delta_hours }} 小时</strong>
-      <label
-        >每页
-        <UiSelect
-          label="每页"
-          v-model="pageSize"
-          :options="[
-            { value: 3, label: '3 条' },
-            { value: 5, label: '5 条' },
-          ]"
-      /></label>
-      <Pager
-        v-if="filtered.length > pageSize"
-        :page="page"
-        :size="pageSize"
-        :total="filtered.length"
-        @change="(p) => (page = p)"
-      />
-    </div>
-    <section v-if="active && activeInput" class="verify">
-      <div class="page-title">
-        <h2>违纪核实</h2>
-        <span class="state-chip">原表第 {{ active.row_number }} 行</span>
+          </tr></tbody>
+        </table>
       </div>
-      <p>
-        <strong>{{ active.student_name }}</strong
-        >（{{ active.student_no }}） · {{ active.remark }} <small>处罚未启用</small>
-      </p>
-      <fieldset>
-        <legend>核实结论</legend>
-        <label v-for="choice in ['属实', '不成立']" :key="choice"
-          ><input type="radio" name="decision" :value="choice" v-model="activeInput.decision" />{{
-            choice
-          }}</label
-        >
-      </fieldset>
-      <label class="opinion"
-        >核实意见
-        <input :aria-label="'第' + active.row_number + '行意见'" v-model="activeInput.opinion"
-      /></label>
-    </section>
-    <p class="warning">时长警告 · {{ batch.warnings.length ? '待复核' : '无' }}</p>
-    <label class="opinion" v-if="batch.warnings.length"
-      >警告接受依据<input v-model="warningBasis"
-    /></label>
-    <footer>
-      <label class="opinion">整批意见 <input v-model="reason" placeholder="批准时选填" /></label>
-      <div class="page-actions decisions">
-        <RouterLink class="button" to="/hours"><UiIcon name="ArrowLeft" />返回时长审核</RouterLink
-        ><button class="primary" @click="preview"><UiIcon name="Check" />预览通过整批</button>
-      </div>
+      <Pager v-if="detail && detail.total > size" :page="page" :size="size" :total="detail.total" @change="page = $event" />
+      <section v-if="canDecide && active && selected" class="verify">
+        <div class="page-title"><h2>原表第 {{ active.row_number }} 行核实</h2></div>
+        <p><strong>{{ active.student_name }}</strong> · {{ active.remark }}</p>
+        <fieldset :disabled="busy">
+          <legend>核实结论</legend>
+          <label><input type="radio" name="decision" value="confirmed" v-model="selected.decision" />属实</label>
+          <label><input type="radio" name="decision" value="rejected" v-model="selected.decision" />不成立</label>
+        </fieldset>
+        <label class="review-field">核实意见
+          <textarea :aria-label="'第' + active.row_number + '行意见'" v-model="selected.reason" maxlength="2000" :disabled="busy" rows="2" />
+        </label>
+        <label v-if="selected.decision === 'confirmed' && (matches?.length || selected.incident)" class="review-field">关联已确认的同一事实
+          <select :value="selected.incident?.id ?? ''" :disabled="busy" @change="linkIncident">
+            <option value="">建立本次核实记录</option>
+            <option v-for="incident in matches" :key="incident.id" :value="incident.id">{{ incident.facts.slice(0, 100) }}</option>
+          </select>
+          <small v-if="selected.incident">关联版本 v{{ selected.incident.version }}
+            <button v-if="matches?.some(incident => incident.id === selected?.incident?.id && incident.version !== selected?.incident?.version)"
+              type="button" :disabled="busy" @click="selected.incident = undefined">清除后重新核对版本</button>
+          </small>
+        </label>
+        <p v-if="matchesError" role="alert">{{ matchesError }} <button @click="loadMatches()">重读已确认异常</button></p>
+      </section>
+      <HourWarnings :warnings="warnings" />
       <p v-if="result" role="status">{{ result }}</p>
-    </footer>
+      <p v-if="problem" role="alert">{{ problem }}</p>
+      <footer v-if="canDecide">
+        <p>已填写 {{ checked }} / {{ batch.misconduct_review_required_count ?? 0 }} 条核实意见</p>
+        <label v-if="warnings.length" class="review-field">警告接受依据
+          <textarea v-model="basis" maxlength="2000" rows="2" :disabled="busy" />
+        </label>
+        <label class="review-field">整批意见
+          <textarea v-model="reason" maxlength="2000" rows="2" :disabled="busy" placeholder="驳回时填写原因" />
+        </label>
+        <div class="page-actions">
+          <button class="primary" :disabled="busy" @click="decide('approved')">批准整批</button>
+          <button :disabled="busy" @click="decide('rejected')">驳回整批</button>
+        </div>
+      </footer>
+      <p v-else-if="batch.status === 'pending_review'">请由另一位审核人处理。</p>
+    </template>
   </article>
 </template>
+
 <style scoped>
-.table-end {
-  --select-width: 5rem;
-}
-.source-file {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 14px;
-}
-.source-file .ui-icon,
-.review-tools .ui-icon {
-  color: var(--brand);
-}
-.verify {
-  margin-top: 10px;
-  padding-inline: 14px !important;
-  background: var(--surface);
-  border-left: 3px solid var(--yellow);
-}
-.verify fieldset label {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-}
-.verify .opinion {
-  margin-top: 5px;
-}
-@media (max-width: 700px) {
-  .verify fieldset label {
-    min-height: 44px;
-  }
-  .opinion input {
-    width: 0;
-  }
-  .review-tools {
-    gap: 6px;
-  }
-  .review-tools label {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-  }
-}
-.hour-review {
-  font-size: 14px;
-}
-.hour-review header,
-.verify,
-.table-end {
-  border-bottom: 1px solid var(--line);
-}
-.batch-activity {
-  font-size: 17px;
-  font-weight: 600;
-  margin: 8px 0 0;
-}
-.batch-meta,
-.source-file {
-  margin: 5px 0;
-  color: var(--muted);
-}
-.source-file {
-  margin-bottom: 13px;
-}
-.review-tools,
-.table-end {
-  padding: 10px 0;
-}
-.review-tools label,
-.table-end label {
-  margin-left: auto;
-}
-.sample-label {
-  margin: 0;
-}
-.data-grid th,
-.data-grid td {
-  padding: 8px;
-}
-.data-grid tbody th button {
-  padding: 2px 6px;
-  color: var(--brand);
-  font-weight: 600;
-  background: white;
-}
-.data-grid tbody tr:has(button) {
-  cursor: pointer;
-}
-.table-end :deep(.pager) {
-  margin: 0;
-}
-.verify {
-  padding: 12px 0;
-}
-.verify h2 {
-  font-size: 18px;
-}
-.verify p {
-  margin: 5px 0;
-}
-.verify small {
-  background: var(--surface);
-  color: var(--muted);
-  padding: 3px 6px;
-}
-fieldset {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  border: 0;
-  padding: 0;
-  margin: 4px 0;
-}
-legend {
-  float: left;
-  margin: 4px 0 4px 0;
-  color: var(--muted);
-}
-input[type='radio'],
-input[type='checkbox'] {
-  accent-color: var(--brand);
-}
-label.opinion {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-weight: 600;
-}
-.opinion input {
-  flex: 1;
-  min-width: 0;
-  font-weight: 400;
-}
-.warning {
-  font-size: 13px;
-  color: var(--muted);
-  margin: 8px 0;
-}
-.decisions {
-  justify-content: flex-end;
-  margin-top: 12px;
-}
-.decisions a {
-  border: 1px solid #c6d3e4;
-  border-radius: 6px;
-  padding: 6px 12px;
-  text-decoration: none;
-}
+.queue-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-block: 14px; }
+.review-tools { margin-block: 14px; }
+.review-tools .size { display: flex; align-items: center; gap: 8px; --select-width: 6rem; }
+.hour-review { overflow-wrap: anywhere; }
+.scroll-table th:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+.scroll-table small { display: block; }
+.long-text { min-width: 9rem; max-width: 22rem; white-space: normal; }
+.verify { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; margin-block: 20px; padding: 14px; }
+.verify fieldset { display: flex; gap: 18px; }
+.review-field { display: grid; gap: 6px; max-width: 55rem; margin-block: 12px; }
+.review-field textarea { width: 100%; }
 </style>
