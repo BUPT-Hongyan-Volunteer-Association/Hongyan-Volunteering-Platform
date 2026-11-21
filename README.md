@@ -26,6 +26,8 @@
 
 学生 `0000000001`、负责人 `0000000002` 首登使用学号后六位，审核员 `demo.teacher` 使用上述密码。多角色体验可运行 `pnpm demo:open`，打开 `http://127.0.0.1:5180`。macOS 可双击 `一键启动.command` 一并启动服务。首次双击前在 `.local/demo.env` 设置同一 `DEMO_STAFF_PASSWORD`。
 
+选择身份后，独立体验窗口中的页面随窗口大小调整。最大化、进入全屏和还原时均可直接查看布局变化。
+
 ## 开发检查
 
 类型检查用 `pnpm typecheck`，服务端回归用 `pnpm --filter @hongyan/api test:flow`，页面回归用 `pnpm test:pages`。两套回归均需数据库账号有建库权限。页面回归和身份选择页可使用已安装的 Chrome 或 Edge。用 Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，再通过 HTTPS 访问。

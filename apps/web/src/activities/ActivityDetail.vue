@@ -231,9 +231,6 @@ const conditions: [keyof Activity, string, IconName][] = [
 </template>
 
 <style scoped>
-.activity-detail {
-  max-width: 1060px;
-}
 .detail-top {
   display: flex;
   align-items: center;

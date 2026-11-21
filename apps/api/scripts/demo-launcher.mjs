@@ -94,7 +94,7 @@ async function enter(id, account) {
   const https = process.env.HY_LOCAL_HTTPS === '1';
   if (!https && browser.browserType().name() === 'webkit')
     throw new EntryError('WebKit 登录需要 HTTPS。请按 README 在 HTTPS 模式下启动两个前端和体验入口。');
-  const context = await browser.newContext({ ignoreHTTPSErrors: https });
+  const context = await browser.newContext({ viewport: null, ignoreHTTPSErrors: https });
   const base = (https ? 'https' : 'http') + '://localhost:' + (account.admin ? 5174 : 5173);
   try {
     const client = context.request;

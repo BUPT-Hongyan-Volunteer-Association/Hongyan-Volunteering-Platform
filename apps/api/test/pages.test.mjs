@@ -130,6 +130,38 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
     const db = api.get(Database);
     const first = await db.activity.findUniqueOrThrow({ where: { activity_code: 'P2026-0001' } });
 
+    await t.test('宽屏正文铺满侧栏以外的空间，收起侧栏后随之扩展', async () => {
+      for (const page of [student, owner, teacher]) {
+        await page.setViewportSize({ width: 1920, height: 1080 });
+      }
+      await link(student, '校园服务甲').click();
+      await link(owner, '我的管理活动').click();
+      for (const page of [student, owner, teacher]) {
+        const rail = await page.locator('.app-rail').boundingBox();
+        const main = await page.getByRole('main').boundingBox();
+        assert.equal(main.x, rail.x + rail.width);
+        const viewportWidth = await page.evaluate(() => document.documentElement.clientWidth);
+        assert.equal(main.x + main.width, viewportWidth);
+        await fits(page);
+      }
+      const detail = student.locator('.activity-detail');
+      await visible(detail);
+      const detailWidths = await detail.evaluate((article) => {
+        const main = article.closest('main');
+        const style = getComputedStyle(main);
+        return {
+          actual: article.getBoundingClientRect().width,
+          available: main.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+        };
+      });
+      assert.equal(detailWidths.actual, detailWidths.available);
+      await button(teacher, '收起导航').click();
+      const main = await teacher.getByRole('main').boundingBox();
+      assert.equal(main.x, 0);
+      assert.equal(main.width, await teacher.evaluate(() => document.documentElement.clientWidth));
+      await button(teacher, '展开导航').click();
+    });
+
     await t.test('两种宽度从首页抵达个人页、活动工作区、后台和日程', async () => {
       for (const width of [390, 1440]) {
         for (const p of [student, owner, teacher]) await p.setViewportSize({ width, height: 900 });
