@@ -2,14 +2,14 @@ import type { Activity as View } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Database } from '../database.js';
 import { invalid } from '../http.js';
-import { includeView, pagination, project, workingRevision } from './read.js';
+import { includeView, pagination, project, workingRevision, type PageRow } from './read.js';
 import { matchesCampus } from '@hongyan/contracts/activity';
 import { slots } from './schedule.js';
 
 type Query = Record<string, string>;
 type Scope = 'public' | 'working' | 'published';
 
-function contentFilter(q: Query) {
+export function contentFilter(q: Query) {
   const from = Date.parse(q.from),
     to = Date.parse(q.to);
   if (
@@ -28,7 +28,11 @@ function contentFilter(q: Query) {
       slots(a.schedule).some((s) => Date.parse(s.starts_at) < to && Date.parse(s.ends_at) > from));
 }
 
-export async function activityPage(
+/**
+ * 先按权限与筛选限定范围，再在同一数据库快照内计数、取页。
+ * 列表与日程共用这一实现，保证同一范围、窗口和筛选下结果一致。
+ */
+export async function activityViews(
   db: Database,
   where: Prisma.ActivityWhereInput,
   scope: Scope,
@@ -89,10 +93,17 @@ export async function activityPage(
           else byActivity.set(revision.activity_id, [revision]);
         }
         for (const row of rows) {
-          const data = {
-            ...row,
+          const data: PageRow = {
+            id: row.id,
+            activity_code: row.activity_code,
+            status: row.status,
+            version: row.version,
+            working_revision: row.working_revision,
+            published_revision: row.published_revision,
+            members: row.members,
             revisions: byActivity.get(row.id) ?? [],
             reviews: row.reviews ?? [],
+            ...(row.registrations && { registrations: row.registrations }),
           };
           if (q.review_status && workingRevision(data)?.revision_state !== q.review_status)
             continue;
@@ -107,8 +118,19 @@ export async function activityPage(
         if (!derived || rows.length < take) break;
         cursor = rows[rows.length - 1].id;
       }
-      return { items, total, page, page_size };
+      return { items, total, page, page_size, now };
     },
     { isolationLevel: 'RepeatableRead' },
   );
+}
+
+export async function activityPage(
+  db: Database,
+  where: Prisma.ActivityWhereInput,
+  scope: Scope,
+  q: Query,
+  studentId?: string,
+) {
+  const { items, total, page, page_size } = await activityViews(db, where, scope, q, studentId);
+  return { items, total, page, page_size };
 }

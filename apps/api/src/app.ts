@@ -38,6 +38,7 @@ import { HourAppealsController } from './hours/appeals.controller.js';
 import { StudentController } from './students/student.controller.js';
 import { StudentImportService } from './students/import.service.js';
 import { StaffGuard } from './students/staff.guard.js';
+import { TimelineController } from './timeline/timeline.controller.js';
 
 @Catch()
 class HttpErrorFilter implements ExceptionFilter {
@@ -87,6 +88,7 @@ class HttpErrorFilter implements ExceptionFilter {
     ManagedController,
     PublicController,
     DraftController,
+    TimelineController,
     GroupImageController,
     ReviewController,
     RegistrationController,

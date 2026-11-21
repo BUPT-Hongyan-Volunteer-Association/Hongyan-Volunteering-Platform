@@ -199,10 +199,10 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
       <h1>活动发现</h1>
       <RouterLink
         class="button"
-        aria-label="活动日程（示例）"
+        aria-label="活动日程"
         :to="{ path: '/schedule', query: scheduleQuery }"
       >
-        <UiIcon name="Calendar" />活动日程<small>示例</small>
+        <UiIcon name="Calendar" />活动日程<small>按时间</small>
       </RouterLink>
     </header>
     <div class="discovery">
