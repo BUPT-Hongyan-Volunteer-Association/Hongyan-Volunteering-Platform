@@ -136,13 +136,31 @@ export async function admit(
     data: { status: 'accepted', version: { increment: 1 }, decision_reason: input.reason ?? null },
   });
   await recordChange(tx, previous, current, now, actor);
-  await tx.registrationDecisionEvent.create({
+  const decision = await tx.registrationDecisionEvent.create({
     data: {
       activity_id: activity.id,
       registration_id: id,
       student_id: current.student_id,
       registration_version: current.version,
       status: current.status,
+    },
+  });
+  await tx.notificationEvent.create({
+    data: {
+      id: decision.event_id,
+      event_type: decision.event_type,
+      event_key: `registration_decision:${decision.event_id}`,
+      activity_id: decision.activity_id,
+      resource_id: decision.registration_id,
+      payload: {
+        event_id: decision.event_id,
+        registration_id: decision.registration_id,
+        student_id: decision.student_id,
+        registration_version: decision.registration_version,
+        status: decision.status,
+        decision_reason: current.decision_reason,
+        actor_id: actor,
+      },
     },
   });
   return registrationView(current);

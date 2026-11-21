@@ -24,25 +24,7 @@ import {
   wrongState,
 } from './workflow.js';
 import { content, validate } from './validation.js';
-
-const notifiedFields = new Set([
-  'schedule',
-  'registration_opens_at',
-  'registration_closes_at',
-  'result_expected_at',
-  'campus',
-  'location',
-  'meeting_point',
-  'transport_notes',
-  'capacity',
-  'eligibility_text',
-  'selection_text',
-  'group_join_instructions',
-  'hours_rule_text',
-  'expected_hours',
-  'expected_hours_basis',
-  'hours_import_expected_at',
-]);
+import { notifiedFields } from '../notices/notice.js';
 
 // Each review references a frozen revision and, for amendments, its previous public revision.
 async function snapshotsForReviews(tx: Tx, reviews: ActivityReview[]) {
@@ -193,6 +175,16 @@ export class ReviewController {
               revision: r.revision,
               changed_fields,
             })),
+          });
+          await tx.notificationEvent.create({
+            data: {
+              event_type: 'activity_changed',
+              event_key: `activity_change:${id}`,
+              activity_id: row.id,
+              resource_id: id,
+              source_revision: r.revision,
+              payload: {},
+            },
           });
         }
       }

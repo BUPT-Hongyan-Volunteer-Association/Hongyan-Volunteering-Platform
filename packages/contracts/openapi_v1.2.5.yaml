@@ -2379,6 +2379,7 @@ paths:
         schema:
           type: string
           format: uuid
+      - $ref: '#/components/parameters/notice_id'
       - $ref: '#/components/parameters/page'
       - $ref: '#/components/parameters/page_size'
       responses:
@@ -2435,6 +2436,7 @@ paths:
         required: false
         schema:
           type: boolean
+      - $ref: '#/components/parameters/notice_id'
       - $ref: '#/components/parameters/page'
       - $ref: '#/components/parameters/page_size'
       - name: notice_kind
@@ -11837,6 +11839,13 @@ components:
             minLength: 1
             pattern: \S
   parameters:
+    notice_id:
+      name: notice_id
+      in: query
+      description: 在当前可见范围内精确查询一条通知，供详情页直接打开。
+      schema:
+        type: string
+        format: uuid
     csrf:
       name: X-CSRF-Token
       in: header

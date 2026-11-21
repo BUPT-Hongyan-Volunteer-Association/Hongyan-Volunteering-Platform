@@ -24,6 +24,8 @@ import { Database } from './database.js';
 import { PublicController } from './activities/public.controller.js';
 import { RegistrationController } from './registrations/registration.controller.js';
 import { ManagedController } from './activities/managed.controller.js';
+import { NoticeController } from './notices/notice.controller.js';
+import { NoticeWorker } from './notices/notice.worker.js';
 import { HourBatchesController, HourUploadScope } from './hours/batches.controller.js';
 import { HourValidationWorker } from './hours/validation-worker.js';
 import { StudentController } from './students/student.controller.js';
@@ -80,6 +82,7 @@ class HttpErrorFilter implements ExceptionFilter {
     DraftController,
     ReviewController,
     RegistrationController,
+    NoticeController,
     HourBatchesController,
     StudentController,
   ],
@@ -92,6 +95,7 @@ class HttpErrorFilter implements ExceptionFilter {
     HourUploadScope,
     HourValidationWorker,
     StudentImportService,
+    NoticeWorker,
   ],
 })
 class AppModule {}

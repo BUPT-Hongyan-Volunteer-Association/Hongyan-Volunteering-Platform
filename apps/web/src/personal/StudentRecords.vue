@@ -9,12 +9,10 @@ const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).fo
 const route = useRoute();
 const section = computed(() => route.name as keyof typeof personalRecords);
 const titles = {
-  notices: '通知',
   hours: '我的时长',
   feedback: '本人记录与反馈',
 };
 const paths = {
-  notices: '/notices',
   hours: '/mine/hours',
   feedback: '/mine/feedback',
 };
@@ -32,7 +30,7 @@ function preview() {
 }
 </script>
 <template>
-  <RouterLink v-if="section === 'feedback' || section === 'hours'" class="back-link" to="/mine"
+  <RouterLink class="back-link" to="/mine"
     ><UiIcon name="ArrowLeft" />返回我的</RouterLink
   >
   <PreviewRecords
@@ -46,11 +44,6 @@ function preview() {
         当前累计 <strong>{{ totalHours }} 小时</strong>
       </p></template
     >
-    <template #detail="{ record }">
-      <button v-if="section === 'notices' && record.status === '未读'" @click="preview">
-        预览确认回执
-      </button>
-    </template>
     <template #after-list>
       <details v-if="section === 'feedback'">
         <summary>填写反馈（预览）</summary>
