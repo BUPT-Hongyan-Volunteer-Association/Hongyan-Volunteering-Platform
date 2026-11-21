@@ -3,6 +3,8 @@ import { createRouter, createWebHistory } from 'vue-router';
 import '@hongyan/ui/theme.css';
 import '@hongyan/ui/pages.css';
 import ManagementPage from './management/ManagementPage.vue';
+import StudentImports from './management/StudentImports.vue';
+import StudentsPage from './management/StudentsPage.vue';
 import { sectionKeys } from './management/sections';
 import SchedulePage from '@hongyan/ui/SchedulePage.vue';
 import TaskInbox from './TaskInbox.vue';
@@ -24,6 +26,8 @@ const router = createRouter({
         { path: 'connection', name: 'connection', component: SessionStatus },
         { path: 'hours/:id?', component: HourReview },
         { path: 'reviews/:id?', component: ReviewPage, meta: { profile: true } },
+        { path: 'manage/imports/:item?', component: StudentImports },
+        { path: 'manage/students/:item?', component: StudentsPage },
         {
           path: 'manage/:section(' + sectionKeys.join('|') + ')/:item?',
           component: ManagementPage,
