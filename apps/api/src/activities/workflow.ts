@@ -12,7 +12,7 @@ import {
   project,
   publishedRevision,
   workingRevision,
-  registrationScope,
+  workspaceScope,
   staff,
   type LoadedActivity,
 } from './read.js';
@@ -141,7 +141,7 @@ export class Workflow {
     req: SessionRequest,
     target: Target,
     // 'self' 用于本人资源操作（如通知已读/确认），不做活动范围校验。
-    access: 'create' | 'manage' | 'review' | 'apply' | 'admit' | 'self',
+    access: 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self',
     execute: (tx: Tx, row: LoadedActivity | null) => Promise<unknown>,
     scope?: string,
     commandInput: unknown = req.body ?? {},
@@ -194,12 +194,12 @@ export class Workflow {
       if (access === 'create' && !actor.roles.includes('organizer')) denied();
       if (access === 'review' && !staff(actor)) denied();
       if (
-        (access === 'manage' || access === 'admit') &&
+        (access === 'manage' || access === 'workspace') &&
         row &&
         !(await tx.activity.findFirst({
           where: {
             id: row.id,
-            ...(access === 'admit' ? registrationScope(actor, scope) : managedScope(actor)),
+            ...(access === 'workspace' ? workspaceScope(actor, scope) : managedScope(actor)),
           },
           select: { id: true },
         }))

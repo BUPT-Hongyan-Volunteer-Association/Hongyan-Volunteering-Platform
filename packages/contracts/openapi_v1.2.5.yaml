@@ -4,7 +4,7 @@ info:
   version: 1.2.5
   description: 2026-11-18 PRD v1.3.4配套规格，尚未实现。沿用/api/v1，本次校订后按本文件重新生成客户端。确认学生初始密码为学号后六位，首次登录强制改密。学号和班级均为十位数字，建档不含在校状态。时长以录入单为准，整数部分最多三位、最多一位小数。本轮聚焦平台搭建与功能实现，暂不考虑部署维护。业务字段、枚举及错误码使用snake_case，自动限制固定off。
     沿用：时长模板末列是否有违纪情况，时长与违规核实合并审批。规则未确定时正常审核时长，处罚固定未启用。按表头识别七列与兼容六列，不仅依赖文件名或版本号。
-  x-document-revision: 2026-11-21-r4
+  x-document-revision: 2026-11-21-r5
 servers:
 - url: /api/v1
   description: 同源相对路径，不指向已部署服务
@@ -1816,12 +1816,7 @@ paths:
       - reviewer
       - tech_admin
       parameters:
-      - name: scope
-        in: query
-        description: 负责人工作区显式使用managed，仅限当前活动成员。all须有有效后台授权。省略时兼任负责人默认使用managed。
-        schema:
-          type: string
-          enum: [managed, all]
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -1958,12 +1953,7 @@ paths:
       - reviewer
       - tech_admin
       parameters:
-      - name: scope
-        in: query
-        description: 负责人工作区显式使用managed，仅限当前活动成员。all须有有效后台授权。省略时兼任负责人默认使用managed。
-        schema:
-          type: string
-          enum: [managed, all]
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -2265,6 +2255,7 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -2328,6 +2319,7 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -2346,7 +2338,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 同日已有记录或幂等键冲突
+          description: 同日已有记录返回 attendance_already_recorded，幂等键冲突返回 conflict。
           content:
             application/json:
               schema:
@@ -5724,6 +5716,7 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -5799,6 +5792,7 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -12102,6 +12096,13 @@ components:
           registration_closes_at: {type: string, format: date-time}
           capacity: {type: integer, minimum: 1, maximum: 10000}
   parameters:
+    workspace_scope:
+      name: scope
+      in: query
+      description: 负责人工作区显式使用managed，仅限当前活动成员。all须有有效后台授权。省略时兼任负责人默认使用managed。
+      schema:
+        type: string
+        enum: [managed, all]
     notice_id:
       name: notice_id
       in: query
@@ -12234,6 +12235,7 @@ x-error-codes:
   target_key_conflict: 修复目标业务键已使用或同组目标重复，整组不生效。
   warning_review_required: 批准时警告快照已变化，返回最新快照供审核后重试。
   notice_not_found: 未找到当前活动的集合源通知。
+  attendance_already_recorded: 所选人员在服务日期已有现场记录，整批未登记。
   conflict: 请求与已有状态或幂等内容冲突。
 x-implementation-state: specification_only
 x-timeline-interaction:

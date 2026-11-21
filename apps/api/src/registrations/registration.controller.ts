@@ -15,7 +15,7 @@ import type {
   RegistrationInput,
   RosterStatusCounts,
 } from '@hongyan/contracts/types';
-import { pagination, registrationScope } from '../activities/read.js';
+import { pagination, workspaceScope } from '../activities/read.js';
 import { Workflow } from '../activities/workflow.js';
 import { validate } from '../activities/validation.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
@@ -115,7 +115,7 @@ export class RegistrationController {
     @Param('id', ParseUUIDPipe) id: string,
     @Query() q: Record<string, string>,
   ) {
-    const scope = registrationScope(req.actor, q.scope);
+    const scope = workspaceScope(req.actor, q.scope);
     return this.db.$transaction(
       async (tx) => {
         const activity = await tx.activity.findFirst({
@@ -204,7 +204,7 @@ export class RegistrationController {
     return this.workflow.run(
       req,
       { registrationId: id },
-      'admit',
+      'workspace',
       (tx, activity) =>
         admit(
           tx,

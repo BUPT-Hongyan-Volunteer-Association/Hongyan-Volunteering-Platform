@@ -18,7 +18,7 @@ export function managedScope(
   if (!actor.roles.includes('organizer')) denied();
   return { members: { some: { account_id: actor.account_id } } };
 }
-export function registrationScope(actor: Actor, scope?: string) {
+export function workspaceScope(actor: Actor, scope?: string) {
   return managedScope(actor, scope ?? (actor.roles.includes('organizer') ? 'managed' : undefined));
 }
 

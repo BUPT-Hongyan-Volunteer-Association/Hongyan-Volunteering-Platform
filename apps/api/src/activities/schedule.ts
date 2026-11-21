@@ -2,6 +2,23 @@ import type { ActivitySchedule, ScheduleSlot } from '@hongyan/contracts/types';
 import { invalid } from '../http.js';
 
 const day = 86_400_000;
+
+export function parseCalendarDate(value: unknown): Date | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith('0000')) return null;
+  const date = new Date(value + 'T00:00:00Z');
+  return Number.isFinite(date.getTime()) && date.toISOString().startsWith(value + 'T') ? date : null;
+}
+
+export function serviceDayMilliseconds(times: readonly ScheduleSlot[], serviceDate: string) {
+  const start = Date.parse(serviceDate + 'T00:00:00+08:00');
+  const end = start + day;
+  return times.reduce((total, slot) => {
+    const from = Math.max(start, Date.parse(slot.starts_at));
+    const until = Math.min(end, Date.parse(slot.ends_at));
+    return total + Math.max(0, until - from);
+  }, 0);
+}
+
 function* occurrences(
   schedule: ActivitySchedule,
 ): Generator<{ slot: ScheduleSlot; field: string }> {

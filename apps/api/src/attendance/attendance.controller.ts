@@ -6,8 +6,8 @@ import type {
   AttendanceInput,
   VersionAction,
 } from '@hongyan/contracts/types';
-import { managedScope, pagination, publishedRevision, type LoadedActivity } from '../activities/read.js';
-import { slots } from '../activities/schedule.js';
+import { workspaceScope, pagination, publishedRevision, type LoadedActivity } from '../activities/read.js';
+import { parseCalendarDate, serviceDayMilliseconds, slots } from '../activities/schedule.js';
 import { validate } from '../activities/validation.js';
 import { checkVersion, Workflow, type Tx } from '../activities/workflow.js';
 import type { SessionRequest } from '../auth/session.guard.js';
@@ -23,19 +23,13 @@ const studentFields = {
 const includeStudent = { student: { select: studentFields } } as const;
 
 function dateOnly(value: string): Date {
-  const date = new Date(value + 'T00:00:00Z');
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith('0000') ||
-      !Number.isFinite(date.getTime()) || !date.toISOString().startsWith(value + 'T'))
-    invalid('service_date', '请选择有效的服务日期');
-  return date;
+  return parseCalendarDate(value) ?? invalid('service_date', '请选择有效的服务日期');
 }
 
 function checkSchedule(activity: LoadedActivity, day: string) {
   const approved = publishedRevision(activity);
   const schedule = (approved?.content as unknown as ActivityInput | undefined)?.schedule;
-  const start = Date.parse(day + 'T00:00:00+08:00');
-  const end = start + 86_400_000;
-  if (!slots(schedule).some((slot) => Date.parse(slot.starts_at) < end && Date.parse(slot.ends_at) > start))
+  if (!(serviceDayMilliseconds(slots(schedule), day) > 0))
     invalid('service_date', '请选择活动获批安排内的服务日期');
 }
 
@@ -104,7 +98,7 @@ export class AttendanceController {
     @Param('id', ParseUUIDPipe) activity_id: string,
     @Query() query: Record<string, string>,
   ) {
-    const scope = managedScope(req.actor);
+    const scope = workspaceScope(req.actor, query.scope);
     return this.db.$transaction(async (tx) => {
       if (!await tx.activity.findFirst({ where: { id: activity_id, ...scope }, select: { id: true } }))
         invisible();
@@ -131,8 +125,9 @@ export class AttendanceController {
     @Req() req: SessionRequest,
     @Param('id', ParseUUIDPipe) activity_id: string,
     @Body() body: unknown,
+    @Query('scope') scope?: string,
   ) {
-    return this.workflow.run(req, { activityId: activity_id }, 'manage', async (tx, activity) => {
+    return this.workflow.run(req, { activityId: activity_id }, 'workspace', async (tx, activity) => {
       const input = validate<AttendanceBatchInput>('attendance_batch_input', body);
       const service_date = dateOnly(input.service_date);
       checkSchedule(activity!, input.service_date);
@@ -143,7 +138,7 @@ export class AttendanceController {
       const duplicate = existing.find((row) => row.cleared_at === null);
       if (duplicate) {
         const name = students.find((s) => s.id === duplicate.student_id)!.account.display_name;
-        throw new BusinessError(409, 'conflict', name + '当日已有记录，请在列表中核对');
+        throw new BusinessError(409, 'attendance_already_recorded', name + '当日已有记录，请在列表中核对');
       }
       const stored = new Set(existing.map((row) => row.student_id));
       const fresh = students.filter((s) => !stored.has(s.id));
@@ -155,7 +150,7 @@ export class AttendanceController {
         data: { ...fields, version: { increment: 1 }, cleared_at: null },
       });
       return { recorded_count: students.length };
-    });
+    }, scope);
   }
 
   @Put(':student_id/:day')
@@ -165,8 +160,9 @@ export class AttendanceController {
     @Param('student_id', ParseUUIDPipe) student_id: string,
     @Param('day') day: string,
     @Body() body: unknown,
+    @Query('scope') scope?: string,
   ) {
-    return this.workflow.run(req, { activityId: activity_id }, 'manage', async (tx, activity) => {
+    return this.workflow.run(req, { activityId: activity_id }, 'workspace', async (tx, activity) => {
       const input = validate<AttendanceInput>('attendance_input', body);
       const fields = exceptionFields(input);
       const key = { activity_id, student_id, service_date: dateOnly(day) };
@@ -191,7 +187,7 @@ export class AttendanceController {
         update: { ...fields, version: { increment: 1 }, cleared_at: null },
         include: includeStudent,
       }));
-    });
+    }, scope);
   }
 
   @Delete(':student_id/:day')
@@ -201,8 +197,9 @@ export class AttendanceController {
     @Param('student_id', ParseUUIDPipe) student_id: string,
     @Param('day') day: string,
     @Body() body: unknown,
+    @Query('scope') scope?: string,
   ) {
-    return this.workflow.run(req, { activityId: activity_id }, 'manage', async (tx) => {
+    return this.workflow.run(req, { activityId: activity_id }, 'workspace', async (tx) => {
       const { expected_version } = validate<VersionAction>('version_action', body);
       const where = { activity_id_student_id_service_date: { activity_id, student_id, service_date: dateOnly(day) } };
       const current = await tx.attendanceRecord.findUnique({ where });
@@ -212,6 +209,6 @@ export class AttendanceController {
         data: { cleared_at: new Date(), version: { increment: 1 } },
       });
       return { completed: true, resource_id: row.id, version: row.version };
-    });
+    }, scope);
   }
 }

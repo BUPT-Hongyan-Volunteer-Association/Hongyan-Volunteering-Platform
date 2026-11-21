@@ -35,7 +35,10 @@ test('现场异常批量登记、撤销、版本与活动权限', async (t) => {
         { weekday: 1, start_time: '14:00:00', end_time: '15:00:00', end_day_offset: 0 },
       ],
       excluded_dates: [excluded],
-      additional_slots: [{ starts_at: '2026-11-17T23:00:00+08:00', ends_at: `${extraDay}T01:00:00+08:00` }],
+      additional_slots: [
+        { starts_at: '2026-11-17T23:00:00+08:00', ends_at: `${extraDay}T01:00:00+08:00` },
+        { starts_at: '2026-11-19T23:00:00+08:00', ends_at: '2026-11-20T00:00:00+08:00' },
+      ],
     };
     await db.activityRevision.update({
       where: { activity_id_revision: { activity_id, revision: approved.revision } },
@@ -62,6 +65,7 @@ test('现场异常批量登记、撤销、版本与活动权限', async (t) => {
     assert.equal((await owner.write('PUT', single(p1), { status: 'present', expected_version: 0 })).status, 422);
     assert.equal((await owner.write('POST', path, { ...batch, status: 'unrecorded' })).status, 422);
     assert.equal((await owner.write('POST', path, { ...batch, service_date: excluded })).status, 422);
+    assert.equal((await owner.write('POST', path, { ...batch, service_date: '2026-11-20' })).status, 422);
     assert.equal((await owner.request(path + '?service_date=2026-11-31')).status, 422);
     assert.equal((await student.request(path)).status, 403);
     assert.equal((await outsider.request(path)).status, 404);
@@ -82,7 +86,9 @@ test('现场异常批量登记、撤销、版本与活动权限', async (t) => {
     assert.deepEqual(new Set(rows.map((row) => row.student_id)), new Set(batch.student_ids));
     assert.ok(rows.every((row) => row.service_date === day && row.reason === batch.reason && row.status === 'late'));
     assert.equal((await find(following)).total, 0);
-    assert.equal((await owner.write('POST', path, { ...batch, student_ids: [p1.id, spare.id] })).status, 409);
+    const duplicate = await owner.write('POST', path, { ...batch, student_ids: [p1.id, spare.id] });
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.code, 'attendance_already_recorded');
     assert.equal((await find(day)).total, 2);
 
     const stale = rows.find((row) => row.student_id === p1.id).version;
@@ -123,9 +129,19 @@ test('现场异常批量登记、撤销、版本与活动权限', async (t) => {
     assert.equal(manualRow.reason, manual.reason);
     assert.equal((await teacher.request(path)).data.total, 3);
     assert.equal((await teacher.write('PUT', single(p2), { expected_version: 1, status: 'excused' })).status, 200);
+    await db.roleGrant.create({ data: { account_id: p2.account_id, role: 'reviewer' } });
+    const managed = '?scope=managed';
+    assert.equal((await helper.request(path + managed)).data.total, 3);
     await db.activityMember.delete({ where: { activity_id_account_id: { activity_id, account_id: p2.account_id } } });
     assert.equal((await helper.request(path)).status, 404);
     assert.equal((await helper.write('DELETE', single(p1), undo, undoKey)).status, 404);
+    assert.equal((await helper.request(path + managed)).status, 404);
+    assert.equal((await helper.write('POST', path + managed, batch)).status, 404);
+    assert.equal((await helper.write('PUT', single(p1) + managed, { expected_version: restored.version, status: 'absent' })).status, 404);
+    assert.equal((await helper.write('DELETE', single(p1) + managed, undo, undoKey)).status, 404);
+    assert.equal((await owner.request(path + '?scope=all')).status, 403);
+    assert.equal((await helper.request(path + '?scope=all')).data.total, 3);
+    assert.equal((await helper.write('PUT', single(p1) + '?scope=all', { expected_version: restored.version, status: 'late' })).status, 200);
     assert.deepEqual(await roster(), originalRoster);
     assert.equal(await db.hourRecord.count(), 0);
     assert.equal(await db.notificationEvent.count(), originalNotices);

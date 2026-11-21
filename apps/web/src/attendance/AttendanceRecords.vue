@@ -9,7 +9,6 @@ import {
   recordAttendanceBatch,
   withdrawAttendance,
   type Attendance,
-  type AttendancePage,
   type AttendanceStatus,
   type AttendanceStudentIdentity,
 } from '@hongyan/contracts';
@@ -17,6 +16,7 @@ import Pager from '@hongyan/ui/Pager.vue';
 import RecordTable from '@hongyan/ui/RecordTable.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import type { PreviewRecord } from '@hongyan/ui/preview';
+import { message, noAccess, usePageRead } from '../usePageRead';
 import AttendanceRoster from './AttendanceRoster.vue';
 
 const props = defineProps<{ writesPaused: boolean }>();
@@ -26,10 +26,8 @@ const labels: Record<AttendanceStatus, string> = {
   late: '迟到', absent: '缺席', excused: '请假', other: '自定义', unregistered_participation: '未报名参加',
 };
 const options = Object.entries(labels).map(([value, label]) => ({ value: value as AttendanceStatus, label }));
-const filterDate = ref('');
-const page = ref(1);
-const result = ref<AttendancePage>();
-const readError = ref('');
+const managed = { scope: 'managed' } as const;
+const listQuery = ref({ date: '', page: 1 });
 const notice = ref('');
 const visibleForm = ref(false);
 const editing = ref<Attendance>();
@@ -45,6 +43,18 @@ const stale = ref(false);
 const accessLost = ref(false);
 const locked = computed(() => saving.value || props.writesPaused || stale.value || accessLost.value);
 const needsReason = computed(() => status.value === 'other' || status.value === 'unregistered_participation');
+const { data: result, error: readError, refresh, clear } = usePageRead(listQuery, async (signal) =>
+  (await listAttendance({
+    path, query: { ...managed, page: listQuery.value.page, page_size: 10, service_date: listQuery.value.date || undefined },
+    signal, cache: 'no-store', throwOnError: true,
+  })).data.data, denied);
+watch(result, (data) => {
+  if (!data) return;
+  accessLost.value = false;
+  const last = Math.max(1, Math.ceil(data.total / data.page_size));
+  if (data.page > last) listQuery.value = { ...listQuery.value, page: last };
+});
+watch(() => status.value === 'unregistered_participation', () => { selected.value = []; });
 const records = computed<PreviewRecord[]>(() => (result.value?.items ?? []).map((row) => ({
   id: row.id,
   title: row.student_name,
@@ -52,16 +62,12 @@ const records = computed<PreviewRecord[]>(() => (result.value?.items ?? []).map(
   fields: [['学号', row.student_no], ['服务日期', row.service_date], ['记录说明', row.reason ?? '—']],
 })));
 const command = createCommand();
-let generation = 0;
 let mounted = true;
 
-function isDenied(e: unknown) {
-  return e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0);
-}
 function denied() {
-  generation++;
+  clear();
   accessLost.value = true;
-  result.value = undefined;
+  readError.value ||= '活动管理权限已失效';
   visibleForm.value = false;
   editing.value = undefined;
   selected.value = [];
@@ -71,38 +77,13 @@ function denied() {
   emit('denied');
 }
 
-async function load() {
-  const turn = ++generation;
-  readError.value = '';
-  result.value = undefined;
-  try {
-    const { data } = await listAttendance({
-      path,
-      query: { page: page.value, page_size: 10, service_date: filterDate.value || undefined },
-      cache: 'no-store',
-      throwOnError: true,
-    });
-    if (turn !== generation) return;
-    const lastPage = Math.max(1, Math.ceil(data.data.total / data.data.page_size));
-    if (page.value > lastPage) {
-      page.value = lastPage;
-      return;
-    }
-    accessLost.value = false;
-    result.value = data.data;
-  } catch (e) {
-    if (turn !== generation) return;
-    readError.value = e instanceof Error ? e.message : '现场异常读取失败';
-    if (isDenied(e)) denied();
-  }
-}
-function filter(date: string) {
-  filterDate.value = date;
-  page.value = 1;
+function showDay(date: string) {
+  if (date === listQuery.value.date && listQuery.value.page === 1) return refresh();
+  listQuery.value = { date, page: 1 };
 }
 function openForm(row?: Attendance) {
   editing.value = row;
-  serviceDate.value = row?.service_date ?? filterDate.value;
+  serviceDate.value = row?.service_date ?? listQuery.value.date;
   status.value = row?.status ?? 'late';
   reason.value = row?.reason ?? '';
   selected.value = [];
@@ -116,9 +97,12 @@ function edit(id: string) {
   const row = result.value?.items.find((record) => record.id === id);
   if (row) openForm(row);
 }
-function reloadAfterConflict() {
+function closeForm() {
   visibleForm.value = false;
-  void load();
+  if (stale.value) {
+    if (editing.value) void refresh();
+    else void showDay(serviceDate.value);
+  }
 }
 
 async function save(withdraw = false) {
@@ -134,12 +118,12 @@ async function save(withdraw = false) {
       const target = [path.id, row.student_id, row.service_date].join('/');
       const version = { expected_version: row.version };
       if (withdraw) {
-        await withdrawAttendance({ path: recordPath, body: version,
+        await withdrawAttendance({ path: recordPath, query: managed, body: version,
           headers: command.headers('withdraw_attendance', target, version), throwOnError: true });
         notice.value = '已撤销现场异常记录。';
       } else {
         const body = { ...version, ...fields };
-        await recordAttendance({ path: recordPath, body,
+        await recordAttendance({ path: recordPath, query: managed, body,
           headers: command.headers('record_attendance', target, body), throwOnError: true });
         notice.value = '已保存修改。';
       }
@@ -148,34 +132,30 @@ async function save(withdraw = false) {
         ? { unregistered_students: identities.value.map(({ student_name, student_no }) => ({ student_name: student_name.trim(), student_no: student_no.trim() })) }
         : { student_ids: [...selected.value].sort() };
       const body = { service_date: day, ...fields, ...students };
-      const { data } = await recordAttendanceBatch({ path, body,
+      const { data } = await recordAttendanceBatch({ path, query: managed, body,
         headers: command.headers('record_attendance_batch', path.id, body), throwOnError: true });
       notice.value = `已登记 ${data.data.recorded_count} 条现场异常。`;
     }
     command.confirmed();
     if (!mounted || accessLost.value) return;
     visibleForm.value = false;
-    if (!row && (day !== filterDate.value || page.value !== 1)) filter(day);
-    else await load();
+    if (row) await refresh();
+    else await showDay(day);
   } catch (e) {
     if (!mounted) return;
-    if (isDenied(e)) {
-      readError.value = e instanceof Error ? e.message : '活动管理权限已失效';
+    if (noAccess(e)) {
+      readError.value = message(e);
       denied();
       return;
     }
     writeError.value = e instanceof Error ? e.message : '现场异常保存失败';
-    stale.value = !!row && e instanceof ApiError && e.body?.code === 'version_conflict';
+    stale.value = e instanceof ApiError && (e.body?.code === 'version_conflict' || e.body?.code === 'attendance_already_recorded');
   } finally {
     saving.value = false;
   }
 }
 
-watch([filterDate, page], load, { immediate: true });
-onUnmounted(() => {
-  mounted = false;
-  generation++;
-});
+onUnmounted(() => { mounted = false; });
 </script>
 
 <template>
@@ -216,34 +196,34 @@ onUnmounted(() => {
         </label>
       </fieldset>
       <p v-if="writeError" role="alert" class="save-error">{{ writeError }}
-        <button v-if="stale" type="button" @click="reloadAfterConflict">刷新记录复核</button>
+        <button v-if="stale" type="button" @click="closeForm">{{ editing ? '刷新记录复核' : '查看该日记录' }}</button>
       </p>
       <div class="page-actions">
         <button class="primary" :disabled="locked || (needsReason && !reason.trim()) || (!editing && status !== 'unregistered_participation' && !selected.length)">
           {{ saving ? '正在保存…' : editing ? '保存修改' : '保存记录' }}
         </button>
-        <button type="button" :disabled="saving" @click="visibleForm = false">取消</button>
+        <button type="button" :disabled="saving" @click="closeForm">取消</button>
         <button v-if="editing" type="button" :disabled="locked" class="quiet withdraw" @click="save(true)">撤销记录</button>
       </div>
     </form>
 
     <template v-else>
       <div class="page-actions filters">
-        <label>服务日期 <input type="date" :value="filterDate" @change="filter(($event.target as HTMLInputElement).value)" /></label>
-        <button v-if="filterDate" type="button" class="quiet" @click="filter('')">查看全部日期</button>
+        <label>服务日期 <input type="date" :value="listQuery.date" @change="showDay(($event.target as HTMLInputElement).value)" /></label>
+        <button v-if="listQuery.date" type="button" class="quiet" @click="showDay('')">查看全部日期</button>
         <span v-if="result" class="state-chip neutral">共 {{ result.total }} 条异常</span>
       </div>
       <p v-if="notice" role="status">{{ notice }}</p>
-      <p v-if="readError" role="alert">{{ readError }} <button @click="load">重读记录</button></p>
+      <p v-if="readError" role="alert">{{ readError }} <button @click="refresh()">重读记录</button></p>
       <p v-else-if="!result" role="status">正在读取现场异常…</p>
-      <p v-else-if="!result.total" role="status">{{ filterDate ? '该日期暂无现场异常。' : '本活动暂无现场异常。' }}</p>
+      <p v-else-if="!result.total" role="status">{{ listQuery.date ? '该日期暂无现场异常。' : '本活动暂无现场异常。' }}</p>
       <RecordTable :records="records" label="现场人员记录" heading="姓名" status-heading="异常类型">
         <template #actions="{ id }">
           <button type="button" :disabled="writesPaused || accessLost" @click="edit(id)">修改</button>
         </template>
       </RecordTable>
-      <Pager v-if="result && result.total > result.page_size" :page="page" :size="result.page_size"
-        :total="result.total" @change="page = $event" />
+      <Pager v-if="result && result.total > result.page_size" :page="listQuery.page" :size="result.page_size"
+        :total="result.total" @change="listQuery = { ...listQuery, page: $event }" />
     </template>
   </section>
 </template>
