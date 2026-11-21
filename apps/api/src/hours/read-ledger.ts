@@ -42,6 +42,10 @@ export async function authorizeHourLedger(
   return { student_id: scope.student_id };
 }
 
+export const approvedOrigin = { OR: [
+  { source_batch: { status: 'approved' } }, { source_group: { status: 'approved' } },
+] } satisfies Prisma.HourRecordWhereInput;
+
 export const hourRecordInclude = {
   student: { select: { student_no: true, account: { select: { display_name: true } } } },
   activity: { select: { activity_code: true } },
@@ -96,7 +100,7 @@ export async function readHourLedger(
   const start = from_date === undefined ? undefined : parseCalendarDate(from_date) ?? invalid('from_date', '请选择有效的起始日期');
   const end = to_date === undefined ? undefined : parseCalendarDate(to_date) ?? invalid('to_date', '请选择有效的结束日期');
   if (start && end && start > end) invalid('to_date', '结束日期须等于或晚于起始日期');
-  const where = { ...scopeWhere, service_date: { gte: start, lte: end } };
+  const where = { ...scopeWhere, ...approvedOrigin, service_date: { gte: start, lte: end } };
   const visible = { ...where, ...(!include_history && { status: 'current' }) };
   const records = await tx.hourRecord.findMany({
     where: visible, include: hourRecordInclude,

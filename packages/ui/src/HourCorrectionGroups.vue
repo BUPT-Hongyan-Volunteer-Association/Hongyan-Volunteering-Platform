@@ -3,13 +3,13 @@ import { computed, onScopeDispose, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   ApiError, createCommand, getHourCorrectionGroup, listActivityHourCorrectionGroups, listHourCorrectionGroups,
-  reviewHourCorrectionGroup, withdrawHourCorrectionGroup, type HourCorrectionGroup, type HourWarning, type Profile,
+  reviewHourCorrectionGroup, withdrawHourCorrectionGroup, type HourCorrectionGroup, type Profile,
 } from '@hongyan/contracts';
 import Pager from './Pager.vue';
 import RecordWorkspace from './RecordWorkspace.vue';
 import HourCorrectionForm from './HourCorrectionForm.vue';
 import HourWarnings from './HourWarnings.vue';
-import { beijing } from './hourDisplay';
+import { beijing, useReviewWarnings } from './hourDisplay';
 import { message, noAccess, pageNumber, usePageRead } from './usePageRead';
 
 const props = defineProps<{ admin?: boolean; profile?: Profile; writesPaused?: boolean; activityId?: string; accountId?: string }>();
@@ -52,14 +52,14 @@ function saved(next: HourCorrectionGroup) {
 const actor = computed(() => props.profile?.account_id ?? props.accountId);
 const canReview = computed(() => props.admin && group.value?.status === 'pending_review' && group.value.submitted_by !== actor.value);
 const canWithdraw = computed(() => group.value?.status === 'pending_review' && (props.admin || group.value.submitted_by === actor.value));
-const warningRefresh = ref<{ warnings: HourWarning[]; warning_snapshot_hash: string }>();
-const warnings = computed(() => warningRefresh.value?.warnings ?? group.value?.warnings ?? []);
+const reviewWarnings = useReviewWarnings(() => group.value);
+const { warnings } = reviewWarnings;
 const reason = ref(''), problem = ref(''), busy = ref(false);
 const command = createCommand();
 let live = true;
 onScopeDispose(() => { live = false; });
 watch(id, () => {
-  warningRefresh.value = undefined; reason.value = ''; problem.value = ''; busy.value = false; command.confirmed();
+  reviewWarnings.reset(); reason.value = ''; problem.value = ''; busy.value = false; command.confirmed();
 });
 async function act(decision: 'approved' | 'rejected' | 'withdrawn') {
   const current = group.value;
@@ -81,12 +81,12 @@ async function act(decision: 'approved' | 'rejected' | 'withdrawn') {
       const body = decision === 'rejected'
         ? { expected_version: current.version, decision, reason: note }
         : { expected_version: current.version, decision, ...(note && { reason: note }),
-          warning_snapshot_hash: warningRefresh.value?.warning_snapshot_hash ?? current.warning_snapshot_hash };
+          warning_snapshot_hash: reviewWarnings.hash.value };
       next = (await reviewHourCorrectionGroup({ path, body, throwOnError: true,
         headers: command.headers('review_hour_correction_group', current.id, body) })).data.data;
     }
     if (!live || id.value !== current.id) return;
-    command.confirmed(); group.value = next; warningRefresh.value = undefined;
+    command.confirmed(); group.value = next; reviewWarnings.reset();
     savedMessage.value = decision === 'approved' ? '修复组已批准，源账与目标账已同步更新。' : '修复组' + labels[next.status] + '。';
     await loadQueue(false);
   } catch (error) {
@@ -94,9 +94,8 @@ async function act(decision: 'approved' | 'rejected' | 'withdrawn') {
     problem.value = message(error);
     if (error instanceof ApiError && error.status === 409) {
       command.confirmed();
-      const snapshot = error.body?.context;
-      if (error.body?.code === 'warning_review_required' && snapshot?.warnings && snapshot.warning_snapshot_hash) {
-        warningRefresh.value = { warnings: snapshot.warnings, warning_snapshot_hash: snapshot.warning_snapshot_hash };
+      if (reviewWarnings.refreshFrom(error)) {
+        reason.value = '';
       } else if (error.body?.code !== 'target_key_conflict') await loadGroup();
     } else if (noAccess(error)) {
       await loadGroup();
@@ -156,7 +155,7 @@ async function act(decision: 'approved' | 'rejected' | 'withdrawn') {
               <p>{{ item.reason }}</p>
             </li>
           </ol>
-          <HourWarnings :warnings="warnings" row-label="第" />
+          <HourWarnings :warnings="warnings" repair-pairs />
           <p v-if="problem" role="alert">{{ problem }}</p>
           <template v-if="canReview || canWithdraw">
             <label class="correction-reason">{{ warnings.length && canReview ? '处理意见与警告接受依据' : '处理意见' }}

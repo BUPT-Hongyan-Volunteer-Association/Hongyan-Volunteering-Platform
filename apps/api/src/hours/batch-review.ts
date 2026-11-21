@@ -10,7 +10,7 @@ import { batchView, digest, emptySummary, type SourceInfo } from './batch-data.j
 import { approvedCoverage, dateText, factKey, indexHistory, lockLedger, projectWarnings, readFactReviews,
   readHistory, recordKey, tenths, versionConflict, type LedgerKey } from './ledger-data.js';
 import { beijingDay, hours, normalizeFact } from './values.js';
-import { acceptWarnings } from './warnings.js';
+import { acceptWarnings, warningSnapshot } from './warnings.js';
 import { enqueueHourNotices } from './events.js';
 
 type FrozenRow = HourRow & LedgerKey & {
@@ -52,7 +52,6 @@ async function batchRows(tx: Tx, batch: HourImportBatch) {
     }
   }
   for (const row of rows) row.activity_id = batch.activity_id;
-  if (legacy.length) await writeRows(tx, batch.id, legacy);
   return rows;
 }
 
@@ -63,31 +62,37 @@ async function checkedRows(tx: Tx, batch: HourImportBatch, activity: LoadedActiv
   const { existing, daily } = indexHistory(await readHistory(tx, rows));
   const facts = await readFactReviews(tx, rows);
   const coverage = approvedCoverage(activity.revisions);
-  return {
-    daily,
-    entries: rows.map((row) => {
-      const record = existing.get(recordKey(row));
-      const duration = coverage(row.bound_schedule_revision, row.service_date);
-      if (duration === 0 || row.service_date > beijingDay(now)) versionConflict();
-      if (row.action === 'add') {
-        if (record || row.bound_schedule_revision !== (batch.metadata as unknown as SourceInfo).schedule_revision)
-          versionConflict();
-      } else if (!record || record.id !== row.existing_record_id || record.version !== row.existing_version
-        || record.origin_schedule_revision !== row.bound_schedule_revision || record.status === 'superseded'
-        || record.misconduct_version !== row.misconduct_version
-        || (row.action !== 'correct' && record.status !== 'current')) versionConflict();
-      const fact = normalizeFact(row.remark ?? '');
-      const reused = row.misconduct_reported === 'reported' && row.action !== 'void'
-        ? facts.get(factKey(row, fact)) : undefined;
-      if (row.misconduct_reported === 'reported' && row.action !== 'void'
-        && (!!reused === !!row.misconduct_requires_review
-          || (row.misconduct_review && reused?.source_batch_id !== row.misconduct_review.source_batch_id)))
-        versionConflict('违纪核实状态已变化，请重新上传批次');
-      const previous = record?.status === 'current' ? tenths(record.hours) : 0;
-      const value = row.action === 'void' ? 0 : tenths(row.credited_hours);
-      return { row, record, duration, previous, value, fact, reused };
-    }),
-  };
+  const entries = rows.map((row) => {
+    const record = existing.get(recordKey(row));
+    const duration = coverage(row.bound_schedule_revision, row.service_date);
+    if (duration === 0 || row.service_date > beijingDay(now)) versionConflict();
+    if (row.action === 'add') {
+      if (record || row.bound_schedule_revision !== (batch.metadata as unknown as SourceInfo).schedule_revision)
+        versionConflict();
+    } else if (!record || record.id !== row.existing_record_id || record.version !== row.existing_version
+      || record.origin_schedule_revision !== row.bound_schedule_revision || record.status === 'superseded'
+      || record.misconduct_version !== row.misconduct_version
+      || (row.action !== 'correct' && record.status !== 'current')) versionConflict();
+    const fact = normalizeFact(row.remark ?? '');
+    const reused = row.misconduct_reported === 'reported' && row.action !== 'void'
+      ? facts.get(factKey(row, fact)) : undefined;
+    if (row.misconduct_reported === 'reported' && row.action !== 'void'
+      && (!!reused === !!row.misconduct_requires_review
+        || (row.misconduct_review && reused?.source_batch_id !== row.misconduct_review.source_batch_id)))
+      versionConflict('违纪核实状态已变化，请重新上传批次');
+    const previous = record?.status === 'current' ? tenths(record.hours) : 0;
+    const value = row.action === 'void' ? 0 : tenths(row.credited_hours);
+    return { row, record, duration, previous, value, fact, reused };
+  });
+  const warnings = projectWarnings(daily, entries.map(({ row, duration, previous, value, fact }) =>
+    ({ ...row, duration, previous, value, explanation: fact })));
+  const byRow = new Map<number, HourWarning[]>();
+  for (const warning of warnings) {
+    const number = warning.row_numbers![0];
+    byRow.set(number, [...(byRow.get(number) ?? []), warning]);
+  }
+  for (const row of rows) row.warnings = byRow.get(row.row_number) ?? [];
+  return { entries, warnings };
 }
 
 export async function submitBatch(
@@ -104,11 +109,19 @@ export async function submitBatch(
   if (!source || info.source_hash !== input.source_hash || digest(Buffer.from(source.contents)) !== input.source_hash)
     throw new BusinessError(409, 'version_conflict', '原工作簿摘要已变化，请重新上传');
   if (summary.error_count || !summary.valid_count) invalid('rows', '批次须无行错误并包含有效动作');
-  if (summary.warnings.some((warning) => !warning.explanation?.trim())) invalid('rows', '所有警告均须有说明');
-  await checkedRows(tx, batch, activity, now, reauthorize);
+  const { entries, warnings } = await checkedRows(tx, batch, activity, now, reauthorize);
+  const missing = entries.filter(({ row, fact }) => row.warnings?.length && !fact);
+  if (missing.length) {
+    const message = '请在原表第 ' + missing[0].row.row_number + ' 行补充时长警告说明，修正后重传';
+    throw new BusinessError(422, 'validation_error', message, missing.map(({ row }) => ({
+      field: 'remark', row: row.row_number, code: 'validation_error', message: '时长警告须填写说明',
+    })));
+  }
+  await writeRows(tx, id, entries.map(({ row }) => row));
   const next = await tx.hourImportBatch.update({
     where: { id }, data: { status: 'pending_review', version: { increment: 1 }, submitted_at: now,
-      submitted_by: actor.account_id, metadata: json({ ...info, submitted_by_name: actor.display_name }) },
+      submitted_by: actor.account_id, summary: json({ ...summary, ...warningSnapshot(warnings) }),
+      metadata: json({ ...info, submitted_by_name: actor.display_name }) },
   });
   await audit(tx, { actor_id: actor.account_id, action: 'submit', resource_type: 'hour_batch', resource_id: id,
     before: { status: batch.status }, after: { status: next.status, valid_count: summary.valid_count } });
@@ -228,16 +241,8 @@ export async function reviewBatch(
   let changes: object[] = [];
   let snapshot;
   if (input.decision === 'approved') {
-    const { entries, daily } = await checkedRows(tx, batch, activity, now, reauthorize);
-    const warnings = projectWarnings(daily, entries.map(({ row, duration, previous, value, fact }) =>
-      ({ ...row, duration, previous, value, explanation: fact })));
+    const { entries, warnings } = await checkedRows(tx, batch, activity, now, reauthorize);
     snapshot = acceptWarnings(input, summary.warning_snapshot_hash, warnings);
-    const byRow = new Map<number, HourWarning[]>();
-    for (const warning of warnings) {
-      const number = warning.row_numbers![0];
-      byRow.set(number, [...(byRow.get(number) ?? []), warning]);
-    }
-    for (const { row } of entries) row.warnings = byRow.get(row.row_number) ?? [];
     changes = await applyRows(tx, batch, entries, input, actor, now);
   }
   const reason = input.reason?.trim();

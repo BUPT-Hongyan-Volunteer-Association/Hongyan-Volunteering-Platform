@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { ledgerActivity, ledgerDay, ledgerWorkbook } from './hour-ledger-fixture.mjs';
+import { ledgerActivity, ledgerDay, ledgerWorkbook, seedApprovedHours } from './hour-ledger-fixture.mjs';
 
 const button = (page, name) => page.getByRole('button', { name, exact: true });
 const link = (page, name) => page.getByRole('link', { name, exact: typeof name === 'string' });
@@ -92,7 +92,7 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   await link(owner, title).click();
   await tab(owner, '时长批次');
   await sendWorkbook(owner, file, ledgerWorkbook(activity, [{ student: a, day }]));
-  const batchPath = new URL(owner.url()).pathname;
+  const rejectedPath = new URL(owner.url()).pathname;
   for (const page of [student, secondStudent]) {
     await page.goto(web + '/mine');
     await link(page, '我的时长').click();
@@ -104,6 +104,17 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   await link(teacher, /查账演示\.xlsx/).click();
   await shown(text(teacher, '全批 1 行 · 预计差额 +2.0 小时'));
   await shown(teacher.getByRole('cell', { name: new RegExp(a.account.display_name) }));
+  await teacher.getByLabel('整批意见').fill('请修正原文件后重新送审');
+  await button(teacher, '驳回整批').click();
+  await shown(text(teacher, '批次已驳回。'));
+  await owner.reload();
+  await button(owner, '修正后重传').click();
+  await sendWorkbook(owner, '修正查账演示.xlsx', ledgerWorkbook(activity, [{ student: a, day }]));
+  const batchPath = new URL(owner.url()).pathname;
+  assert.notEqual(batchPath, rejectedPath);
+  assert.equal(new URL(await link(owner, '查看修正前批次').getAttribute('href'), web).pathname, rejectedPath);
+  await teacher.goto(admin + '/hours');
+  await link(teacher, /修正查账演示/).click();
   await button(teacher, '批准整批').click();
   await shown(text(teacher, '批次已批准，正式时长已更新。'));
   await owner.reload();
@@ -252,8 +263,8 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   assert.equal(await teacher.getByLabel('第2行意见').inputValue(), '核实属实，相关情况已登记。');
   await shown(text(teacher, '全批 6 行 · 预计差额 +12.0 小时'));
   const extra = await ledgerActivity(db, manager.account_id, '时长警告复核活动');
-  await db.hourRecord.create({ data: { student_id: a.id, activity_id: extra.id, service_date: new Date(reviewDays[0]),
-    hours: '23.0', version: 1, status: 'current', origin_schedule_revision: 1, misconduct_reported: 'none', misconduct_version: 0 } });
+  await seedApprovedHours(db, { student_id: a.id, activity_id: extra.id, service_date: new Date(reviewDays[0]),
+    hours: '23.0', version: 1, status: 'current', origin_schedule_revision: 1, misconduct_reported: 'none', misconduct_version: 0 }, manager.account_id);
   const firstRequest = teacher.waitForRequest((request) => request.method() === 'POST' && request.url().includes('/admin/hour-imports/'));
   await button(teacher, '批准整批').click();
   const firstKey = (await firstRequest).headers()['idempotency-key'];
@@ -267,4 +278,27 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   await shown(text(teacher, '批次已批准，正式时长已更新。'));
   await shown(text(teacher, /属实 · 核实属实/));
   await shown(text(teacher, /不成立 · 复核为误报/));
+
+  // 同一真实修复组的两笔目标均超出当日 24 小时，核对工作表行号到配对序号的展示。
+  const days = reviewDays.slice(0, 2);
+  const records = await db.hourRecord.findMany({ where: { activity_id: activity.id, student_id: a.id,
+    service_date: { in: days.map(day => new Date(day)) }, status: 'current' }, orderBy: { service_date: 'asc' } });
+  assert.equal(records.length, 2);
+  const csrf = await (await owner.request.get(web + '/api/v1/auth/csrf')).json();
+  const response = await owner.request.post(web + '/api/v1/organizer/hour-correction-groups', {
+    headers: { 'X-CSRF-Token': csrf.data.csrf_token, 'Idempotency-Key': randomUUID() },
+    data: { reason: '核对配对编号', items: records.map(record => ({
+      source_record_id: record.id, expected_source_version: record.version,
+      target_student_no: b.student_no, target_student_name: b.account.display_name, target_activity_id: activity.id,
+      target_service_date: record.service_date.toISOString().slice(0, 10), target_schedule_revision: 1,
+      credited_hours: '25.0', reason: '核实当日服务情况',
+    })) },
+  });
+  const group = await response.json();
+  assert.equal(response.status(), 201, JSON.stringify(group));
+  await teacher.goto(admin + '/manage/corrections/' + group.data.id);
+  const warningList = teacher.getByRole('region', { name: '时长警告' });
+  await shown(warningList.getByText('第 1 对 ·', { exact: true }));
+  await shown(warningList.getByText('第 2 对 ·', { exact: true }));
+  assert.equal(await warningList.locator('li').count(), 2);
 }

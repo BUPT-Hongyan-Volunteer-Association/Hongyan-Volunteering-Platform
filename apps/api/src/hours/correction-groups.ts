@@ -9,7 +9,7 @@ import { audit } from '../audit.js';
 import { approvedCoverage, dateText, indexHistory, lockLedger, projectWarnings, readHistory, recordKey, tenths,
   versionConflict, type Projection } from './ledger-data.js';
 import { beijingDay, hours } from './values.js';
-import { hourRecordInclude, hourRecordViews } from './read-ledger.js';
+import { approvedOrigin, hourRecordInclude, hourRecordViews } from './read-ledger.js';
 import { acceptWarnings, warningSnapshot } from './warnings.js';
 import { enqueueHourNotices } from './events.js';
 
@@ -28,7 +28,7 @@ export function groupView(group: HourCorrectionGroup): GroupView {
 export async function correctionActivities(tx: Tx, input: HourCorrectionGroupInput) {
   const sources = [...new Set(input.items.map((item) => item.source_record_id.toLowerCase()))];
   const rows = await tx.hourRecord.findMany({
-    where: { id: { in: sources } }, select: { activity_id: true },
+    where: { id: { in: sources }, ...approvedOrigin }, select: { activity_id: true },
   });
   if (rows.length !== sources.length) invisible();
   return [...rows.map((row) => row.activity_id), ...input.items.map((item) => item.target_activity_id.toLowerCase())];

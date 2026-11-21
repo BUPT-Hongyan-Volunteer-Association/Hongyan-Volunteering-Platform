@@ -389,6 +389,52 @@ test('独立 PostgreSQL 时长账务、警告、并发与更正结案', { timeou
       assert.equal((await dual.write('POST', decision(ownBatch), approved(ownBatch))).status, 403);
     });
 
+    await t.test('送审时按锁内累计复核空备注，冻结最新批次和行警告', async () => {
+      const day = ledgerDay(18), target = await ledgerActivity(db, o.account_id, '送审重新核账');
+      await db.registration.create({ data: { activity_id: target.id, student_id: a.id, status: 'accepted',
+        submitted_at: new Date(ledgerDay(20)) } });
+      const clean = await preview(owner, target, [{ student: a, day, note: '' }]);
+      const explained = await preview(owner, target, [{ student: a, day, note: '另参加晚场' }]);
+      assert.equal(clean.warnings.length, 0);
+      const extra = await submit(owner, await preview(owner, other, [{ student: a, day, hours: '23.0' }]));
+      result(await teacher.write('POST', decision(extra), approved(extra)), 200);
+      const refused = await owner.write('POST', detail(clean) + '/submit',
+        { expected_version: clean.version, source_hash: clean.source_hash });
+      assert.equal(refused.status, 422);
+      assert.equal(refused.details[0].row, 2);
+      assert.equal(result(await owner.request(detail(clean)), 200).status, 'ready');
+      const pending = await submit(owner, explained);
+      assert.equal(pending.warnings[0].projected_daily_hours, '25.0');
+      const row = result(await owner.request(detail(pending) + '/rows'), 200).items[0];
+      assert.deepEqual(row.warnings, pending.warnings);
+      assert.notEqual(explained.warning_snapshot_hash, pending.warning_snapshot_hash);
+    });
+
+    await t.test('无来源旧账保留原值，不参与查账、导出、当日警告和同键正式入账', async () => {
+      const day = ledgerDay(19);
+      // 在独立测试库还原新增约束之前已有一条旧记录的升级状态。
+      const legacy = await db.$transaction(async tx => {
+        await tx.$executeRawUnsafe('ALTER TABLE hour_record DROP CONSTRAINT hour_record_requires_origin');
+        const old = await tx.hourRecord.create({ data: { activity_id: activity.id, student_id: b.id,
+          service_date: new Date(day), hours: '30.0', version: 1, status: 'current',
+          origin_schedule_revision: 1, misconduct_reported: 'none', misconduct_version: 0 } });
+        await tx.$executeRawUnsafe('ALTER TABLE hour_record ADD CONSTRAINT hour_record_requires_origin CHECK (num_nonnulls(batch_id, correction_group_id) = 1) NOT VALID');
+        return old;
+      });
+      assert.equal((await myDay(bob, day, true)).total, 0);
+      const snapshot = await compareExportRows(db, bob, '/me/hours', { type: 'my_hours' },
+        { from_date: day, to_date: day, include_history: true });
+      assert.equal(snapshot.total_hours, '0.0');
+      const pending = await submit(owner, await preview(owner, activity, [{ student: b, day }]));
+      assert.equal(pending.warnings.length, 0);
+      result(await teacher.write('POST', decision(pending), approved(pending)), 200);
+      const visible = await myDay(bob, day, true);
+      assert.equal(visible.total, 1);
+      assert.equal(visible.total_hours, '2.0');
+      assert.equal(visible.items[0].batch_id, pending.id);
+      assert.deepEqual(await db.hourRecord.findUniqueOrThrow({ where: { id: legacy.id } }), legacy);
+    });
+
     await t.test('审批在等待账务锁期间失去审核角色时拒绝入账', async () => {
       const day = ledgerDay(14);
       const batch = await submit(owner, await preview(owner, activity, [{ student: a, day }]));
@@ -420,6 +466,7 @@ test('独立 PostgreSQL 时长账务、警告、并发与更正结案', { timeou
       assert.equal((await myDay(alice, day)).total_hours, '0.0');
       assert.equal((await db.hourImportBatch.findUniqueOrThrow({ where: { id: batch.id } })).status, 'pending_review');
     });
+
   } finally {
     await app.close();
     await db.$disconnect();

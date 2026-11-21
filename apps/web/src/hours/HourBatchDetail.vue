@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onScopeDispose, ref, watch } from 'vue';
+import { computed, onScopeDispose, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ApiError, createCommand, downloadEvidence, getHourBatch, getHourImportErrorReport, retryHourBatchValidation, submitHourBatch } from '@hongyan/contracts';
 import HourRows from './HourRows.vue';
@@ -19,6 +19,8 @@ const {data:batch,error,loading,refresh} = useHourRead(() => id, async (signal) 
   if (result.activity_id !== activityId) throw new Error('该批次不属于当前活动。');
   return result;
 }, () => emit('denied'));
+const canReplace = computed(() => batch.value?.mode !== 'void' &&
+  ['invalid', 'rejected', 'ready'].includes(batch.value?.status ?? ''));
 watch(batch,(current,_,cleanup) => {
   if (current?.status !== 'validating') return;
   const timer = window.setTimeout(() => void refresh(false),1000);
@@ -96,13 +98,13 @@ async function download(report: boolean) {
       <div class="tools">
         <button v-if="batch.status === 'ready'" class="primary" :disabled="busy || writesPaused || !batch.valid_count" @click="submit">提交审核</button>
         <button v-if="batch.status === 'invalid'" class="primary" :disabled="busy || writesPaused" @click="download(true)">下载错误报告</button>
-        <button v-if="batch.status === 'invalid'" :disabled="busy || writesPaused" @click="replacing=!replacing">{{ replacing ? '收起上传表单' : '修正后重传' }}</button>
+        <button v-if="canReplace" :disabled="busy || writesPaused" @click="replacing=!replacing">{{ replacing ? '收起上传表单' : '修正后重传' }}</button>
         <button v-if="batch.status === 'failed'" class="primary" :disabled="busy || writesPaused" @click="retry">重试原批次</button>
         <button v-if="batch.source_file_id" :disabled="busy || writesPaused" @click="download(false)">下载原工作簿</button>
       </div>
       <p v-if="batch.status === 'ready' && !batch.valid_count">本批均为重复记录，无需送审。</p>
       <p v-if="problem" role="alert">{{ problem }}</p>
-      <KeepAlive v-if="batch.status === 'invalid'">
+      <KeepAlive v-if="canReplace">
         <HourUpload v-if="replacing" :activity-id="activityId" :previous="batch" :writes-paused="writesPaused" @denied="refresh()" />
       </KeepAlive>
       <div v-if="batch.row_count !== undefined" class="summary">

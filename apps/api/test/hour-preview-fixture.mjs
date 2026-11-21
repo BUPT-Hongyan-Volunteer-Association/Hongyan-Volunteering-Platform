@@ -1,3 +1,4 @@
+import { seedApprovedHours } from './hour-ledger-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { previewActivityHours } from '../dist/hours/preview-context.js';
@@ -42,7 +43,7 @@ export async function prepareHourPreviewFixture(db, sample) {
     } });
     const historical = { id:randomUUID(),version:1,activity_id:sample.id,student_id:students[2].id,service_date:new Date(date),
       status:'current',hours:'18.0',origin_schedule_revision:1,misconduct_reported:'none',misconduct_version:0 };
-    await tx.hourRecord.create({data:historical});
+    await seedApprovedHours(tx, historical, owner);
     return activity.id;
   },{isolationLevel:'RepeatableRead'});
   return { activityId, bytes:mixedWorkbook(students), fixed:mixedWorkbook(students,true), ownerId:students[1].account_id,

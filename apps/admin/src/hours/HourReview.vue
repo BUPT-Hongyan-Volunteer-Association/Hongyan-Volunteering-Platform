@@ -4,12 +4,12 @@ import { useRoute, useRouter } from 'vue-router';
 import {
   ApiError, createCommand, getHourBatch, getHourBatchRows, listHourBatchesForReview,
   listIncidentsForReview, reviewHourBatch, type HourBatch, type HourBatchReviewDecision,
-  type HourMisconductReviewInput, type HourWarning, type Profile,
+  type HourMisconductReviewInput, type Profile,
 } from '@hongyan/contracts';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import Pager from '@hongyan/ui/Pager.vue';
 import HourWarnings from '@hongyan/ui/HourWarnings.vue';
-import { actions, beijing, misconductLabels, modes, signed, statuses } from '@hongyan/ui/hourDisplay';
+import { actions, useReviewWarnings, beijing, misconductLabels, modes, signed, statuses } from '@hongyan/ui/hourDisplay';
 import { message, noAccess, pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 
 const props = defineProps<{ profile: Profile }>();
@@ -74,8 +74,8 @@ watch(detail, (current) => {
 });
 watch([only, size], () => { page.value = 1; });
 
-const warningRefresh = ref<{ warnings: HourWarning[]; warning_snapshot_hash: string }>();
-const warnings = computed(() => warningRefresh.value?.warnings ?? batch.value?.warnings ?? []);
+const reviewWarnings = useReviewWarnings(() => batch.value);
+const { warnings } = reviewWarnings;
 const reason = ref(''), basis = ref(''), result = ref(''), problem = ref(''), busy = ref(false);
 const command = createCommand();
 let live = true;
@@ -83,7 +83,7 @@ onScopeDispose(() => { live = false; });
 watch(id, () => {
   for (const key of Object.keys(drafts)) delete drafts[Number(key)];
   only.value = false; page.value = 1; activeNumber.value = undefined;
-  warningRefresh.value = undefined; basis.value = ''; reason.value = '';
+  reviewWarnings.reset(); basis.value = ''; reason.value = '';
   problem.value = ''; result.value = ''; busy.value = false;
   command.confirmed();
 });
@@ -119,7 +119,7 @@ async function decide(decision: 'approved' | 'rejected') {
   const body: HourBatchReviewDecision = decision === 'rejected'
     ? { expected_version: current.version, decision, reason: decisionReason }
     : { expected_version: current.version, decision, ...(decisionReason && { reason: decisionReason }),
-      warning_snapshot_hash: warningRefresh.value?.warning_snapshot_hash ?? current.warning_snapshot_hash,
+      warning_snapshot_hash: reviewWarnings.hash.value,
       misconduct_reviews: remarks };
   busy.value = true;
   try {
@@ -128,7 +128,7 @@ async function decide(decision: 'approved' | 'rejected') {
     if (!live || id.value !== target) return;
     command.confirmed();
     batch.value = data.data;
-    warningRefresh.value = undefined;
+    reviewWarnings.reset();
     result.value = decision === 'approved' ? '批次已批准，正式时长已更新。' : '批次已驳回。';
     await loadRows(false);
   } catch (error) {
@@ -136,9 +136,7 @@ async function decide(decision: 'approved' | 'rejected') {
     problem.value = message(error);
     if (error instanceof ApiError && error.status === 409) {
       command.confirmed();
-      const latest = error.body?.context;
-      if (error.body?.code === 'warning_review_required' && latest?.warnings && latest.warning_snapshot_hash) {
-        warningRefresh.value = { warnings: latest.warnings, warning_snapshot_hash: latest.warning_snapshot_hash };
+      if (reviewWarnings.refreshFrom(error)) {
         basis.value = '';
       } else await loadBatch();
     } else if (noAccess(error)) {

@@ -1,4 +1,5 @@
-import type { HourBatch, HourRow } from '@hongyan/contracts';
+import { computed, shallowRef } from 'vue';
+import { type ApiError, type HourBatch, type HourRow } from '@hongyan/contracts';
 export { message, noAccess, usePageRead as useHourRead } from './usePageRead';
 
 export const statuses: Record<HourBatch['status'], string> = {
@@ -16,3 +17,22 @@ export const signed = (value?: string) => value === undefined ? '—' : Number(v
 export const beijing = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', {
   timeZone: 'Asia/Shanghai', hour12: false, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit',
 }) : '—';
+
+type ReviewWarnings = Pick<HourBatch, 'warnings' | 'warning_snapshot_hash'>;
+
+export function useReviewWarnings(current: () => ReviewWarnings | undefined) {
+  const revised = shallowRef<ReviewWarnings>();
+  const snapshot = computed(() => revised.value ?? current());
+  return {
+    warnings: computed(() => snapshot.value?.warnings ?? []),
+    hash: computed(() => snapshot.value?.warning_snapshot_hash),
+    reset() { revised.value = undefined; },
+    refreshFrom(error: ApiError) {
+      const context = error.body?.context;
+      if (error.status !== 409 || error.body?.code !== 'warning_review_required' ||
+        !context?.warnings || !context.warning_snapshot_hash) return false;
+      revised.value = { warnings: context.warnings, warning_snapshot_hash: context.warning_snapshot_hash };
+      return true;
+    },
+  };
+}

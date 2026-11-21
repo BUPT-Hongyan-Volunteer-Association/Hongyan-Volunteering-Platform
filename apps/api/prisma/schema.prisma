@@ -422,6 +422,7 @@ model HourImportBatch {
   source         HourImportFile? @relation("HourSource", fields: [source_file_id], references: [id], onDelete: Restrict)
   report         HourImportFile? @relation("HourReport", fields: [report_file_id], references: [id])
   rows           HourImportRow[]
+  posted_records HourRecord[]
 
   @@index([activity_id, created_at, id])
   @@index([status, created_at])
@@ -465,7 +466,10 @@ model HourRecord {
   student                  Student  @relation(fields: [student_id], references: [id])
   activity                 Activity @relation(fields: [activity_id], references: [id])
 
-  // 部分唯一索引由迁移维护，每个业务键最多一个 current。
+  source_batch HourImportBatch? @relation(fields: [batch_id], references: [id], onDelete: Restrict)
+  source_group HourCorrectionGroup? @relation(fields: [correction_group_id], references: [id], onDelete: Restrict)
+
+  // 旧账保留原 ID 和状态，只有具备入账来源的 current 记录占用业务键。
   @@index([student_id, service_date, activity_id])
   @@index([activity_id, service_date])
   @@map("hour_record")
@@ -535,6 +539,7 @@ model AuditEvent {
 }
 
 model HourCorrectionGroup {
+  posted_records        HourRecord[]
   id                    String   @id @default(uuid()) @db.Uuid
   version               Int      @default(1)
   status                String   @default("pending_review")

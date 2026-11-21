@@ -29,3 +29,10 @@ export function ledgerWorkbook(activity, entries) {
       .map((value, col) => cell(String.fromCharCode(65 + col) + line, value, col === 4 ? 'n' : 'str')).join(''));
   }).join(''));
 }
+
+export async function seedApprovedHours(db, record, submittedBy) {
+  const batch = await db.hourImportBatch.create({ data: { activity_id: record.activity_id, mode: 'new',
+    status: 'approved', submitted_by: submittedBy, validation_by: submittedBy, reviewed_at: new Date(),
+    metadata: {}, summary: {} } });
+  return db.hourRecord.create({ data: { ...record, batch_id: batch.id } });
+}

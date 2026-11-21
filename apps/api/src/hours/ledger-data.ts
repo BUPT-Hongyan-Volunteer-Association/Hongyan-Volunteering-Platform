@@ -64,6 +64,8 @@ export async function readHistory(tx: Tx, keys: readonly StudentDay[]) {
       record.misconduct_version, record.remark
     FROM hour_record AS record JOIN jsonb_to_recordset(${JSON.stringify(distinctDays(keys))}::jsonb)
       AS requested(student_id uuid, service_date date) USING (student_id, service_date)
+    WHERE EXISTS (SELECT 1 FROM hour_import_batch b WHERE b.id = record.batch_id AND b.status = 'approved')
+       OR EXISTS (SELECT 1 FROM hour_correction_group g WHERE g.id = record.correction_group_id AND g.status = 'approved')
     ORDER BY record.version DESC, record.created_at DESC NULLS LAST, record.id`;
 }
 

@@ -3290,7 +3290,7 @@ paths:
     post:
       operationId: submit_hour_batch
       summary: 提交校验通过的时长批次
-      description: 仅ready且无行错误、有效行>0，校验expected_version与source_hash。有效行包含review_only，全skip_identical批次不能提交。new检查新增行的获批安排，correction及review_only检查原记录版本与安排。冻结文件、时长动作、上报标记、备注事实、misconduct_version及需核实行集合。待审不可修改，不创建独立pending异常任务。警告必须有说明。
+      description: 仅ready且无行错误、有效行>0，校验expected_version与source_hash。有效行包含review_only，全skip_identical批次不能提交。new检查新增行的获批安排，correction及review_only检查原记录版本与安排。冻结文件、时长动作、上报标记、备注事实、misconduct_version及需核实行集合。送审在锁内按最新有效账务重算警告。缺少行说明返回 422，details 标出原表行号。成功后冻结行警告及全批摘要。待审不可修改，不创建独立pending异常任务。
       tags:
       - 时长
       x-requirement: FR04
@@ -11472,6 +11472,7 @@ components:
           type: string
           format: date
         row_numbers:
+          description: 沿用从 2 开始的原表行号。修复组界面按 row_number 减 1 显示配对序号。
           type: array
           items:
             type: integer

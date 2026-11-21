@@ -1,3 +1,4 @@
+import { approvedOrigin } from './read-ledger.js';
 import { Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
 import type { Incident as View, IncidentDecision, IncidentInput, ReasonAction } from '@hongyan/contracts/types';
 import { managedScope, pagination, staff } from '../activities/read.js';
@@ -48,7 +49,7 @@ export class HourIncidentsController {
       const person = await tx.student.findFirst({
         where: { id: input.student_id, OR: [
           { registrations: { some: { activity_id: id } } },
-          { hour_records: { some: { activity_id: id } } },
+          { hour_records: { some: { activity_id: id, ...approvedOrigin } } },
         ] }, select: { id: true },
       });
       const attendance = person || await tx.attendanceRecord.findFirst({

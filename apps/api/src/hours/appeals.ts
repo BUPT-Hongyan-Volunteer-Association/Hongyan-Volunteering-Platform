@@ -6,7 +6,7 @@ import { audit } from '../audit.js';
 import type { HourAppeal, Prisma } from '../generated/prisma/client.js';
 import { BusinessError, invalid, invisible } from '../http.js';
 import { enqueueHourNotices } from './events.js';
-import { approvedTitles } from './read-ledger.js';
+import { approvedOrigin, approvedTitles } from './read-ledger.js';
 import { dateText } from './ledger-data.js';
 import { beijingDay } from './values.js';
 
@@ -40,7 +40,7 @@ export async function appealActivity(tx: Tx, input: AppealInput, actor: Actor) {
   const student_id = studentId(actor);
   if (input.target_type === 'missing_hours') return [input.activity_id!];
   if (input.target_type === 'hours') {
-    const row = await tx.hourRecord.findFirst({ where: { id: input.target_id, student_id }, select: { activity_id: true } });
+    const row = await tx.hourRecord.findFirst({ where: { id: input.target_id, student_id, ...approvedOrigin }, select: { activity_id: true } });
     if (row) return [row.activity_id];
   }
   if (input.target_type === 'incident') {
@@ -72,7 +72,7 @@ export async function createAppeal(tx: Tx, input: AppealInput, actor: Actor, now
   } else {
     const where = { id: input.target_id, student_id };
     const select = { activity_id: true, service_date: true };
-    resource = (input.target_type === 'hours' ? await tx.hourRecord.findFirst({ where, select })
+    resource = (input.target_type === 'hours' ? await tx.hourRecord.findFirst({ where: { ...where, ...approvedOrigin }, select })
       : await tx.incident.findFirst({ where: { ...where, status: 'confirmed' }, select })) ?? invisible();
   }
   if (await tx.hourAppeal.findFirst({ where: {

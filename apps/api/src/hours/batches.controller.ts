@@ -1,3 +1,4 @@
+import { approvedOrigin } from './read-ledger.js';
 import { Body, CallHandler, CanActivate, Controller, ExecutionContext, Get, Header, HttpCode, Injectable, Param, ParseUUIDPipe, PayloadTooLargeException,
   Post, Query, Req, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -168,7 +169,7 @@ export class HourBatchesController {
   @Post('organizer/hour-records/:id/void-requests')
   async voidRequest(@Param('id', ParseUUIDPipe) id: string, @Req() req: SessionRequest) {
     const record = await this.db.hourRecord.findFirst({
-      where: { id, activity: managedScope(req.actor) }, select: { activity_id: true },
+      where: { id, activity: managedScope(req.actor), ...approvedOrigin }, select: { activity_id: true },
     });
     if (!record) invisible();
     const input = validate<ReasonAction>('reason_action', req.body);
