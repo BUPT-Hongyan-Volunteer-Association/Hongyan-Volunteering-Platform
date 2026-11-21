@@ -8,7 +8,7 @@ import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { buildWorkbook, rosterSheet } from './xlsx-fixture.mjs';
 
 const template = readFileSync(
-  new URL('../../../packages/contracts/templates/学生建档导入模板_v1.4.xlsx', import.meta.url),
+  new URL('../../../packages/contracts/templates/学生建档导入模板_v1.5.xlsx', import.meta.url),
 );
 
 function browser(base) {
@@ -123,7 +123,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
     await student.signIn('0000000001', '000001', 'student-new-pass1');
     const upload = (bytes, filename) => teacher.upload('/admin/student-imports', bytes, filename);
 
-    await t.test('上传限 5 MB，只接受 v1.4 模板的工作表与六列表头', async () => {
+    await t.test('上传限 5 MB，只接受 v1.5 模板的工作表与必需表头', async () => {
       const oversized = Buffer.alloc(5_242_881);
       oversized[0] = 0x50;
       oversized[1] = 0x4b;
@@ -765,6 +765,66 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
         conflictRows.items.every((row) =>
           row.errors.some((error) => error.code === 'duplicate_conflict'),
         ),
+      );
+    });
+
+    await t.test('v1.5 五列名单不含级部列也可导入，非法年级按原表行报错', async () => {
+      const fiveColumns = buildWorkbook({
+        sheets: [
+          rosterSheet(
+            [
+              {
+                number: 2,
+                values: ['2026123456', '五列学生', '', '2026', '0000001901'],
+              },
+            ],
+            { includeCohort: false },
+          ),
+        ],
+        prefix: true,
+        sharedStrings: true,
+      });
+      const batch = await uploadImport(teacher, fiveColumns);
+      assert.equal(batch.status, 'ready');
+      const preview = (await teacher.request('/admin/student-imports/' + batch.id + '/rows')).data;
+      assert.equal(preview.items[0].cohort, undefined);
+      assert.equal(preview.items[0].grade, '2026');
+      assert.equal(
+        (
+          await teacher.write(
+            'POST',
+            '/admin/student-imports/' + batch.id + '/commit',
+            commitBody(batch),
+          )
+        ).status,
+        200,
+      );
+      const stored = await db.student.findUniqueOrThrow({ where: { student_no: '2026123456' } });
+      assert.equal(stored.cohort, null);
+      assert.equal(stored.grade, '2026');
+
+      const badGrade = await uploadImport(
+        teacher,
+        workbook([
+          { number: 2, values: ['0000001902', '非法年级', '', '大一', ''] },
+        ]),
+      );
+      assert.equal(badGrade.status, 'invalid');
+      const badRows = (await teacher.request('/admin/student-imports/' + badGrade.id + '/rows')).data;
+      assert(
+        badRows.items[0].errors.some(
+          (error) => error.field === 'grade' && error.code === 'format',
+        ),
+      );
+      assert.equal(
+        (
+          await teacher.write(
+            'POST',
+            '/admin/student-imports/' + badGrade.id + '/commit',
+            commitBody(badGrade),
+          )
+        ).status,
+        409,
       );
     });
 

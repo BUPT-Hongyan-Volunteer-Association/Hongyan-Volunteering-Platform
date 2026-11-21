@@ -96,6 +96,7 @@ const fieldLabels: Record<ImportField, string> = {
 const importFieldByHeader = new Map<string, ImportField>(
   importHeaders.map((label, index) => [label, importFields[index]]),
 );
+const requiredImportFields: ImportField[] = ['student_no', 'name', 'grade', 'class_name'];
 
 /** 学号前四位为入学年份；非 19xx/20xx 开头时不推断。 */
 export function gradeFromStudentNo(student_no: string) {
@@ -203,6 +204,14 @@ function parseRow(row: SheetRow, columns: Map<ImportField, number>): ParsedRow {
     const value = text(cell, field, errors, max);
     if (value === undefined) continue;
     if (field === 'grade') {
+      if (value && !/^\d{4}(?:级)?$/.test(value)) {
+        errors.push({
+          field: 'grade',
+          code: 'format',
+          message: '年级须为四位年份（如 2026 或 2026级）',
+        });
+        continue;
+      }
       const grade = normalizeGrade(value);
       signature.grade = grade;
       if (grade) values.grade = grade;
@@ -253,13 +262,13 @@ export function parseImportWorkbook(buffer: Buffer): ParsedImport {
       }
       columns.set(field, cell.column);
     }
-    for (const field of importFields.slice(0, 5))
+    for (const field of requiredImportFields)
       if (!columns.has(field)) mismatch.push(fieldLabels[field]);
   }
   if (mismatch.length)
     return {
       file_error:
-        '第 1 行表头须包含 学号、姓名、级部、年级、班级（学院可选），列顺序不限，且不使用其他列',
+        '第 1 行表头须包含 学号、姓名、年级、班级（级部兼容旧名单可选，学院可选），列顺序不限，且不使用其他列',
       rows: [],
       row_count: 0,
     };
