@@ -34,6 +34,14 @@ enum MemberRole {
   collaborator
 }
 
+enum AttendanceStatus {
+  late
+  absent
+  excused
+  other
+  unregistered_participation
+}
+
 model Account {
   id                   String           @id @default(uuid()) @db.Uuid
   username             String           @unique
@@ -50,6 +58,7 @@ model Account {
 }
 
 model Student {
+  attendance    AttendanceRecord[]
   hour_records HourRecord[]
   registrations Registration[]
   receipts      NoticeReceipt[]
@@ -128,6 +137,7 @@ model LoginWindow {
 }
 
 model Activity {
+  attendance   AttendanceRecord[]
   group_images ActivityGroupImage[]
   hour_batches HourImportBatch[]
   hour_files   HourImportFile[]
@@ -205,6 +215,25 @@ model RegistrationHistory {
 
   @@id([registration_id, version])
   @@map("registration_history")
+}
+
+model AttendanceRecord {
+  id           String           @id @default(uuid()) @db.Uuid
+  activity_id  String           @db.Uuid
+  student_id   String           @db.Uuid
+  service_date DateTime         @db.Date
+  status       AttendanceStatus
+  reason       String?
+  version      Int              @default(1)
+  created_at   DateTime         @default(now()) @db.Timestamptz(3)
+  updated_at   DateTime         @default(now()) @updatedAt @db.Timestamptz(3)
+  cleared_at   DateTime?        @db.Timestamptz(3)
+  activity     Activity         @relation(fields: [activity_id], references: [id])
+  student      Student          @relation(fields: [student_id], references: [id])
+
+  @@unique([activity_id, student_id, service_date])
+  @@index([activity_id, cleared_at, service_date])
+  @@map("attendance_record")
 }
 
 model RegistrationDecisionEvent {

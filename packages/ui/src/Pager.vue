@@ -8,6 +8,7 @@ const pages = computed(() => Math.max(1, Math.ceil(props.total / props.size)));
 <template>
   <nav class="pager" aria-label="分页">
     <button
+      type="button"
       class="icon-button"
       aria-label="上一页"
       title="上一页"
@@ -20,6 +21,7 @@ const pages = computed(() => Math.max(1, Math.ceil(props.total / props.size)));
       >第 <b>{{ page }}</b> / {{ pages }} 页</span
     >
     <button
+      type="button"
       class="icon-button"
       aria-label="下一页"
       title="下一页"

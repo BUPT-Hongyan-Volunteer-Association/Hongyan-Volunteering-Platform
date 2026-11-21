@@ -8,6 +8,7 @@ import { createApp } from '../dist/app.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { NoticeWorker } from '../dist/notices/notice.worker.js';
 import { Database } from '../dist/database.js';
+import { slots } from '../dist/activities/schedule.js';
 import { checkHourPages } from './hour-pages-fixture.mjs';
 import { checkStudentImportPages } from './student-import-pages-fixture.mjs';
 
@@ -242,15 +243,14 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
             await fits(owner);
             continue;
           }
-          if (tab === '现场人员记录' || tab === '漏记反馈') {
-            const table = owner.getByRole('table', { name: tab });
-            await visible(table);
-            if (tab === '现场人员记录') {
-              await visible(table.getByRole('row', { name: /许同学.*已请假.*本人提前联系本活动负责人/ }));
-              if (width === 1440) await capture(owner, 'attendance-register');
-              await pickOption(owner, '服务日期', '2026-11-15');
-              assert.equal(await table.getByText('林同学').count(), 0);
-            }
+          if (tab === '现场人员记录') {
+            await visible(owner.getByText('本活动暂无现场异常。'));
+            await visible(button(owner, '登记异常'));
+            await fits(owner);
+            continue;
+          }
+          if (tab === '漏记反馈') {
+            await visible(owner.getByRole('table', { name: tab }));
             await fits(owner);
             continue;
           }
@@ -1334,6 +1334,92 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
 
     await t.test('负责人上传并逐行核对时长、下载报告、修正重传和原批重试', async () => {
       await checkHourPages(owner, web, db, first.id, { pickOption, fits });
+    });
+
+    await t.test('负责人跨页批量登记现场异常并可按日期查回和撤销', async () => {
+      const activity = await db.activity.findUniqueOrThrow({ where: { id: first.id } });
+      const { content } = await db.activityRevision.findUniqueOrThrow({
+        where: { activity_id_revision: { activity_id: first.id, revision: activity.published_revision } },
+      });
+      const [slot] = slots(content.schedule);
+      const date = new Date(Date.parse(slot.starts_at) + 8 * 3600000).toISOString().slice(0, 10);
+      await owner.setViewportSize({ width: 1440, height: 900 });
+      await owner.goto(web + '/managed');
+      await link(owner, '校园服务甲').click();
+      await link(owner, '现场人员记录').click();
+      await visible(owner.getByText('本活动暂无现场异常。'));
+      await button(owner, '登记异常').click();
+      await owner.getByLabel('登记服务日期').fill(date);
+      await pickOption(owner, '异常类型', '迟到');
+      const people = owner.getByRole('group', { name: '报名人员' });
+      const firstChoice = people.locator('.choices label').nth(1);
+      await firstChoice.getByRole('checkbox').check();
+      const firstName = await firstChoice.locator('span').innerText();
+      await owner.getByLabel('记录说明（选填）').fill('第一时段因交通延误');
+      await button(people, '下一页').click();
+      await visible(people.getByText(/第 2 \/ /));
+      assert.notEqual(await firstChoice.locator('span').innerText(), firstName);
+      await firstChoice.getByRole('checkbox').check();
+      await visible(people.getByText('已选 2 人'));
+      await fits(owner);
+      await capture(owner, 'attendance-form');
+      await button(owner, '保存记录').click();
+      await visible(owner.getByText('已登记 2 条现场异常。'));
+      const table = owner.getByRole('table', { name: '现场人员记录' });
+      const dataRows = table.getByRole('row').filter({ hasText: '第一时段因交通延误' });
+      await visible(dataRows.nth(1));
+      assert.equal(await table.getByRole('cell', { name: '迟到', exact: true }).count(), 2);
+      await owner.reload();
+      await visible(dataRows.nth(1));
+      const filter = owner.getByLabel('服务日期', { exact: true });
+      await filter.fill('2000-01-01');
+      await visible(owner.getByText('该日期暂无现场异常。'));
+      await filter.fill(date);
+      await visible(dataRows.nth(1));
+
+      await button(dataRows.first(), '修改').click();
+      await pickOption(owner, '异常类型', '自定义');
+      const reason = owner.getByLabel('异常原因（必填）');
+      await reason.fill('');
+      assert.ok(await button(owner, '保存修改').isDisabled());
+      await reason.fill('临时换岗');
+      await button(owner, '保存修改').click();
+      const changed = table.getByRole('row').filter({ hasText: '临时换岗' });
+      await visible(changed);
+      await visible(table.getByRole('cell', { name: '自定义' }));
+      await capture(owner, 'attendance-register');
+
+      await owner.setViewportSize({ width: 390, height: 844 });
+      await settleRender(owner);
+      await fits(owner);
+      await capture(owner, 'attendance-mobile');
+      await button(changed, '修改').click();
+      await button(owner, '撤销记录').click();
+      await visible(owner.getByText('共 1 条异常'));
+      assert.equal(await changed.count(), 0);
+
+      await button(owner, '登记异常').click();
+      await pickOption(owner, '异常类型', '未报名参加');
+      const unregistered = await db.student.findMany({
+        where: { student_no: { in: ['0000000002', '0000000003'] }, registrations: { none: { activity_id: first.id } } },
+        include: { account: true },
+        orderBy: { student_no: 'asc' },
+      });
+      assert.equal(unregistered.length, 2);
+      await button(owner, '添加人员').click();
+      const manual = owner.getByRole('group', { name: '未报名人员' });
+      for (const [index, person] of unregistered.entries()) {
+        await manual.getByLabel('学号', { exact: true }).nth(index).fill(person.student_no);
+        await manual.getByLabel('姓名', { exact: true }).nth(index).fill(person.account.display_name);
+      }
+      await owner.getByLabel('异常原因（必填）').fill('现场临时替补');
+      await fits(owner);
+      await button(owner, '保存记录').click();
+      await visible(owner.getByText('共 3 条异常'));
+      const supplemented = table.getByText('未报名参加', { exact: true });
+      await visible(supplemented.nth(1));
+      assert.equal(await supplemented.count(), 2);
+      await fits(owner);
     });
   } finally {
     try {

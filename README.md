@@ -4,6 +4,8 @@
 
 活动地点、时间等关键信息修订获批后，受影响的学生会收到变更通知。被录取的学生会收到报名结果。学生在「通知」中可直接阅读正文，打开详情即标为已读。在列表或详情点击「确认收到」后，负责人可在「通知与回执」的对应通知中查看确认时间。
 
+负责人可在「现场人员记录」按服务日期批量登记迟到、缺席、请假或自定义情况，并查询和更正已登记的异常。正常签到无需在这里录入。
+
 审核员可从「建档导入」下载 v1.5 学生名单模板，填写后上传，按原表行号核对并确认，再到「学生档案」查询建档结果。
 
 ## 本地运行
@@ -34,7 +36,7 @@
 
 ## 开发检查
 
-类型检查用 `pnpm typecheck`，服务端回归用 `pnpm --filter @hongyan/api test:flow`（活动流程）、`pnpm --filter @hongyan/api test:students`（学生名单导入）和 `pnpm --filter @hongyan/api test:notice`（通知与回执），页面回归用 `pnpm test:pages`。服务端与页面回归都会创建独立测试库，数据库账号须有建库权限。页面回归和身份选择页可使用已安装的 Chrome 或 Edge。用 Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，再通过 HTTPS 访问。
+类型检查用 `pnpm typecheck`，服务端回归用 `pnpm --filter @hongyan/api test:flow`（活动流程和现场异常）、`pnpm --filter @hongyan/api test:students`（学生名单导入）和 `pnpm --filter @hongyan/api test:notice`（通知与回执），页面回归用 `pnpm test:pages`。服务端与页面回归都会创建独立测试库，数据库账号须有建库权限。页面回归和身份选择页可使用已安装的 Chrome 或 Edge。用 Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，再通过 HTTPS 访问。
 
 时长工作簿解析测试用 `pnpm --filter @hongyan/api test:hour-workbook`，逐行预览测试用 `pnpm --filter @hongyan/api test:hour-preview`。两者均可在本地离线运行。
 
