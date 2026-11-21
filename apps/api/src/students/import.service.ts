@@ -6,18 +6,18 @@ import type { SessionRequest } from '../auth/session.guard.js';
 import { pagination } from '../activities/read.js';
 import { Database } from '../database.js';
 import { BusinessError, invalid, invisible } from '../http.js';
-import { command } from './command.js';
 import {
   counts,
   evaluateRows,
   maxImportBytes,
   parseImportWorkbook,
   profileMatches,
+  readImportFields,
   type EvaluatedRow,
   type ExistingStudent,
   type FieldIssue,
 } from './import.js';
-import { checkVersion } from '../activities/workflow.js';
+import { Workflow, checkVersion } from '../activities/workflow.js';
 
 export interface UploadedStudentFile {
   buffer: Buffer;
@@ -125,7 +125,7 @@ function rowView(row: {
 
 @Injectable()
 export class StudentImportService implements OnApplicationBootstrap {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Database, private readonly workflow: Workflow) {}
 
   /** 服务重启后恢复上传事务已提交、但校验回调尚未执行的批次。 */
   async onApplicationBootstrap() {
@@ -187,10 +187,8 @@ export class StudentImportService implements OnApplicationBootstrap {
     const source_hash = sha256(file.buffer);
     const source_name = file.originalname ?? '名单.xlsx';
     let batchId = '';
-    const response = await command(
-      this.db,
-      req,
-      { source_hash, source_name },
+    const response = await this.workflow.run(
+      req, null, 'review',
       async (tx) => {
         const batch = await tx.studentImportBatch.create({
           data: {
@@ -204,6 +202,7 @@ export class StudentImportService implements OnApplicationBootstrap {
         batchId = batch.id;
         return importView(batch);
       },
+      undefined, { source_hash, source_name },
     );
     if (batchId) this.schedule(batchId);
     return response;
@@ -222,11 +221,11 @@ export class StudentImportService implements OnApplicationBootstrap {
       const parsed = parseImportWorkbook(Buffer.from(batch.source_data));
       let evaluated: EvaluatedRow[] = [];
       let summary = { created_count: 0, skipped_count: 0, error_count: 0 };
-      if (!parsed.file_error) {
+      if (parsed.fields) {
         const existing = await this.loadExisting(
           parsed.rows.flatMap((row) => (row.values.student_no ? [row.values.student_no] : [])),
         );
-        evaluated = evaluateRows(parsed.rows, existing);
+        evaluated = evaluateRows(parsed.rows, existing, parsed.fields);
         summary = counts(evaluated);
       }
       await this.db.$transaction(async (tx) => {
@@ -311,20 +310,24 @@ export class StudentImportService implements OnApplicationBootstrap {
   async commit(req: SessionRequest, id: string, input: CommitInput) {
     const batch = await this.db.studentImportBatch.findUnique({
       where: { id },
-      include: { rows: { orderBy: { row_number: 'asc' } } },
+      select: {
+        status: true, source_data: true,
+        rows: { where: { action: 'create' }, select: { student_no: true } },
+      },
     });
     if (!batch) invisible();
     // 已确认批次的相同幂等键由命令回执直接返回，不再重复计算初始密码摘要。
-    const planned =
-      batch.status === 'ready' && !batch.error_count
-        ? batch.rows.flatMap((row) => (row.action === 'create' && row.student_no ? [row.student_no] : []))
-        : [];
+    const ready = batch.status === 'ready';
+    const fields = ready ? readImportFields(Buffer.from(batch.source_data)) : [];
+    const planned = ready ? batch.rows.flatMap(row => row.student_no ? [row.student_no] : []) : [];
     const hashes = await hashAccounts([...new Set(planned)]);
-    return command(this.db, req, input, async (tx) => {
+    return this.workflow.run(req, null, 'review', async (tx) => {
       await tx.$queryRaw`SELECT id FROM student_import_batch WHERE id=${id}::uuid FOR UPDATE`;
-      const current = await tx.studentImportBatch.findUnique({ where: { id } });
+      const current = await tx.studentImportBatch.findUnique({
+        where: { id }, select: { status: true, error_count: true, version: true, source_hash: true },
+      });
       if (!current) invisible();
-      if (current.status !== 'ready' || current.error_count)
+      if (!ready || current.status !== 'ready' || current.error_count)
         throw new BusinessError(409, 'invalid_state', '仅已就绪且无错误的批次可以确认');
       checkVersion(current.version, input.expected_version);
       if (current.source_hash !== input.source_hash)
@@ -349,7 +352,7 @@ export class StudentImportService implements OnApplicationBootstrap {
             field: 'student_no',
             row: row.row_number,
             code: 'invalid_row',
-            message: '原表第 ' + row.row_number + ' 行缺少可导入的学号',
+            message: '缺少可导入的学号',
           });
           continue;
         }
@@ -360,13 +363,7 @@ export class StudentImportService implements OnApplicationBootstrap {
         if (account) {
           if (
             account.student &&
-            profileMatches(row, {
-              name: account.display_name,
-              cohort: account.student.cohort ?? '',
-              grade: account.student.grade ?? '',
-              class_name: account.student.class_name ?? '',
-              college: account.student.college ?? '',
-            })
+            profileMatches(row, { ...account.student, name: account.display_name }, fields)
           ) {
             skipped += 1;
             continue;
@@ -375,8 +372,7 @@ export class StudentImportService implements OnApplicationBootstrap {
             field: 'student_no',
             row: row.row_number,
             code: 'profile_conflict',
-            message:
-              '原表第 ' + row.row_number + ' 行学号 ' + student_no + ' 与已有学生档案资料不一致',
+            message: '学号 ' + student_no + ' 与已有学生档案资料不一致',
           });
           continue;
         }
@@ -385,7 +381,7 @@ export class StudentImportService implements OnApplicationBootstrap {
             field: 'name',
             row: row.row_number,
             code: 'invalid_row',
-            message: '原表第 ' + row.row_number + ' 行缺少姓名',
+            message: '缺少姓名',
           });
           continue;
         }
@@ -435,7 +431,7 @@ export class StudentImportService implements OnApplicationBootstrap {
     const batch = await this.db.studentImportBatch.findUnique({ where: { id }, select: { id: true } });
     if (!batch) invisible();
     let scheduled = false;
-    const response = await command(this.db, req, input, async (tx) => {
+    const response = await this.workflow.run(req, null, 'review', async (tx) => {
       await tx.$queryRaw`SELECT id FROM student_import_batch WHERE id=${id}::uuid FOR UPDATE`;
       const current = await tx.studentImportBatch.findUnique({ where: { id } });
       if (!current) invisible();

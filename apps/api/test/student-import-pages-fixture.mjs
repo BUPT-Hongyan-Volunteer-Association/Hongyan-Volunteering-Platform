@@ -121,6 +121,36 @@ export async function checkStudentImportPages(page, admin, { fits, db }) {
   assert.ok(await conflict.isVisible());
   assert.equal(await chip('待确认').count(), 1);
 
+  // A failed confirmation arriving after navigation belongs only to its original batch.
+  const held = Promise.withResolvers(), release = Promise.withResolvers();
+  await page.route('**/admin/student-imports/*/commit', async route => {
+    const response = await route.fetch();
+    held.resolve(response.status());
+    await release.promise;
+    await route.fulfill({ response });
+  }, { times: 1 });
+  await button('确认建档').click();
+  try {
+    assert.equal(await held.promise, 409);
+    await navigateInApp('/manage/imports/' + firstId);
+    await chip('待确认').waitFor();
+  } finally {
+    release.resolve();
+  }
+  await page.waitForFunction(() => document.querySelector('.page-actions button')?.disabled === false);
+  assert.equal(await conflict.count(), 0);
+  assert.match(await batchHeading.innerText(), new RegExp(firstId.slice(0, 8)));
+
+  // A version conflict has no row details and must remain visible after the reread.
+  await db.studentImportBatch.update({ where: { id: firstId }, data: { version: { increment: 1 } } });
+  const reread = page.waitForResponse(response =>
+    response.url().endsWith('/admin/student-imports/' + firstId) && response.request().method() === 'GET');
+  await button('确认建档').click();
+  await reread;
+  await page.waitForFunction(() => document.querySelector('.page-actions button')?.disabled === false);
+  assert.match(await conflict.innerText(), /版本|刷新/);
+  assert.equal(await conflict.locator('li').count(), 0);
+
   // 学生档案列表读取真实数据
   await page.getByRole('navigation', { name: '后台导航' }).getByRole('link', { name: '学生档案', exact: true }).click();
   await page.waitForURL('**/manage/students');

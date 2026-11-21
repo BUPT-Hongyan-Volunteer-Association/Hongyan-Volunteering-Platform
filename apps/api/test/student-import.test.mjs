@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { strFromU8, unzipSync } from 'fflate';
+import { scan, attr } from '../dist/hours/ooxml.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createApp } from '../dist/app.js';
@@ -10,6 +12,18 @@ import { buildWorkbook, rosterSheet } from './xlsx-fixture.mjs';
 const template = readFileSync(
   new URL('../../../packages/contracts/templates/学生建档导入模板_v1.5.xlsx', import.meta.url),
 );
+
+test('下载模板的输入校验与五列表头对齐', () => {
+  const xml = strFromU8(unzipSync(template)['xl/worksheets/sheet1.xml']);
+  const validationTitles = {};
+  scan(xml, { open(tag) {
+    if (tag.local === 'dataValidation') validationTitles[attr(tag, 'sqref')] = attr(tag, 'errorTitle');
+  } });
+  assert.deepEqual(validationTitles, {
+    'A2:A5001': '十位数字学号', 'B2:B5001': '姓名', 'C2:C5001': '年级',
+    'D2:D5001': '十位数字班级', 'E2:E5001': '学院',
+  });
+});
 
 function browser(base) {
   let cookie = '',
@@ -148,7 +162,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       response = await teacher.write('POST', '/admin/student-imports', undefined);
       assert.equal(response.status, 422);
 
-      const blank = await uploadImport(teacher, template, '学生建档导入模板_v1.4.xlsx');
+      const blank = await uploadImport(teacher, template, '学生建档导入模板_v1.5.xlsx');
       assert.equal(blank.status, 'invalid');
       assert.match(blank.error_message, /未找到可导入的数据行/);
 
@@ -826,6 +840,25 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
         ).status,
         409,
       );
+    });
+
+    await t.test('只按随名单提供的列比较，预览和确认均保留旧档案的级部', async () => {
+      const values = ['2026999101', '跨模板学生', '本科生', '2026', '2026000101', '示例学院'];
+      const roster = (fields, options) => workbook([{ number: 2, values: fields }], options);
+      const confirm = batch => teacher.write('POST', '/admin/student-imports/' + batch.id + '/commit', commitBody(batch));
+      const newFile = roster(values, { includeCohort: false });
+      const pending = await uploadImport(teacher, newFile);
+      assert.equal(pending.status, 'ready');
+      const old = await uploadImport(teacher, roster(values));
+      assert.equal((await confirm(old)).data.created_count, 1);
+      assert.equal((await confirm(pending)).data.skipped_count, 1);
+      const replay = await uploadImport(teacher, newFile);
+      assert.equal(replay.skipped_count, 1);
+      assert.equal((await confirm(replay)).data.skipped_count, 1);
+      const student = await db.student.findUniqueOrThrow({ where: { student_no: values[0] } });
+      assert.equal(student.cohort, '本科生');
+      // An explicitly present, empty cohort must still conflict with an existing value.
+      assert.equal((await uploadImport(teacher, roster(values.with(2, '')))).status, 'invalid');
     });
 
     await t.test('年级缺省取学号前四位，统一保存为 YYYY 并支持年级筛选', async () => {

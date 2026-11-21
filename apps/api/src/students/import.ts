@@ -1,7 +1,6 @@
 import { readXlsxSheet, XlsxContentError, type SheetCell, type SheetRow } from './xlsx.js';
 
 export const importSheetName = '学生建档';
-export const importHeaders = ['学号', '姓名', '级部', '年级', '班级', '学院'] as const;
 export const maxImportBytes = 5_242_880;
 export const maxImportRows = 5_000;
 
@@ -46,15 +45,10 @@ export interface ProfileValues {
 /** 名单资料与已有档案是否完全一致；用于预览跳过判定与确认时复核。 */
 export function profileMatches(
   values: ProfileValues,
-  existing: { name: string; cohort: string; grade: string; class_name: string; college: string },
+  existing: ProfileValues,
+  fields: readonly ImportField[],
 ) {
-  return (
-    (values.name ?? '') === existing.name &&
-    (values.cohort ?? '') === existing.cohort &&
-    (values.grade ?? '') === existing.grade &&
-    (values.class_name ?? '') === existing.class_name &&
-    (values.college ?? '') === existing.college
-  );
+  return fields.every(field => field === 'student_no' || (values[field] ?? '') === (existing[field] ?? ''));
 }
 
 export interface ExistingStudent {
@@ -69,7 +63,8 @@ export interface ExistingStudent {
   status: 'active' | 'inactive';
 }
 
-export interface ParsedImport {
+interface ParsedImport {
+  fields?: ImportField[];
   /** 文件级问题：工作表、表头、行数或工作簿结构。 */
   file_error?: string;
   rows: ParsedRow[];
@@ -94,18 +89,13 @@ const fieldLabels: Record<ImportField, string> = {
   college: '学院',
 };
 const importFieldByHeader = new Map<string, ImportField>(
-  importHeaders.map((label, index) => [label, importFields[index]]),
+  importFields.map(field => [fieldLabels[field], field]),
 );
 const requiredImportFields: ImportField[] = ['student_no', 'name', 'grade', 'class_name'];
 
 /** 学号前四位为入学年份；非 19xx/20xx 开头时不推断。 */
 export function gradeFromStudentNo(student_no: string) {
   return /^((?:19|20)\d{2})/.exec(student_no)?.[1];
-}
-
-/** 年级统一保存为四位年份；兼容历史文件中带「级」的写法。 */
-export function normalizeGrade(value: string) {
-  return /^(\d{4})(?:级)?$/.exec(value.trim())?.[1] ?? value.trim();
 }
 
 const text = (cell: SheetCell, field: ImportField, errors: FieldIssue[], max = 100) => {
@@ -132,12 +122,6 @@ const text = (cell: SheetCell, field: ImportField, errors: FieldIssue[], max = 1
   return value;
 };
 
-function cellsOf(row: SheetRow) {
-  const cells = new Map<number, SheetCell>();
-  for (const cell of row.cells) cells.set(cell.column, cell);
-  return cells;
-}
-
 function columnName(index: number) {
   let name = '';
   let value = index + 1;
@@ -149,32 +133,22 @@ function columnName(index: number) {
 }
 
 function parseRow(row: SheetRow, columns: Map<ImportField, number>): ParsedRow {
-  const cells = cellsOf(row);
+  const cells = new Map(row.cells.map(cell => [cell.column, cell]));
   const allowed = new Set(columns.values());
   const raw_values: Record<string, string> = {};
-  for (const field of importFields) {
-    const column = columns.get(field);
-    const cell = column === undefined ? undefined : cells.get(column);
-    if (cell) raw_values[field] = cell.text;
-  }
-  for (const cell of row.cells) {
-    if (!allowed.has(cell.column) && cell.text !== '')
-      raw_values[columnName(cell.column)] = cell.text;
-  }
   const errors: FieldIssue[] = [];
   for (const cell of row.cells) {
-    if (!allowed.has(cell.column) && cell.text !== '')
-      errors.push({
-        field: columnName(cell.column),
-        code: 'unknown_column',
-        message: '表格之外的第 ' + columnName(cell.column) + ' 列有值',
-      });
+    if (allowed.has(cell.column) || !cell.text) continue;
+    const field = columnName(cell.column);
+    raw_values[field] = cell.text;
+    errors.push({ field, code: 'unknown_column', message: '表格之外的第 ' + field + ' 列有值' });
   }
   const values: NormalizedValues = {};
   const signature: ParsedRow['signature'] = { name: '', cohort: '', grade: '', class_name: '', college: '' };
   for (const field of importFields) {
     const column = columns.get(field);
     const cell = column === undefined ? undefined : cells.get(column);
+    if (cell) raw_values[field] = cell.text;
     const max = field === 'grade' ? 50 : 100;
     if (field === 'student_no') {
       if (!cell) {
@@ -204,7 +178,8 @@ function parseRow(row: SheetRow, columns: Map<ImportField, number>): ParsedRow {
     const value = text(cell, field, errors, max);
     if (value === undefined) continue;
     if (field === 'grade') {
-      if (value && !/^\d{4}(?:级)?$/.test(value)) {
+      const grade = /^(\d{4})(?:级)?$/.exec(value)?.[1];
+      if (value && !grade) {
         errors.push({
           field: 'grade',
           code: 'format',
@@ -212,8 +187,7 @@ function parseRow(row: SheetRow, columns: Map<ImportField, number>): ParsedRow {
         });
         continue;
       }
-      const grade = normalizeGrade(value);
-      signature.grade = grade;
+      signature.grade = grade ?? '';
       if (grade) values.grade = grade;
       continue;
     }
@@ -236,6 +210,25 @@ function parseRow(row: SheetRow, columns: Map<ImportField, number>): ParsedRow {
   return { row_number: row.number, values, raw_values, errors, signature };
 }
 
+function importColumns(rows: SheetRow[]) {
+  const header = rows.find(row => row.number === 1);
+  if (!header) return;
+  const columns = new Map<ImportField, number>();
+  for (const cell of header.cells) {
+    const field = cell.type === 'text' && importFieldByHeader.get(cell.text.trim());
+    if (!field || columns.has(field)) return;
+    columns.set(field, cell.column);
+  }
+  if (requiredImportFields.every(field => columns.has(field))) return columns;
+}
+
+/** 确认时从原文件读取实际表头，兼容此前已预览的批次。 */
+export function readImportFields(buffer: Buffer) {
+  const columns = importColumns(readXlsxSheet(buffer, importSheetName, true).rows);
+  if (!columns) throw new XlsxContentError('已就绪批次的原文件表头无效');
+  return [...columns.keys()];
+}
+
 /** 解析工作簿结构、工作表、表头和数据行；只做文件与行内格式校验。 */
 export function parseImportWorkbook(buffer: Buffer): ParsedImport {
   let rows: SheetRow[];
@@ -248,24 +241,8 @@ export function parseImportWorkbook(buffer: Buffer): ParsedImport {
   }
   if (truncated)
     return { file_error: '数据行超过 5,000 条上限，请拆分后重新上传', rows: [], row_count: 0 };
-  const header = rows.find((row) => row.number === 1);
-  const mismatch: string[] = [];
-  const columns = new Map<ImportField, number>();
-  if (!header) mismatch.push('缺少第 1 行表头');
-  else {
-    for (const cell of header.cells) {
-      const label = cell.type === 'text' ? cell.text.trim() : '';
-      const field = importFieldByHeader.get(label);
-      if (!field || columns.has(field)) {
-        mismatch.push(label || columnName(cell.column));
-        continue;
-      }
-      columns.set(field, cell.column);
-    }
-    for (const field of requiredImportFields)
-      if (!columns.has(field)) mismatch.push(fieldLabels[field]);
-  }
-  if (mismatch.length)
+  const columns = importColumns(rows);
+  if (!columns)
     return {
       file_error:
         '第 1 行表头须包含 学号、姓名、年级、班级（级部兼容旧名单可选，学院可选），列顺序不限，且不使用其他列',
@@ -278,7 +255,7 @@ export function parseImportWorkbook(buffer: Buffer): ParsedImport {
     return { file_error: '未找到可导入的数据行，请使用空白模板填写后重新上传', rows: [], row_count: 0 };
   if (parsed.length > maxImportRows)
     return { file_error: '数据行超过 5,000 条上限，请拆分后重新上传', rows: [], row_count: parsed.length };
-  return { rows: parsed, row_count: parsed.length };
+  return { fields: [...columns.keys()], rows: parsed, row_count: parsed.length };
 }
 
 const signatureOf = (row: ParsedRow) =>
@@ -294,7 +271,7 @@ const signatureOf = (row: ParsedRow) =>
  * 依据文件内同键去重与已有学生档案判定每行动作。
  * 文件内同键不同资料的所有行都报冲突；完全相同的后续行跳过。
  */
-export function evaluateRows(rows: ParsedRow[], existing: Map<string, ExistingStudent>): EvaluatedRow[] {
+export function evaluateRows(rows: ParsedRow[], existing: Map<string, ExistingStudent>, fields: ImportField[]): EvaluatedRow[] {
   const evaluated = new Map<number, EvaluatedRow>();
   for (const row of rows) {
     evaluated.set(row.row_number, {
@@ -337,7 +314,7 @@ export function evaluateRows(rows: ParsedRow[], existing: Map<string, ExistingSt
     let status: 'active' | 'inactive' = 'active';
     const match = existing.get(student_no);
     if (match) {
-      const same = match.has_record && profileMatches(first.values, match);
+      const same = match.has_record && profileMatches(first.values, match, fields);
       if (same) {
         action = 'skip_identical';
         status = match.status;

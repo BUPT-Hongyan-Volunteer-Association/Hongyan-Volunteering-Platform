@@ -45,8 +45,8 @@ const loading = ref(false);
 const busy = ref(false);
 const error = ref('');
 const notice = ref('');
-const conflictMessage = ref('');
-const conflictRows = ref<FieldError[]>([]);
+const writeFailure = ref<{ message: string; details: FieldError[] }>();
+let routeVersion = 0;
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 let loadSerial = 0;
 let disposed = false;
@@ -84,8 +84,11 @@ function display(
   if (!value) return '—';
   return field === 'grade' ? value + '级' : value;
 }
+function currentRoute(version: number) {
+  return !disposed && version === routeVersion;
+}
 function stillCurrent(id: string, serial: number) {
-  return !disposed && serial === loadSerial && String(route.params.item ?? '') === id;
+  return !disposed && serial === loadSerial && batchId.value === id;
 }
 async function loadRows(page = rowPage.value, serial = loadSerial) {
   const current = batch.value;
@@ -104,14 +107,15 @@ async function loadRows(page = rowPage.value, serial = loadSerial) {
 }
 async function loadBatch(id: string, { quiet = false } = {}) {
   const serial = ++loadSerial;
+  error.value = '';
   if (!quiet) {
-    loading.value = true;
+    loading.value = !!id;
     batch.value = undefined;
     rows.value = [];
     rowTotal.value = 0;
     rowPage.value = 1;
   }
-  error.value = '';
+  if (!id) return;
   try {
     const data = (await getStudentImport({ path: { id }, throwOnError: true })).data.data;
     if (!stillCurrent(id, serial)) return;
@@ -163,10 +167,10 @@ function dragLeave() {
 }
 async function uploadFile(source: File) {
   if (busy.value) return;
+  const version = routeVersion;
   busy.value = true;
   error.value = '';
-  conflictMessage.value = '';
-  conflictRows.value = [];
+  writeFailure.value = undefined;
   notice.value = '';
   try {
     const hash = Array.from(
@@ -180,12 +184,12 @@ async function uploadFile(source: File) {
       throwOnError: true,
     });
     command.confirmed();
-    if (disposed) return;
+    if (!currentRoute(version)) return;
     chosenName.value = '';
     notice.value = '文件已受理，正在校验…';
     await router.replace({ path: '/manage/imports/' + result.data.data.id });
   } catch (reason) {
-    if (!disposed) error.value = message(reason);
+    if (currentRoute(version)) error.value = message(reason);
   } finally {
     if (!disposed) busy.value = false;
   }
@@ -193,15 +197,10 @@ async function uploadFile(source: File) {
 async function commit() {
   const current = batch.value;
   if (!current || !canCommit.value || busy.value) return;
-  if (current.id !== String(route.params.item ?? '')) {
-    error.value = '批次已切换，请重新确认当前批次。';
-    void loadBatch(String(route.params.item ?? ''));
-    return;
-  }
+  const version = routeVersion;
   busy.value = true;
   error.value = '';
-  conflictMessage.value = '';
-  conflictRows.value = [];
+  writeFailure.value = undefined;
   const body = { expected_version: current.version, source_hash: current.source_hash };
   try {
     const result = await commitStudentImport({
@@ -211,30 +210,23 @@ async function commit() {
       throwOnError: true,
     });
     command.confirmed();
-    if (disposed || current.id !== String(route.params.item ?? '')) return;
+    if (!currentRoute(version)) return;
     batch.value = result.data.data;
     notice.value = '已确认建档，可在学生档案中查到新学生。';
-    await loadRows(1);
+    await loadBatch(current.id, { quiet: true });
   } catch (reason) {
-    if (!disposed) {
-      const apiError = reason instanceof ApiError ? reason : undefined;
-      const details = apiError?.status === 409 ? (apiError.body?.details ?? []) : [];
-      if (details.length) {
-        conflictMessage.value = apiError?.message ?? message(reason);
-        conflictRows.value = details;
-      } else {
-        error.value = message(reason);
-      }
-      void loadBatch(current.id, { quiet: true });
-    }
+    if (!currentRoute(version)) return;
+    const details = reason instanceof ApiError && reason.status === 409 ? reason.body?.details : undefined;
+    writeFailure.value = { message: message(reason), details: details ?? [] };
+    await loadBatch(current.id, { quiet: true });
   } finally {
     if (!disposed) busy.value = false;
   }
 }
 async function retry() {
   const current = batch.value;
-  if (!current || busy.value) return;
-  if (current.id !== String(route.params.item ?? '')) return;
+  if (!current || current.id !== batchId.value || busy.value) return;
+  const version = routeVersion;
   busy.value = true;
   error.value = '';
   const body = { expected_version: current.version };
@@ -246,31 +238,25 @@ async function retry() {
       throwOnError: true,
     });
     command.confirmed();
-    if (disposed) return;
+    if (!currentRoute(version)) return;
     batch.value = result.data.data;
     notice.value = '已重新排队校验…';
     schedulePoll();
   } catch (reason) {
-    if (!disposed) error.value = message(reason);
+    if (currentRoute(version)) error.value = message(reason);
   } finally {
     if (!disposed) busy.value = false;
   }
 }
 watch(
-  () => route.params.item,
-  (value) => {
+  batchId,
+  (id) => {
+    routeVersion++;
     stopPolling();
-    loadSerial++;
-    batch.value = undefined;
-    rows.value = [];
-    rowTotal.value = 0;
-    rowPage.value = 1;
-    error.value = '';
     notice.value = '';
-    conflictMessage.value = '';
-    conflictRows.value = [];
-    loading.value = false;
-    if (value) void loadBatch(String(value));
+    chosenName.value = '';
+    writeFailure.value = undefined;
+    void loadBatch(id);
   },
   { immediate: true },
 );
@@ -314,14 +300,14 @@ watch(
   </div>
   <p v-if="error" role="alert">{{ error }} <button type="button" @click="batchId && loadBatch(batchId)">重试读取</button></p>
   <p v-if="notice" role="status" class="notice">{{ notice }}</p>
-  <section v-if="conflictMessage" class="conflict-panel" role="alert">
-    <p><strong>确认未完成：</strong>{{ conflictMessage }}</p>
+  <section v-if="writeFailure" class="conflict-panel" role="alert">
+    <p><strong>确认未完成：</strong>{{ writeFailure.message }}</p>
     <ul>
-      <li v-for="(item, index) in conflictRows" :key="index">
+      <li v-for="(item, index) in writeFailure.details" :key="index">
         <template v-if="item.row">原表第 {{ item.row }} 行：</template>{{ item.message }}
       </li>
     </ul>
-    <p>请按原表行号修正文件后重新上传，整批未写入。</p>
+    <p v-if="writeFailure.details.length">请按原表行号修正文件后重新上传，整批未写入。</p>
   </section>
   <p v-if="loading && !batch" role="status">正在读取批次…</p>
   <section v-else-if="batch" class="batch-summary">

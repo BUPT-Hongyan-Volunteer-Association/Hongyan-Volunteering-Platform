@@ -394,7 +394,7 @@ function columnIndex(letters: string) {
 }
 
 /** 读取指定名称的工作表；文件结构不合法时抛出 XlsxContentError。 */
-export function readXlsxSheet(buffer: Buffer, name: string): Sheet {
+export function readXlsxSheet(buffer: Buffer, name: string, headerOnly = false): Sheet {
   const cache = new Map<string, Buffer>();
   const files = archive(buffer, cache);
   const sheet = workbookSheets(files).find((entry) => entry.name === name);
@@ -419,6 +419,7 @@ export function readXlsxSheet(buffer: Buffer, name: string): Sheet {
     }
     if (cells.length) {
       rows.push({ number, cells });
+      if (headerOnly && number === 1) break;
       if (rows.length > maxSheetRows) {
         truncated = true;
         break;
