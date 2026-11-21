@@ -136,7 +136,7 @@ export async function admit(
     data: { status: 'accepted', version: { increment: 1 }, decision_reason: input.reason ?? null },
   });
   await recordChange(tx, previous, current, now, actor);
-  await tx.registrationDecisionEvent.create({
+  const decision = await tx.registrationDecisionEvent.create({
     data: {
       activity_id: activity.id,
       registration_id: id,
@@ -144,6 +144,27 @@ export async function admit(
       registration_version: current.version,
       status: current.status,
     },
+  });
+  // 决定与待发送通知写在同一个事务里：要么都成立，要么都不成立，不会出现"录取了却没通知"。
+  // event_key 按决定事件与接收人去重，重复投递同一份决定只会入队一次。
+  await tx.notificationEvent.createMany({
+    data: [
+      {
+        event_type: 'registration_decided',
+        event_key: `registration_decision:${decision.event_id}:${current.student_id}`,
+        activity_id: activity.id,
+        resource_id: id,
+        payload: {
+          event_id: decision.event_id,
+          registration_id: id,
+          student_id: current.student_id,
+          status: current.status,
+          decision_reason: current.decision_reason,
+          actor_id: actor,
+        },
+      },
+    ],
+    skipDuplicates: true,
   });
   return registrationView(current);
 }

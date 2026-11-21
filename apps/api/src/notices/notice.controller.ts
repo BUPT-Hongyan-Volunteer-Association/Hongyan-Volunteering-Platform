@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   HttpCode,
@@ -13,7 +14,7 @@ import type { Prisma } from '../generated/prisma/client.js';
 import { Database } from '../database.js';
 import { BusinessError, denied, envelope, invalid, invisible } from '../http.js';
 import { managedScope, pagination, staff } from '../activities/read.js';
-import { Workflow, wrongState, type Tx } from '../activities/workflow.js';
+import { Workflow, checkVersion, wrongState, type Tx } from '../activities/workflow.js';
 import { studentId, type Actor, type SessionRequest } from '../auth/session.guard.js';
 import { Clock } from './clock.js';
 import { eventView, noticeView, receiptView } from './notice.js';
@@ -238,11 +239,18 @@ export class NoticeController {
 
   @Post('admin/notification-events/:id/retry')
   @HttpCode(202)
-  async retry(@Req() req: SessionRequest, @Param('id', new ParseUUIDPipe()) id: string) {
+  async retry(
+    @Req() req: SessionRequest,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+  ) {
+    // 契约要求带版本与原因：版本对不上说明事件已被别的操作改过，原因要留在事件上备查。
+    const { expected_version, reason } = retryInput(body);
     return this.workflow.run(req, null, 'review', async (tx) => {
       await tx.$executeRaw`SELECT 1 FROM notification_event WHERE id = ${id}::uuid FOR UPDATE`;
       const event = await tx.notificationEvent.findUnique({ where: { id } });
       if (!event) invisible();
+      checkVersion(event.version, expected_version);
       if (event.status !== 'failed') wrongState();
       // 复用原事件排队，业务状态不重做；投递时会再次核对公开版本。
       const updated = await tx.notificationEvent.update({
@@ -252,6 +260,7 @@ export class NoticeController {
           attempt_count: 0,
           next_retry_at: this.clock.now(),
           last_error: null,
+          last_retry_reason: reason,
           version: { increment: 1 },
         },
       });
@@ -276,4 +285,15 @@ export class NoticeController {
       include: { notice: true },
     });
   }
+}
+
+function retryInput(body: unknown) {
+  const input = (body ?? {}) as Record<string, unknown>;
+  const expected_version = input.expected_version;
+  if (typeof expected_version !== 'number' || !Number.isSafeInteger(expected_version) || expected_version < 1)
+    invalid('expected_version', '需要当前事件的版本号（正整数）');
+  const value = input.reason;
+  if (typeof value !== 'string' || !value.trim()) invalid('reason', '请填写重试原因');
+  if (value.length > 2000) invalid('reason', '重试原因最多 2000 个字符');
+  return { expected_version, reason: value.trim() };
 }

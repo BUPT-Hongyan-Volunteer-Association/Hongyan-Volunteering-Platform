@@ -12,6 +12,7 @@ CREATE TABLE "notice" (
     "supersedes_id" UUID,
     "is_current" BOOLEAN NOT NULL DEFAULT true,
     "published_by" UUID,
+    "source_event_id" UUID,
     "published_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
@@ -43,6 +44,7 @@ CREATE TABLE "notification_event" (
     "status" TEXT NOT NULL DEFAULT 'pending',
     "attempt_count" INTEGER NOT NULL DEFAULT 0,
     "last_error" TEXT,
+    "last_retry_reason" TEXT,
     "next_retry_at" TIMESTAMPTZ(3),
     "delivered_at" TIMESTAMPTZ(3),
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -50,6 +52,9 @@ CREATE TABLE "notification_event" (
 
     CONSTRAINT "notification_event_pkey" PRIMARY KEY ("id")
 );
+
+-- CreateIndex
+CREATE UNIQUE INDEX "notice_source_event_id_key" ON "notice"("source_event_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "notice_activity_id_notice_kind_information_version_key" ON "notice"("activity_id", "notice_kind", "information_version");

@@ -26,6 +26,10 @@ const changeFieldLabels: Record<string, string> = {
   hours_import_expected_at: '时长导入时间',
 };
 
+// 这些字段的具体内容只该给已录取的学生看：报名者与候补也会收到变更通知，
+// 但入群方式属于录取后的信息，正文里只提示"已更新"，详情页再展示。
+const restrictedFields = new Set(['group_join_instructions']);
+
 const stamp = new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai',
   year: 'numeric',
@@ -89,6 +93,10 @@ function changeLines(fields: string[], before: unknown, after: unknown): string[
     if (seen.has(root)) continue;
     seen.add(root);
     const label = changeFieldLabels[root] ?? '活动信息';
+    if (restrictedFields.has(root)) {
+      lines.push(`${label}：已更新，录取后可进入活动详情查看`);
+      continue;
+    }
     lines.push(`${label}：${displayValue(read(before, root))} → ${displayValue(read(after, root))}`);
   }
   return lines;

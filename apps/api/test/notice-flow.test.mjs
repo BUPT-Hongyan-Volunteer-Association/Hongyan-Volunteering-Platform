@@ -247,7 +247,10 @@ test('地点变更按事件投递站内通知，回执、催办与失败重试�
         const failed = await teacher.request('/admin/notification-events?status=failed');
         assert.equal(failed.status, 200);
         assert(failed.data.items.some((e) => e.id === event.id));
-        const retry = await teacher.write('POST', `/admin/notification-events/${event.id}/retry`);
+        const retry = await teacher.write('POST', `/admin/notification-events/${event.id}/retry`, {
+          expected_version: event.version,
+          reason: '人工排查后重试',
+        });
         assert.equal(retry.status, 202);
         assert.equal(retry.data.status, 'pending');
         assert.equal(retry.data.attempt_count, 0);
@@ -317,7 +320,12 @@ test('地点变更按事件投递站内通知，回执、催办与失败重试�
       assert.equal(stale.status, 'failed');
       await amend({ location: 'F' });
       await drain();
-      const retry = await teacher.write('POST', `/admin/notification-events/${stale.id}/retry`);
+      // 事件在失败后被别的修订改过版本，重试要带上它此刻的版本号。
+      const snapshot = await db.notificationEvent.findUniqueOrThrow({ where: { id: stale.id } });
+      const retry = await teacher.write('POST', `/admin/notification-events/${stale.id}/retry`, {
+        expected_version: snapshot.version,
+        reason: '确认替代关系后重试',
+      });
       assert.equal(retry.status, 202);
       await drain();
       const after = await db.notificationEvent.findUniqueOrThrow({ where: { id: stale.id } });
@@ -367,6 +375,169 @@ test('地点变更按事件投递站内通知，回执、催办与失败重试�
       assert.equal(await db.noticeReceipt.count({ where: { notice_id: notice.id } }), 1);
     });
 
+  } finally {
+    delete process.env.NOTICE_WORKER;
+    await app?.close();
+  }
+});
+
+test('录取结果单独成通知，敏感字段不落正文，人工重试校验版本与原因', async (t) => {
+  const staffPassword = randomUUID();
+  process.env.NOTICE_WORKER = 'off';
+  await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: staffPassword });
+  let app;
+  try {
+    app = await createApp();
+    await app.listen(0, '127.0.0.1');
+    const db = app.get(Database);
+    const clock = app.get(Clock);
+    const worker = app.get(NoticeWorker);
+    const base = (await app.getUrl()) + '/api/v1';
+    const [student, other, owner, teacher] = Array.from({ length: 4 }, () => browser(base));
+    await Promise.all([
+      student.signIn('0000000001', '000001', 't1' + randomUUID()),
+      other.signIn('0000000004', '000004', 't1' + randomUUID()),
+      owner.signIn('0000000002', '000002', 't1' + randomUUID()),
+      teacher.signIn('demo.teacher', staffPassword),
+    ]);
+    const sample = await db.activity.findUniqueOrThrow({
+      where: { activity_code: 'P2026-0001' },
+      include: { revisions: true },
+    });
+    const created = await owner.write('POST', '/organizer/activities', {
+      ...sample.revisions[0].content,
+      title: '录取回归',
+      location: 'A',
+      group_join_instructions: '进群加微信 old-teacher-1111',
+    });
+    assert.equal(created.status, 201);
+    const id = created.data.id;
+    const path = '/organizer/activities/' + id;
+    const version = async () => (await owner.request(path)).data.activity.version;
+    const submit = async () => {
+      const r = await owner.write('POST', path + '/submit', { expected_version: await version() });
+      assert.equal(r.status, 201);
+      return r.data;
+    };
+    const amend = async (fields) => {
+      assert.equal(
+        (await owner.write('PATCH', path, { ...fields, expected_version: await version() })).status,
+        200,
+      );
+      const r = await submit();
+      assert.equal(
+        (await teacher.write('POST', '/admin/activity-reviews/' + r.id + '/decision', {
+          expected_version: r.version,
+          decision: 'approved',
+        })).status,
+        200,
+      );
+    };
+    const drain = () => worker.drain(clock.now());
+
+    await amend({ location: 'A' });
+    const applied = await student.write('POST', '/activities/' + id + '/registrations', {});
+    assert.equal(applied.status, 201);
+
+    await t.test('录取决定在事务内入队，消费后学生收到一条带回执的结果通知', async () => {
+      const decided = await owner.write(
+        'POST',
+        '/organizer/registrations/' + applied.data.id + '/decision?scope=managed',
+        { expected_version: applied.data.version, decision: 'accepted', reason: '材料齐全' },
+      );
+      assert.equal(decided.status, 200);
+      const event = await db.notificationEvent.findFirstOrThrow({
+        where: { activity_id: id, event_type: 'registration_decided' },
+      });
+      assert.equal(event.status, 'pending');
+      await drain();
+      const notice = await db.notice.findFirstOrThrow({
+        where: { activity_id: id, notice_kind: 'result' },
+      });
+      assert.match(notice.body, /已被录取/);
+      assert.match(notice.body, /材料齐全/);
+      assert.equal(notice.requires_ack, true);
+      assert.equal(await db.noticeReceipt.count({ where: { notice_id: notice.id } }), 1);
+      const inbox = await student.request('/me/notices?notice_kind=result');
+      assert.equal(inbox.status, 200);
+      assert.equal(inbox.data.total, 1);
+      assert.equal(inbox.data.items[0].notice_kind, 'result');
+      // 同一事件重新排队只认第一条通知，不会给学生发第二份结果。
+      await db.notificationEvent.update({
+        where: { id: event.id },
+        data: { status: 'pending', next_retry_at: null },
+      });
+      await drain();
+      assert.equal(
+        await db.notice.count({ where: { activity_id: id, notice_kind: 'result' } }),
+        1,
+      );
+      assert.equal(
+        (await db.notificationEvent.findUniqueOrThrow({ where: { id: event.id } })).status,
+        'delivered',
+      );
+    });
+
+    await t.test('后续修订只改标题时，地点提醒仍按原事件投递', async () => {
+      await amend({ location: 'B' });
+      const location = await db.notificationEvent.findFirstOrThrow({
+        where: { activity_id: id, event_type: 'activity_changed', status: 'pending' },
+      });
+      // 提醒还在队列里，公开版本又被一次只改标题的修订推到更后面。
+      await amend({ title: '录取回归（改名）' });
+      const activity = await db.activity.findUniqueOrThrow({ where: { id } });
+      assert.notEqual(activity.published_revision, location.source_revision);
+      await drain();
+      const event = await db.notificationEvent.findUniqueOrThrow({ where: { id: location.id } });
+      assert.equal(event.status, 'delivered');
+      const notice = await db.notice.findFirstOrThrow({
+        where: { activity_id: id, notice_kind: 'change', is_current: true },
+      });
+      assert.match(notice.body, /活动地点：A → B/);
+    });
+
+    await t.test('入群方式的具体内容不进共享正文', async () => {
+      await amend({ group_join_instructions: '进群加微信 new-teacher-9527' });
+      await drain();
+      const notice = await db.notice.findFirstOrThrow({
+        where: { activity_id: id, notice_kind: 'change', is_current: true },
+      });
+      assert.match(notice.body, /入群方式：已更新，录取后可进入活动详情查看/);
+      assert.ok(!notice.body.includes('new-teacher-9527'));
+      assert.ok(!notice.body.includes('old-teacher-1111'));
+    });
+
+    await t.test('人工重试必须带当前版本与原因', async () => {
+      await amend({ location: 'C' });
+      const event = await db.notificationEvent.findFirstOrThrow({
+        where: { activity_id: id, event_type: 'activity_changed', status: 'pending' },
+      });
+      await db.notificationEvent.update({
+        where: { id: event.id },
+        data: { status: 'failed', attempt_count: 6, last_error: '模拟失败', next_retry_at: null },
+      });
+      const missing = await teacher.write('POST', `/admin/notification-events/${event.id}/retry`);
+      assert.equal(missing.status, 422);
+      const stale = await teacher.write('POST', `/admin/notification-events/${event.id}/retry`, {
+        expected_version: event.version + 7,
+        reason: '人工重试',
+      });
+      assert.equal(stale.status, 409);
+      assert.equal(stale.code, 'version_conflict');
+      const current = await db.notificationEvent.findUniqueOrThrow({ where: { id: event.id } });
+      const retried = await teacher.write('POST', `/admin/notification-events/${event.id}/retry`, {
+        expected_version: current.version,
+        reason: '学生反馈没收到',
+      });
+      assert.equal(retried.status, 202);
+      const row = await db.notificationEvent.findUniqueOrThrow({ where: { id: event.id } });
+      assert.equal(row.last_retry_reason, '学生反馈没收到');
+      await drain();
+      assert.equal(
+        (await db.notificationEvent.findUniqueOrThrow({ where: { id: event.id } })).status,
+        'delivered',
+      );
+    });
   } finally {
     delete process.env.NOTICE_WORKER;
     await app?.close();

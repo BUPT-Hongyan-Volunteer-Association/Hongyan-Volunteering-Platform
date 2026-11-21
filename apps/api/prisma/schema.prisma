@@ -247,6 +247,8 @@ model Notice {
   supersedes_id       String?         @db.Uuid
   is_current          Boolean         @default(true)
   published_by        String?         @db.Uuid
+  // 一次业务事件最多产出一条通知，重试与并发投递都靠它兜底。
+  source_event_id     String?         @unique @db.Uuid
   published_at        DateTime        @default(now()) @db.Timestamptz(3)
   created_at          DateTime        @default(now()) @db.Timestamptz(3)
   updated_at          DateTime        @updatedAt @db.Timestamptz(3)
@@ -286,6 +288,7 @@ model NotificationEvent {
   status          String    @default("pending")
   attempt_count   Int       @default(0)
   last_error      String?
+  last_retry_reason String?
   next_retry_at   DateTime? @db.Timestamptz(3)
   delivered_at    DateTime? @db.Timestamptz(3)
   created_at      DateTime  @default(now()) @db.Timestamptz(3)
