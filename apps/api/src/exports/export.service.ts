@@ -1,4 +1,4 @@
-import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { ExportInput } from '@hongyan/contracts/types';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
@@ -8,14 +8,11 @@ import { validate } from '../activities/validation.js';
 import { Workflow, json, wrongState, type Tx } from '../activities/workflow.js';
 import {
   authorizeStoredScope,
-  exportBuffer,
-  exportContent,
   exportedScope,
   resolveExportScope,
 } from './export-data.js';
+import { ExportWorker } from './export.worker.js';
 
-const expiryMs = 24 * 60 * 60 * 1000;
-const cleanupMs = 10 * 60 * 1000;
 const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const snapshot = { isolationLevel: 'RepeatableRead' } as const;
 
@@ -45,34 +42,12 @@ function view(job: {
 }
 
 @Injectable()
-export class ExportService implements OnApplicationBootstrap, OnModuleDestroy {
-  private readonly logger = new Logger(ExportService.name);
-  private cleanupTimer: ReturnType<typeof setInterval> | undefined;
-
+export class ExportService {
   constructor(
     private db: Database,
     private workflow: Workflow,
+    private worker: ExportWorker,
   ) {}
-
-  async onApplicationBootstrap() {
-    const pending = await this.db.exportJob.findMany({
-      where: { status: { in: ['pending', 'running'] } },
-      select: { id: true },
-    });
-    for (const job of pending) {
-      await this.db.exportJob.update({
-        where: { id: job.id },
-        data: { status: 'pending', error_message: null },
-      });
-      this.schedule(job.id);
-    }
-    this.cleanupTimer = setInterval(() => void this.cleanup(), cleanupMs);
-    this.cleanupTimer.unref();
-  }
-
-  onModuleDestroy() {
-    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
-  }
 
   async create(req: SessionRequest, body: unknown) {
     let created: string | undefined;
@@ -97,7 +72,7 @@ export class ExportService implements OnApplicationBootstrap, OnModuleDestroy {
       });
       return view(job);
     });
-    if (created) this.schedule(created);
+    if (created) this.worker.wake();
     return response;
   }
 
@@ -149,10 +124,6 @@ export class ExportService implements OnApplicationBootstrap, OnModuleDestroy {
     };
   }
 
-  private schedule(id: string) {
-    setImmediate(() => void this.generate(id));
-  }
-
   private async expireIfNeeded(tx: Tx, job: {
     id: string; status: string; expires_at: Date | null;
   }) {
@@ -161,51 +132,4 @@ export class ExportService implements OnApplicationBootstrap, OnModuleDestroy {
     return tx.exportJob.findUniqueOrThrow({ where: { id: job.id } });
   }
 
-  private async generate(id: string) {
-    const started = await this.db.exportJob.updateMany({
-      where: { id, status: 'pending' },
-      data: { status: 'running' },
-    });
-    if (!started.count) return;
-    try {
-      await this.db.$transaction(async (tx) => {
-        const job = await tx.exportJob.findUniqueOrThrow({ where: { id } });
-        const content = await exportContent(tx, exportedScope(job));
-        const buffer = exportBuffer(content.sheet);
-        await tx.exportJob.update({
-          where: { id },
-          data: {
-            status: 'ready',
-            file_name: content.fileName,
-            content_type: mime,
-            size: buffer.length,
-            contents: buffer,
-            expires_at: new Date(Date.now() + expiryMs),
-            error_message: null,
-          },
-        });
-      }, { isolationLevel: 'RepeatableRead' });
-    } catch (error) {
-      this.logger.error('导出文件生成失败 ' + id, error instanceof Error ? error.stack : String(error));
-      await this.db.exportJob.updateMany({
-        where: { id, status: { in: ['pending', 'running'] } },
-        data: { status: 'failed', error_message: '文件生成失败，请重新导出' },
-      });
-    }
-  }
-
-  private async cleanup() {
-    try {
-      await this.db.exportJob.updateMany({
-        where: { status: 'ready', expires_at: { lte: new Date() } },
-        data: { status: 'expired', contents: null },
-      });
-      await this.db.exportJob.updateMany({
-        where: { status: 'expired', contents: { not: null } },
-        data: { contents: null },
-      });
-    } catch (error) {
-      this.logger.error('清理过期导出文件失败', error instanceof Error ? error.stack : String(error));
-    }
-  }
 }

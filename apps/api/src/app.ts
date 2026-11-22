@@ -38,6 +38,7 @@ import { HourAppealsController } from './hours/appeals.controller.js';
 import { StudentController } from './students/student.controller.js';
 import { ExportController } from './exports/export.controller.js';
 import { ExportService } from './exports/export.service.js';
+import { ExportWorker } from './exports/export.worker.js';
 import { AuditController } from './audit.controller.js';
 import { StudentImportService } from './students/import.service.js';
 import { StaffGuard } from './students/staff.guard.js';
@@ -114,6 +115,7 @@ class HttpErrorFilter implements ExceptionFilter {
     HourValidationWorker,
     StudentImportService,
     ExportService,
+    ExportWorker,
     NoticeWorker,
   ],
 })
