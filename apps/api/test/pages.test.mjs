@@ -277,14 +277,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           '申诉与更正',
           '账号与角色',
           '通知失败队列',
-          '审计记录',
         ]) {
           await nav.getByRole('link', { name: section, exact: true }).click();
-          if (section === '审计记录') {
-            await visible(teacher.getByRole('table', { name: section }).getByText('活动交接'));
-            await fits(teacher);
-            continue;
-          }
           const empty = {
             错账修复组: '当前没有修复组。',
             异常复核: '没有异常记录。',
@@ -300,6 +294,13 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           await fits(teacher);
           await link(teacher, '返回' + section).click();
         }
+        await nav.getByRole('link', { name: '审计记录', exact: true }).click();
+        await teacher.waitForURL('**/manage/audit');
+        await visible(teacher.getByRole('heading', { name: '审计记录' }));
+        await visible(teacher.getByLabel('操作者 ID'));
+        await button(teacher, '查询').click();
+        await visible(teacher.locator('table, .empty-state').first());
+        await fits(teacher);
         await link(teacher, '全院日程').click();
         await visible(teacher.locator(width === 390 ? '.schedule-list' : '.chart-scroll'));
         await fits(teacher);
@@ -434,6 +435,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(helper.getByText('没有待确认的通知。'));
       await button(owner, '刷新回执').click();
       await visible(receipt.getByText('已确认', { exact: true }));
+      await button(owner, '导出回执').click();
+      const exportDownload = owner.waitForEvent('download');
+      await button(owner, '下载回执文件').click();
+      const exportFile = await exportDownload;
+      assert.match(exportFile.suggestedFilename(), /通知回执/);
       await fits(owner);
       await fits(helper);
     });

@@ -28,6 +28,7 @@
     "./hourDisplay": "./src/hourDisplay.ts",
     "./ActivityChoice.vue": "./src/ActivityChoice.vue",
     "./HourWarnings.vue": "./src/HourWarnings.vue",
+    "./ExportButton.vue": "./src/ExportButton.vue",
     "./HourLedger.vue": "./src/HourLedger.vue",
     "./HourCorrectionGroups.vue": "./src/HourCorrectionGroups.vue",
     "./HourAppeals.vue": "./src/HourAppeals.vue",

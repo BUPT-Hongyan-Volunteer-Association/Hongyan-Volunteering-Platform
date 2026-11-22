@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { listActivityHours, listMyHours, listStudentHours, type HourRecord } from '@hongyan/contracts';
 import ActivityDateField from './ActivityDateField.vue';
-import HourExportButton from './HourExportButton.vue';
+import ExportButton from './ExportButton.vue';
 import Pager from './Pager.vue';
 import { beijing } from './hourDisplay';
 import { pageNumber, usePageRead } from './usePageRead';
@@ -61,7 +61,7 @@ defineExpose({ refresh, clear });
         <p>筛选范围内累计 <strong>{{ data.total_hours }} 小时</strong></p>
         <span class="meta-line">共 {{ data.total }} 条记录</span>
       </template>
-      <HourExportButton :key="JSON.stringify(exportInput)" :input="exportInput" :disabled="loading || !data" @recheck="refresh(false)" />
+      <ExportButton :key="JSON.stringify(exportInput)" :input="exportInput" :disabled="loading || !data" @recheck="refresh(false)" />
     </div>
     <template v-if="data">
       <p v-if="!data.items.length">当前条件下没有时长记录。</p>
