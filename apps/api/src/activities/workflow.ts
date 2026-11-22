@@ -143,7 +143,7 @@ export class Workflow {
     req: SessionRequest,
     target: Target,
     // 'self' 用于本人资源操作（如通知已读/确认），不做活动范围校验。
-    access: 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self',
+    access: 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 'export',
     execute: (tx: Tx, row: LoadedActivity | null, actor: Actor, reauthorize: Reauthorize) => Promise<unknown>,
     scope?: string,
     commandInput: unknown = req.body ?? {},

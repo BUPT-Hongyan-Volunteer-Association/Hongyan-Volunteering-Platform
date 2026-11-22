@@ -10342,6 +10342,7 @@ components:
         expires_at:
           type: string
           format: date-time
+          description: 文件生成完成起 24 小时；到期后查询显示 expired 且下载拒绝。
         error_message:
           type: string
       additionalProperties: false

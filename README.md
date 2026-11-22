@@ -36,12 +36,12 @@
 
 ## 开发检查
 
-类型检查用 `pnpm typecheck`，服务端回归用 `pnpm --filter @hongyan/api test:flow`（活动流程和现场异常）、`pnpm --filter @hongyan/api test:students`（学生名单导入）和 `pnpm --filter @hongyan/api test:notice`（通知与回执），页面回归用 `pnpm test:pages`。服务端与页面回归都会创建独立测试库，数据库账号须有建库权限。页面回归和身份选择页可使用已安装的 Chrome 或 Edge。用 Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，再通过 HTTPS 访问。
+类型检查用 `pnpm typecheck`，服务端回归用 `pnpm --filter @hongyan/api test:flow`（活动流程和现场异常）、`pnpm --filter @hongyan/api test:students`（学生名单导入）、`pnpm --filter @hongyan/api test:notice`（通知与回执）和 `pnpm --filter @hongyan/api test:exports`（业务导出与审计），页面回归用 `pnpm test:pages`。服务端与页面回归都会创建独立测试库，数据库账号须有建库权限。页面回归和身份选择页可使用已安装的 Chrome 或 Edge。用 Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，再通过 HTTPS 访问。
 
 时长工作簿解析测试用 `pnpm --filter @hongyan/api test:hour-workbook`，逐行预览测试用 `pnpm --filter @hongyan/api test:hour-preview`。两者均可在本地离线运行。
 
-正式时长流程用 `pnpm --filter @hongyan/api test:hour-ledger` 在独立库验证。旧库中缺少审批来源的记录保留原 ID 和数值，仅已批准批次或修复组产生的记录进入正式台账。活动台账、本人查账和后台按学生查账共用 `readHourLedger`。供导出模块接入时，在同一个 `RepeatableRead` 事务中传入当前操作者、查询范围和日期／历史筛选，省略分页以读取全量。导出作业查询和领取可用 `authorizeHourLedger` 按当前身份复核范围权限。真实导出文件的生成与领取由 [Issue #18](https://github.com/BUPT-Hongyan-Volunteer-Association/Hongyan-Volunteering-Platform/issues/18) 接入。[时长读取与授权](apps/api/src/hours/read-ledger.ts)
+正式时长流程用 `pnpm --filter @hongyan/api test:hour-ledger` 在独立库验证。旧库中缺少审批来源的记录保留原 ID 和数值，仅已批准批次或修复组产生的记录进入正式台账。活动台账、本人查账和后台按学生查账共用 `readHourLedger`。导出作业在创建时保存类型和筛选范围，异步生成单个 xlsx；查询和下载只允许发起人，并按保存的范围重新核验当前权限，文件在生成完成 24 小时后过期。时长导出复用 `readHourLedger` 的全量读取口径，合计只取 `current`。[导出数据与文件](apps/api/src/exports)
 
-写入事务通过公共审计入口保存 `audit_event`，查询时将 `before` 和 `after` 的 JSON 值按契约序列化为字符串。 [公共审计入口](apps/api/src/audit.ts)
+写入事务通过公共审计入口保存 `audit_event`，写入前脱敏凭证、令牌和敏感附件；后台 `GET /admin/audit-events` 按操作者、对象和时间查询，并将 `before`、`after` 序列化为 JSON 字符串。[公共审计入口](apps/api/src/audit.ts) · [审计查询](apps/api/src/audit.controller.ts)
 
 [工程协作约定](AGENTS.md) · [界面规范](DESIGN.md) · [共享 UI 组件](packages/ui/README.md) · [三端运行示例](docs/ui-samples/README.md) · [接口契约与导入模板](packages/contracts/)

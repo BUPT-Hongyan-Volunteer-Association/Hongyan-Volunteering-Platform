@@ -538,6 +538,27 @@ model AuditEvent {
   @@map("audit_event")
 }
 
+model ExportJob {
+  id            String    @id @default(uuid()) @db.Uuid
+  actor_id      String    @db.Uuid
+  type          String
+  scope         Json
+  status        String    @default("pending")
+  version       Int       @default(1)
+  file_name     String?
+  content_type  String?
+  size          Int?
+  contents      Bytes?
+  error_message String?
+  expires_at    DateTime? @db.Timestamptz(3)
+  created_at    DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at    DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@index([actor_id, created_at])
+  @@index([status, expires_at])
+  @@map("export_job")
+}
+
 model HourCorrectionGroup {
   posted_records        HourRecord[]
   id                    String   @id @default(uuid()) @db.Uuid

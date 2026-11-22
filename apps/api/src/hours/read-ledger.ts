@@ -95,7 +95,16 @@ export async function hourRecordViews(tx: Tx, records: Parameters<typeof hourRec
 export async function readHourLedger(
   tx: Tx, actor: Actor, scope: HourLedgerScope, filters: HourLedgerFilters, page?: ReturnType<typeof pagination>,
 ) {
-  const scopeWhere = await authorizeHourLedger(tx, actor, scope);
+  return readHourLedgerWithScope(tx, await authorizeHourLedger(tx, actor, scope), filters, page);
+}
+
+/** 已完成范围核验后的全量/分页读取；导出生成使用保存的解析后范围，不再重新授权。 */
+export async function readHourLedgerWithScope(
+  tx: Tx,
+  scopeWhere: Pick<Prisma.HourRecordWhereInput, 'activity_id' | 'student_id'>,
+  filters: HourLedgerFilters,
+  page?: ReturnType<typeof pagination>,
+) {
   const { from_date, to_date, include_history } = filters;
   const start = from_date === undefined ? undefined : parseCalendarDate(from_date) ?? invalid('from_date', '请选择有效的起始日期');
   const end = to_date === undefined ? undefined : parseCalendarDate(to_date) ?? invalid('to_date', '请选择有效的结束日期');

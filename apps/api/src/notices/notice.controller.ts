@@ -23,6 +23,7 @@ import { validate } from '../activities/validation.js';
 import { Workflow, checkVersion, wrongState } from '../activities/workflow.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { eventView, noticeView, receiptView } from './notice.js';
+import { activeStatuses, attendanceKinds, followUpEmpty, receiptStatus, receiptWhere } from './receipts.js';
 
 const noticeKinds = [
   'result',
@@ -33,8 +34,6 @@ const noticeKinds = [
   'appeal_result',
   'other',
 ];
-const attendanceKinds = ['change', 'gathering'];
-const activeStatuses = ['submitted', 'waitlisted', 'accepted'];
 const snapshot = { isolationLevel: 'RepeatableRead' } as const;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Filters = Record<string, string>;
@@ -194,29 +193,13 @@ export class NoticeController {
   ) {
     const scope = managedScope(req.actor);
     const { page, page_size, skip } = pagination(q);
-    const follow = flag(q, 'follow_up_only');
-    if (q.status && !['unread', 'read', 'acknowledged'].includes(q.status))
-      invalid('status', '回执状态无效');
+    const filters = { status: receiptStatus(q.status), follow_up_only: flag(q, 'follow_up_only') };
     return this.db.$transaction(async (tx) => {
       const notice = await tx.notice.findFirst({ where: { id, activity: scope } });
       if (!notice) invisible();
-      if (follow && (!notice.is_current || !notice.requires_ack || q.status === 'acknowledged'))
+      if (followUpEmpty(notice, filters))
         return envelope<ReceiptPage>({ items: [], total: 0, page, page_size });
-      const where: Prisma.NoticeReceiptWhereInput = {
-        notice_id: id,
-        ...(q.status === 'unread' && { read_at: null }),
-        ...(q.status === 'read' && { read_at: { not: null }, acknowledged_at: null }),
-        ...(q.status === 'acknowledged' && { acknowledged_at: { not: null } }),
-        ...(follow && { acknowledged_at: null }),
-        ...(follow &&
-          attendanceKinds.includes(notice.notice_kind) && {
-            student: {
-              registrations: {
-                some: { activity_id: notice.activity_id, status: { in: activeStatuses } },
-              },
-            },
-          }),
-      };
+      const where = receiptWhere(notice, filters);
       const rows = await tx.noticeReceipt.findMany({
         where,
         include: {
