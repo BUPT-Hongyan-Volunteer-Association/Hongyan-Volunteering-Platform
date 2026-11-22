@@ -54,7 +54,7 @@ async function signIn(browser, origin, username, password, width) {
 }
 
 // Hold one real API response until the newer route has finished rendering.
-async function holdResponse(page, pattern) {
+async function holdResponse(page, pattern, overrides = {}) {
   const received = Promise.withResolvers(),
     release = Promise.withResolvers(),
     delivered = Promise.withResolvers();
@@ -64,7 +64,7 @@ async function holdResponse(page, pattern) {
       const response = await route.fetch();
       received.resolve();
       await release.promise;
-      await route.fulfill({ response });
+      await route.fulfill({ response, ...overrides });
       delivered.resolve();
     },
     { times: 1 },
@@ -723,7 +723,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         ['周', 7],
       ]) {
         await scale.getByRole('button', { name: label, exact: true }).click();
-        assert.equal(await student.locator('.chart thead svg text').count(), count);
+        await student.waitForFunction(
+          (expected) => document.querySelectorAll('.chart thead svg text').length === expected,
+          count,
+        );
       }
       const segment = student.getByRole('button', { name: /校园服务丙.*14:15/ });
       await segment.focus();
@@ -963,41 +966,50 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await teacher.setViewportSize({ width: 1440, height: 900 });
     });
 
-    await t.test('日程追加保留已加载页，返回详情恢复第 21 项，负责人候选不受分页影响', async () => {
+    await t.test('日程分页可重试，详情返回只补读到所选页，候选跨页可用', async (t) => {
       await student.setViewportSize({ width: 1440, height: 900 });
-      const listUrl =
-        web + '/schedule?date=' + demo.paged + '&unit=day&view=list&q=' +
-        encodeURIComponent('分页演示');
-      await student.goto(listUrl);
+      const query = '?' + new URLSearchParams({ date: demo.paged, unit: 'day', view: 'list', q: '分页演示' });
+      const timeline = (url) => url.pathname === '/api/v1/timeline';
+      const requested = [];
+      const recordPage = (req) => {
+        const url = new URL(req.url());
+        if (timeline(url)) requested.push(Number(url.searchParams.get('page')));
+      };
+      student.on('request', recordPage);
+      t.after(() => student.off('request', recordPage));
+      t.after(() => db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-92' } } }));
+      const failOnce = (route) => route.fulfill({ status: 503, body: '' });
+
+      await student.goto(web + '/schedule' + query);
       const rows = student.locator('.schedule-list li');
-      await visible(rows.first());
-      assert.equal(await rows.count(), 20);
-      await visible(student.getByText(/21 项（已显示 20）/));
-      await student.locator('.schedule-more').getByRole('button').click();
-      await student.waitForFunction(() => document.querySelectorAll('.schedule-list li').length === 21);
-      assert.equal(await student.locator('.schedule-more').count(), 0);
-      // 追加不能覆盖前页。
+      await visible(student.getByText('41 项（已显示 20）', { exact: false }));
+      await student.route(timeline, failOnce, { times: 1 });
+      await student.locator('.schedule-more button').click();
+      await button(student, '重试').click();
+      await visible(student.getByText('41 项（已显示 40）', { exact: false }));
+      assert.deepEqual(requested, [1, 2, 2]);
       assert.match(await rows.first().innerText(), /分页演示 01/);
-      const last = rows.filter({ hasText: '分页演示 21' }).getByRole('button').first();
-      await last.click();
-      await visible(student.getByRole('complementary', { name: '时段详情' }));
+      await rows.filter({ hasText: '分页演示 21' }).getByRole('button').first().click();
+      const detail = student.getByRole('complementary', { name: '时段详情' });
+      await visible(detail);
       const selectedUrl = student.url();
-      await student.getByRole('link', { name: '查看真实获批详情' }).click();
+      await link(student, '查看真实获批详情').click();
       await visible(student.getByRole('heading', { name: '分页演示 21', exact: true }));
+      requested.length = 0;
+      await student.route(timeline, failOnce, { times: 1 });
       await link(student, '返回日程').click();
-      await student.waitForURL(selectedUrl);
-      // 返回后按选中活动所在页恢复，既不误报移出窗口，也不回退到第 1 页。
-      await visible(student.getByRole('complementary', { name: '时段详情' }));
-      await student.waitForFunction(() => document.querySelectorAll('.schedule-list li').length === 21);
-      assert.equal(await rows.filter({ hasText: '分页演示 21' }).count(), 1);
-      assert.equal(await student.getByText('所选时段已移出当前窗口').count(), 0);
+      await button(student, '重新读取').click();
+      await visible(detail.getByRole('heading', { name: '分页演示 21' }));
+      await visible(student.getByText('41 项（已显示 40）', { exact: false }));
+      assert.deepEqual(requested, [1, 1, 2]);
+      assert.equal(student.url(), selectedUrl);
+      await student.locator('.schedule-more button').click();
+      await student.locator('.schedule-more').waitFor({ state: 'detached' });
+      assert.equal(await rows.count(), 41);
 
       // 第 21 项的负责人只在第 2 页出现，首屏仍应可选。
       await teacher.setViewportSize({ width: 1440, height: 900 });
-      await teacher.goto(
-        admin + '/schedule?date=' + demo.paged + '&unit=day&view=list&q=' +
-          encodeURIComponent('分页演示'),
-      );
+      await teacher.goto(admin + '/schedule' + query);
       await visible(teacher.locator('.schedule-list li').first());
       assert.equal(await teacher.locator('.schedule-list li').count(), 20);
       const { list } = await openOptions(teacher, '负责人');
@@ -1006,9 +1018,30 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(teacher.locator('.schedule-list li').first());
       assert.equal(await teacher.locator('.schedule-list li').count(), 1);
       await pickOption(teacher, '负责人', '所有负责人');
-      assert.equal(await teacher.locator('.schedule-list li').count(), 20);
-      // 只服务本用例，移除后不影响后续公开列表分页。
-      await db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-92' } } });
+      await visible(teacher.getByText('41 项（已显示 20）', { exact: false }));
+    });
+
+    await t.test('切换筛选时重新聚焦并读取失败，重试仍只显示新条件的结果', async () => {
+      await student.goto(web + '/schedule?unit=week&view=list&date=' + demo.anchor);
+      const rows = student.locator('.schedule-list li');
+      await visible(rows.first());
+      const pattern = (url) => url.pathname === '/api/v1/timeline' && url.searchParams.get('q') === '没有匹配的活动';
+      const pending = await holdResponse(student, pattern, { status: 503 });
+      const search = student.getByRole('searchbox');
+      await search.fill('没有匹配的活动');
+      await search.press('Enter');
+      await pending.received;
+      try {
+        await student.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await settleRender(student);
+        assert.equal(await rows.count(), 0);
+      } finally {
+        await pending.release();
+      }
+      await visible(button(student, '重新读取'));
+      assert.equal(await rows.count(), 0);
+      await button(student, '重新读取').click();
+      await visible(student.getByText('该窗口和筛选条件下没有活动'));
     });
 
     await t.test('切换展示版本不展示旧稿，权限收回时清空数据和详情', async () => {
@@ -1027,28 +1060,18 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       );
       await visible(teacher.locator('.schedule-list li').first());
       // 获批版本响应延迟期间，不能继续展示工作版本的结果。
-      const delayed = async (route) => {
-        try {
-          if (!route.request().url().includes('revision_scope=published'))
-            return await route.continue();
-          const response = await route.fetch();
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-          await route.fulfill({ response });
-        } catch {
-          // 页面在延迟期间切换时路由可能已失效，忽略即可。
-        }
-      };
-      await teacher.route('**/api/v1/timeline**', delayed);
+      const delayed = await holdResponse(teacher, (url) =>
+        url.pathname === '/api/v1/timeline' && url.searchParams.get('revision_scope') === 'published',
+      );
       try {
         await pickOption(teacher, '展示版本', '获批版本');
-        await teacher.waitForURL((u) => u.searchParams.get('revision') === 'published');
+        await delayed.received;
         await visible(teacher.getByText('正在读取活动日程…'));
         assert.equal(await teacher.locator('.schedule-list li').count(), 0);
-        // 该活动没有获批版本，获批视图不返回它。
-        await visible(teacher.getByText('该窗口和筛选条件下没有活动'));
       } finally {
-        await teacher.unroute('**/api/v1/timeline**');
+        await delayed.release();
       }
+      await visible(teacher.getByText('该窗口和筛选条件下没有活动'));
 
       // 权限被收回：清空旧管理数据与已打开详情。
       await teacher.goto(
@@ -1058,6 +1081,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(teacher.locator('.schedule-list li').first());
       await teacher.locator('.schedule-list li').first().getByRole('button').first().click();
       await visible(teacher.getByRole('complementary', { name: '时段详情' }));
+      await teacher.route('**/api/v1/timeline**', (route) => route.fulfill({ status: 503, body: '' }), { times: 1 });
+      await teacher.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await visible(teacher.getByText('状态待刷新，请重试', { exact: false }));
+      assert.ok(await teacher.locator('.schedule-detail').isVisible());
       await teacher.route('**/api/v1/timeline**', (route) =>
         route.fulfill({
           status: 403,
@@ -1070,7 +1097,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         }),
       );
       try {
-        await pickOption(teacher, '展示版本', '获批版本');
+        await button(teacher, '重试').click();
         await visible(teacher.getByText(/无权查看该日程范围/));
       } finally {
         await teacher.unroute('**/api/v1/timeline**');

@@ -151,18 +151,6 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       },
       'cancelled',
     );
-    // 每周规则含排除日与补充时段：核对起止统一为含秒和时区的 date-time。
-    const weekly = await create('TL-0008', '周常规演示', {
-      schedule_type: 'weekly',
-      duration_start_date: '2026-12-07',
-      duration_end_date: '2026-12-20',
-      weekly_slots: [{ weekday: 1, start_time: '09:00', end_time: '11:30', end_day_offset: 0 }],
-      excluded_dates: ['2026-12-14'],
-      additional_slots: [
-        { starts_at: '2026-12-16T13:00:00+08:00', ends_at: '2026-12-16T15:00:00+08:00' },
-      ],
-    });
-
     const timeline = (client, query) => client.request('/timeline?' + query);
     const codes = (response) => response.data.items.map((item) => item.activity_code).sort();
     const publicQuery = (extra = '') => timeline(student, 'scope=public&' + window + extra);
@@ -380,6 +368,7 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       const publicItem = (await publicQuery())
         .data.items.find((row) => row.activity_code === 'TL-0001');
       assert.equal(publicItem.has_planned_overlap, undefined);
+      assert.ok(publicItem.segments.every((segment) => segment.has_planned_overlap === undefined));
 
       // 取消活动作为当前活动：自身分段与汇总都不提示重叠。
       await db.registration.create({
@@ -402,45 +391,51 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       );
     });
 
-    await t.test('周规则与补充时段统一输出含秒和时区的起止', async () => {
-      const response = await timeline(
-        student,
-        'scope=public&from=' + encodeURIComponent('2026-12-01T00:00:00+08:00') +
-          '&to=' + encodeURIComponent('2026-12-31T00:00:00+08:00'),
-      );
-      assert.equal(response.status, 200, JSON.stringify(response));
-      const item = response.data.items.find((row) => row.activity_code === 'TL-0008');
+    await t.test('周规则排除日与补充时段按北京时间返回并保留毫秒', async (t) => {
+      const weekly = await create('TL-0008', '周常规演示', {
+        schedule_type: 'weekly',
+        duration_start_date: '2026-12-07',
+        duration_end_date: '2026-12-20',
+        weekly_slots: [{ weekday: 1, start_time: '09:00', end_time: '11:30', end_day_offset: 0 }],
+        excluded_dates: ['2026-12-14'],
+        additional_slots: [
+          { starts_at: '2026-12-16T05:00:00.100Z', ends_at: '2026-12-16T05:00:00.900Z' },
+        ],
+      });
+      t.after(() => db.activity.delete({ where: { id: weekly.id } }));
+      const params = new URLSearchParams({
+        scope: 'public', q: weekly.activity_code,
+        from: '2026-12-01T00:00:00+08:00', to: '2026-12-31T00:00:00+08:00',
+      });
+      const response = await timeline(student, params);
+      assert.equal(response.status, 200);
+      const [item] = response.data.items;
       assert.equal(item.schedule_type, 'weekly');
       assert.deepEqual(
         item.segments.map((segment) => [segment.starts_at, segment.ends_at]),
         [
           ['2026-12-07T09:00:00+08:00', '2026-12-07T11:30:00+08:00'],
-          ['2026-12-16T13:00:00+08:00', '2026-12-16T15:00:00+08:00'],
+          ['2026-12-16T13:00:00.100+08:00', '2026-12-16T13:00:00.900+08:00'],
         ],
       );
-      // 排除日不生成场次。
-      assert.equal(
-        item.segments.some((segment) => segment.starts_at.startsWith('2026-12-14')),
-        false,
-      );
-      for (const segment of item.segments)
-        for (const value of [segment.starts_at, segment.ends_at])
-          assert.match(value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$/);
     });
 
     await t.test('审核状态枚举和带时区时刻不合法时返回 422 并指出字段', async () => {
       const typo = await timeline(teacher, 'scope=all&' + window + '&review_status=typo');
       assert.equal(typo.status, 422);
       assert.equal(typo.details[0].field, 'review_status');
-      const dateOnlyFrom = await timeline(student, 'scope=public&from=2026-11-18&to=' + iso(to));
-      assert.equal(dateOnlyFrom.status, 422);
-      assert.equal(dateOnlyFrom.details[0].field, 'from');
-      const noZoneTo = await timeline(
-        student,
-        'scope=public&from=' + iso(from) + '&to=2026-11-25T00:00:00',
-      );
-      assert.equal(noZoneTo.status, 422);
-      assert.equal(noZoneTo.details[0].field, 'to');
+      for (const [field, value] of [
+        ['from', undefined], ['to', undefined], ['from', '2026-11-18'],
+        ['to', '2026-11-25T00:00:00'], ['from', '2026-11-18T00:00Z'],
+        ['from', '2026-02-30T01:00:00Z'], ['to', '2026-13-02T01:00:00Z'],
+      ]) {
+        const params = new URLSearchParams({ scope: 'public', from: iso(from), to: iso(to) });
+        if (value === undefined) params.delete(field);
+        else params.set(field, value);
+        const response = await timeline(student, params);
+        assert.equal(response.status, 422, params.toString());
+        assert.equal(response.details[0].field, field);
+      }
       // 带时区的偏移格式被接受。
       const offset = await timeline(
         student,
@@ -466,8 +461,8 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       assert.deepEqual(secondPage.data.owner_options, firstPage.data.owner_options);
       const far = await timeline(
         teacher,
-        'scope=all&from=' + iso(Date.parse('2027-01-01T00:00:00Z')) +
-          '&to=' + iso(Date.parse('2027-01-08T00:00:00Z')),
+        'scope=all&from=' + iso(now + 100 * day) +
+          '&to=' + iso(now + 107 * day),
       );
       assert.equal(far.data.items.length, 0);
       assert.deepEqual(far.data.owner_options, firstPage.data.owner_options);

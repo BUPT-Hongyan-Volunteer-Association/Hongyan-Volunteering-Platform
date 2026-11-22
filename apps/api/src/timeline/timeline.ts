@@ -11,7 +11,7 @@ import type { Actor } from '../auth/session.guard.js';
 import { denied, invalid } from '../http.js';
 import { managedScope } from '../activities/read.js';
 import { activityViews } from '../activities/list.js';
-import { slots } from '../activities/schedule.js';
+import { parseCalendarDate, slots } from '../activities/schedule.js';
 
 export type TimelineScope = 'public' | 'mine' | 'managed' | 'all';
 const scopes: TimelineScope[] = ['public', 'mine', 'managed', 'all'];
@@ -21,11 +21,10 @@ const phases = ['not_open', 'open', 'closed', 'unavailable'];
 const reviewStatuses = ['draft', 'pending_review', 'approved', 'rejected', 'withdrawn', 'cancelled'];
 const overlappingStatuses = ['published', 'completed'];
 const day = 86_400_000;
-const dateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+const dateTime = /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/i;
 
-/** 契约要求带时区的完整 date-time；分段统一补足秒并按北京时间输出。 */
-function instant(value: string) {
-  return new Date(Date.parse(value) + 8 * 3600_000).toISOString().slice(0, 19) + '+08:00';
+function instant(milliseconds: number) {
+  return new Date(milliseconds + 8 * 3600_000).toISOString().replace(/(?:\.000)?Z$/, '+08:00');
 }
 
 type Query = Record<string, string>;
@@ -38,13 +37,17 @@ export function colorIndex(id: string) {
   return (hash >>> 0) % 6;
 }
 
+function windowBound(q: Query, field: 'from' | 'to') {
+  const value = q[field];
+  const match = typeof value === 'string' && dateTime.exec(value);
+  const time = match && parseCalendarDate(match[1]) ? Date.parse(value) : NaN;
+  if (!Number.isFinite(time)) invalid(field, '请填写带时区的有效日期时间');
+  return time;
+}
+
 function window(q: Query) {
-  if (!q.from || !q.to) invalid('from', '起止时刻须成对填写');
-  if (!dateTime.test(q.from)) invalid('from', '开始时刻须为带时区的完整日期时间');
-  if (!dateTime.test(q.to)) invalid('to', '结束时刻须为带时区的完整日期时间');
-  const from = Date.parse(q.from),
-    to = Date.parse(q.to);
-  if (!Number.isFinite(from) || !Number.isFinite(to)) invalid('from', '起止时刻须成对填写');
+  const from = windowBound(q, 'from');
+  const to = windowBound(q, 'to');
   if (!(from < to)) invalid('to', '结束时刻必须晚于开始时刻');
   if (to - from > 31 * day) invalid('to', '日期窗口最长 31 天');
   return { from, to };
@@ -56,7 +59,7 @@ type Plan = { activity_id: string; start: number; end: number };
 async function plannedSlots(db: Database, studentId: string, from: number, to: number) {
   const rows = await db.activity.findMany({
     where: {
-      status: { in: ['published', 'completed'] },
+      status: { in: overlappingStatuses },
       published_revision: { not: null },
       registrations: { some: { student_id: studentId, status: 'accepted' } },
     },
@@ -66,22 +69,17 @@ async function plannedSlots(db: Database, studentId: string, from: number, to: n
   for (const row of rows) {
     const revision = row.revisions.find((r) => r.revision === row.published_revision);
     if (!revision) continue;
-    for (const slot of slots((revision.content as unknown as ActivityInput).schedule)) {
-      const start = Date.parse(slot.starts_at),
-        end = Date.parse(slot.ends_at);
-      if (start < to && end > from)
-        plan.push({ activity_id: row.id, start, end });
-    }
+    const { schedule } = revision.content as unknown as ActivityInput;
+    for (const { start, end } of windowSlots(schedule, from, to))
+      plan.push({ activity_id: row.id, start, end });
   }
   return plan;
 }
 
-function segmentsOf(view: Activity, from: number, to: number) {
-  if (!view.schedule) return [];
-  return slots(view.schedule)
+function windowSlots(schedule: Activity['schedule'], from: number, to: number) {
+  return slots(schedule)
     .map((slot) => ({ ...slot, start: Date.parse(slot.starts_at), end: Date.parse(slot.ends_at) }))
-    .filter((slot) => slot.start < to && slot.end > from)
-    .sort((a, b) => a.start - b.start);
+    .filter((slot) => slot.start < to && slot.end > from);
 }
 
 function toActivity(
@@ -92,27 +90,30 @@ function toActivity(
   management: boolean,
   plan?: Plan[],
 ): TimelineActivity | null {
-  const segments = segmentsOf(view, from, to);
-  if (!segments.length || !view.schedule) return null;
-  const others = plan?.filter((slot) => slot.activity_id !== view.id);
-  // 取消活动不参与计划重叠：无论它作为当前活动还是比较对象，都不提示重叠。
-  const overlapping = plan !== undefined && overlappingStatuses.includes(view.status);
+  const { schedule } = view;
+  if (!schedule) return null;
+  const segments = windowSlots(schedule, from, to).sort((a, b) => a.start - b.start);
+  if (!segments.length) return null;
+  const others = overlappingStatuses.includes(view.status)
+    ? plan?.filter((slot) => slot.activity_id !== view.id)
+    : undefined;
   const items: TimelineItem[] = segments.map((slot) => {
-    const overlap = overlapping && others!.some((o) => slot.start < o.end && slot.end > o.start);
     return {
       activity_id: view.id,
       activity_code: view.activity_code,
       title: view.title,
-      starts_at: instant(slot.starts_at),
-      ends_at: instant(slot.ends_at),
+      starts_at: instant(slot.start),
+      ends_at: instant(slot.end),
       status: view.status,
       occurrence_key: [view.id, view.schedule_revision, slot.starts_at].join('/'),
       schedule_revision: view.schedule_revision,
-      schedule_type: view.schedule!.schedule_type,
+      schedule_type: schedule.schedule_type,
       revision_state: view.revision_state,
       ...(view.registration_phase && { registration_phase: view.registration_phase }),
       ...(view.location && { location: view.location }),
-      ...(overlap !== undefined && { has_planned_overlap: overlap }),
+      ...(plan && {
+        has_planned_overlap: others?.some((o) => slot.start < o.end && slot.end > o.start) ?? false,
+      }),
     };
   });
   return {
@@ -122,7 +123,7 @@ function toActivity(
     status: view.status,
     revision_state: view.revision_state,
     schedule_revision: view.schedule_revision,
-    schedule_type: view.schedule.schedule_type,
+    schedule_type: schedule.schedule_type,
     registration_phase: view.registration_phase ?? 'unavailable',
     ...(view.campus && { campus: view.campus }),
     location: view.location ?? '',
