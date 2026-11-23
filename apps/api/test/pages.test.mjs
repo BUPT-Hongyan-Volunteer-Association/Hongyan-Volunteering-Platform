@@ -16,6 +16,7 @@ import {
   atTime,
   createScheduleDataset,
   createScheduleDemo,
+  createWeeklyRevisionPair,
   presetRegistration,
   setActivityOwner,
 } from './timeline-fixture.mjs';
@@ -1654,117 +1655,59 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
 
     await t.test('日程 1-1 审核改期后返回原日程保留条件并重读', async (t) => {
       const date = demo.anchor;
-      const reviewer = await db.account.findUniqueOrThrow({ where: { username: '0000000003' } });
-      const template = (
-        await db.activityRevision.findFirstOrThrow({
-          where: { activity_id: first.id, revision: 1 },
-        })
-      ).content;
-      const scheduleAt = (slots) => ({
-        schedule_type: 'custom',
-        duration_start_date: date,
-        duration_end_date: date,
-        slots,
+      const title = '改期审核';
+      const submitter = await db.account.findUniqueOrThrow({ where: { username: '0000000003' } });
+      const pair = await createWeeklyRevisionPair(db, {
+        activityCode: 'TL-9401',
+        title,
+        date,
+        ownerUsername: '0000000003',
       });
-      const approved = scheduleAt([
-        { starts_at: atTime(date, '09:30'), ends_at: atTime(date, '10:45') },
-        { starts_at: atTime(date, '14:15'), ends_at: atTime(date, '15:45') },
-      ]);
-      const revised = scheduleAt([
-        { starts_at: atTime(date, '09:30'), ends_at: atTime(date, '10:45') },
-        { starts_at: atTime(date, '16:15'), ends_at: atTime(date, '17:15') },
-      ]);
-      const create = (activity_code, title) =>
-        db.activity.create({
-          data: {
-            activity_code,
-            status: 'published',
-            working_revision: 2,
-            published_revision: 1,
-            members: { create: { account_id: reviewer.id, member_role: 'owner' } },
-            revisions: {
-              create: [
-                {
-                  revision: 1,
-                  revision_state: 'approved',
-                  approved_at: new Date(),
-                  created_by: reviewer.id,
-                  content: { ...template, title, schedule: approved },
-                },
-                {
-                  revision: 2,
-                  revision_state: 'pending_review',
-                  created_by: reviewer.id,
-                  content: { ...template, title, schedule: revised },
-                },
-              ],
-            },
-          },
-        });
-      const approving = await create('TL-9401', '改期审核甲');
-      const rejecting = await create('TL-9402', '改期审核乙');
-      await db.activityReview.createMany({
-        data: [
-          { activity_id: approving.id, revision: 2, previous_revision: 1, submitted_by: reviewer.id },
-          { activity_id: rejecting.id, revision: 2, previous_revision: 1, submitted_by: reviewer.id },
-        ],
-      });
-      for (const activityCode of ['TL-9401', 'TL-9402'])
-        await presetRegistration(db, { activityCode, studentNo: '0000000001', status: 'accepted' });
+      await presetRegistration(db, { activityCode: 'TL-9401', studentNo: '0000000001', status: 'accepted' });
       t.after(async () => {
         await db.registration.deleteMany({
-          where: { activity: { activity_code: { startsWith: 'TL-94' } } },
+          where: { activity: { activity_code: { in: ['TL-9401'] } } },
         });
         await db.activityReview.deleteMany({
-          where: { activity: { activity_code: { startsWith: 'TL-94' } } },
+          where: { activity: { activity_code: { in: ['TL-9401'] } } },
         });
-        await db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-94' } } });
+        await db.activity.deleteMany({ where: { activity_code: { in: ['TL-9401'] } } });
       });
 
       await teacher.setViewportSize({ width: 1440, height: 900 });
-      const scheduleAtUrl = (title) =>
+      const scheduleAt = (revision) =>
         admin +
         '/schedule?date=' +
         date +
-        '&unit=day&view=list&revision=working&q=' +
+        '&unit=day&view=list&revision=' +
+        revision +
+        '&q=' +
         encodeURIComponent(title);
       const detail = teacher.getByRole('complementary', { name: '时段详情' });
+      const row = teacher.locator('.schedule-list li').filter({ hasText: title });
+      const mineAt =
+        web + '/mine/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent(title);
+      const mineRow = student.locator('.schedule-list li').filter({ hasText: title });
 
-      // 批准：工作版本新增的 16:15 通过后仍是所选时段，返回原链接保留选中与筛选。
-      await teacher.goto(scheduleAtUrl('改期审核甲'));
-      const approvingRow = teacher.locator('.schedule-list li').filter({ hasText: '改期审核甲' });
-      await visible(approvingRow);
-      assert.match(await approvingRow.locator('.meta-line').innerText(), /待审核/);
-      await approvingRow.getByRole('button', { name: /16:15/ }).click();
-      await visible(detail.getByRole('heading', { name: '改期审核甲' }));
-      const before = new URL(teacher.url());
-      await link(teacher, '查看待审版本').click();
-      await visible(button(teacher, '批准发布'));
-      await button(teacher, '批准发布').click();
-      await teacher.waitForURL((url) => url.pathname === '/schedule');
-      await visible(teacher.getByText('已批准发布', { exact: true }));
-      const after = new URL(teacher.url());
-      for (const key of ['date', 'unit', 'view', 'revision', 'q'])
-        assert.equal(after.searchParams.get(key), before.searchParams.get(key));
-      await visible(detail.getByText(/16:15/));
-      assert.doesNotMatch(await approvingRow.locator('.meta-line').innerText(), /待审核/);
+      // 同一项活动的两版：获批版 A 是两条例行时段，待审版 B 停办当日例行时段、只留补充的 16:15。
+      await teacher.goto(scheduleAt('published'));
+      await visible(row);
+      assert.match(await row.innerText(), /09:30/);
+      assert.match(await row.innerText(), /14:15/);
+      assert.doesNotMatch(await row.innerText(), /16:15/);
+      assert.equal(await row.locator('.slot-list button').count(), 2);
+      await teacher.goto(scheduleAt('working'));
+      await visible(row);
+      assert.match(await row.innerText(), /16:15/);
+      assert.doesNotMatch(await row.innerText(), /09:30|14:15/);
+      assert.equal(await row.locator('.slot-list button').count(), 1);
+      assert.match(await row.locator('.meta-line').innerText(), /待审核/);
 
-      // 学生端看到改期后的安排。
-      await student.goto(
-        web + '/mine/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent('改期审核甲'),
-      );
-      const approvingMine = student.locator('.schedule-list li').filter({ hasText: '改期审核甲' });
-      await visible(approvingMine);
-      assert.match(await approvingMine.innerText(), /16:15/);
-      assert.doesNotMatch(await approvingMine.innerText(), /14:15/);
-
-      // 驳回：工作版本回落到获批版本，所选 16:15 在窗内消失，按新说明清除并说明。
-      await teacher.goto(scheduleAtUrl('改期审核乙'));
-      const rejectingRow = teacher.locator('.schedule-list li').filter({ hasText: '改期审核乙' });
-      await visible(rejectingRow);
-      await rejectingRow.getByRole('button', { name: /16:15/ }).click();
-      await visible(detail.getByRole('heading', { name: '改期审核乙' }));
+      // 驳回：工作版本回落到获批版，所选 16:15 在窗内消失，按第 3 种清除并说明。
+      await row.getByRole('button', { name: /16:15/ }).click();
+      await visible(detail.getByRole('heading', { name: title }));
       assert.equal(new URL(teacher.url()).searchParams.has('slot'), true);
+      const beforeReject = new URL(teacher.url());
       await link(teacher, '查看待审版本').click();
       await visible(button(teacher, '驳回'));
       await teacher.getByLabel('审核意见（驳回必填）').fill('按原安排执行');
@@ -1772,19 +1715,87 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await teacher.waitForURL((url) => url.pathname === '/schedule');
       await visible(teacher.getByText('已驳回', { exact: true }));
       await visible(teacher.getByText('所选时段已随安排更新失效，已回到日程。'));
-      assert.equal(new URL(teacher.url()).searchParams.has('item'), false);
-      assert.equal(new URL(teacher.url()).searchParams.has('slot'), false);
-      await visible(rejectingRow);
-      assert.match(await rejectingRow.innerText(), /14:15/);
-      assert.doesNotMatch(await rejectingRow.innerText(), /16:15/);
-
-      await student.goto(
-        web + '/mine/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent('改期审核乙'),
+      await teacher.waitForURL(
+        (url) => !url.searchParams.has('item') && !url.searchParams.has('slot'),
       );
-      const rejectingMine = student.locator('.schedule-list li').filter({ hasText: '改期审核乙' });
-      await visible(rejectingMine);
-      assert.match(await rejectingMine.innerText(), /14:15/);
-      assert.doesNotMatch(await rejectingMine.innerText(), /16:15/);
+      assert.equal(await teacher.locator('.schedule-detail').count(), 0);
+      const afterReject = new URL(teacher.url());
+      for (const key of ['date', 'unit', 'view', 'revision', 'q'])
+        assert.equal(afterReject.searchParams.get(key), beforeReject.searchParams.get(key));
+      await visible(row);
+      assert.match(await row.innerText(), /09:30/);
+      assert.match(await row.innerText(), /14:15/);
+      assert.doesNotMatch(await row.innerText(), /16:15/);
+
+      // 学生端仍见获批版 A。
+      await student.goto(mineAt);
+      await visible(mineRow);
+      assert.match(await mineRow.innerText(), /09:30/);
+      assert.match(await mineRow.innerText(), /14:15/);
+      assert.doesNotMatch(await mineRow.innerText(), /16:15/);
+
+      // 批准：驳回后重新提交同一 B（rev 3），批准后学生端见 B。
+      const submitted = (
+        await db.activityRevision.findFirstOrThrow({
+          where: { activity_id: pair.activity.id, revision: 1 },
+        })
+      ).content;
+      await db.activityRevision.create({
+        data: {
+          activity_id: pair.activity.id,
+          revision: 3,
+          revision_state: 'pending_review',
+          created_by: submitter.id,
+          content: { ...submitted, schedule: pair.pending },
+        },
+      });
+      await db.activity.update({ where: { id: pair.activity.id }, data: { working_revision: 3 } });
+      await db.activityReview.create({
+        data: {
+          activity_id: pair.activity.id,
+          revision: 3,
+          previous_revision: 1,
+          submitted_by: submitter.id,
+        },
+      });
+
+      await teacher.goto(scheduleAt('working'));
+      await visible(row);
+      assert.match(await row.innerText(), /16:15/);
+      assert.match(await row.locator('.meta-line').innerText(), /待审核/);
+      await row.getByRole('button', { name: /16:15/ }).click();
+      await visible(detail.getByRole('heading', { name: title }));
+      const beforeApprove = new URL(teacher.url());
+      await link(teacher, '查看待审版本').click();
+      await visible(button(teacher, '批准发布'));
+      await button(teacher, '批准发布').click();
+      await teacher.waitForURL((url) => url.pathname === '/schedule');
+      await visible(teacher.getByText('已批准发布', { exact: true }));
+      const afterApprove = new URL(teacher.url());
+      for (const key of ['date', 'unit', 'view', 'revision', 'q'])
+        assert.equal(afterApprove.searchParams.get(key), beforeApprove.searchParams.get(key));
+      await visible(detail.getByText(/16:15/));
+      for (const key of ['item', 'slot'])
+        assert.equal(afterApprove.searchParams.get(key), beforeApprove.searchParams.get(key));
+      assert.equal(await teacher.getByText('所选时段已随安排更新失效，已回到日程。').count(), 0);
+      assert.doesNotMatch(await row.locator('.meta-line').innerText(), /待审核/);
+
+      // 学生端见获批版 B：只剩 16:15。
+      await student.goto(mineAt);
+      await visible(mineRow);
+      assert.match(await mineRow.innerText(), /16:15/);
+      assert.doesNotMatch(await mineRow.innerText(), /09:30|14:15/);
+
+      // 只看待审核：处理完成后活动移出结果，页面给出空态。
+      await teacher.goto(
+        admin +
+          '/schedule?date=' +
+          date +
+          '&unit=day&view=list&pending=1&q=' +
+          encodeURIComponent(title),
+      );
+      await visible(teacher.getByText('该窗口和筛选条件下没有活动'));
+      assert.equal(await teacher.locator('.schedule-list li').count(), 0);
     });
 
     await t.test('日程 1-2 报名与交接改变可见范围', async (t) => {
@@ -1969,6 +1980,18 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       assert.equal(new Set(shown).size, shown.length);
       assert.equal(shown.includes(title + ' 01'), false);
 
+      // 同一个已加载范围在时间轴视图上再核一次：行标题取自 tr > th 内 strong，逐项相等且无重复。
+      await button(student, '时间轴').click();
+      const chartRows = student.locator('.chart tbody tr');
+      await visible(chartRows.first());
+      assert.equal(await chartRows.count(), expected.length);
+      const chartTitles = await student
+        .locator('.chart tbody tr > th strong')
+        .evaluateAll((items) => items.map((node) => node.textContent.trim()));
+      assert.deepEqual(chartTitles, expected);
+      assert.equal(new Set(chartTitles).size, chartTitles.length);
+      await button(student, '列表').click();
+
       // 分段键取自同一结果，刷新后范围仍完整、选中保留。
       await rows.first().getByRole('button', { name: /10:00/ }).click();
       const detail = student.getByRole('complementary', { name: '时段详情' });
@@ -1981,6 +2004,31 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await student.evaluate(() => window.dispatchEvent(new Event('focus')));
       await visible(detail.getByRole('heading', { name: expected[0] }));
       assert.deepEqual([...requested].sort((a, b) => a - b), [1, 2], '刷新重读已加载的两页');
+
+      // 侧栏不保留已失效的段：同日改时刻后所选时段键消失，活动仍在列表里（§2.2 第 3 种）。
+      await db.activityRevision.update({
+        where: {
+          activity_id_revision: { activity_id: server[0].items[0].activity_id, revision: 1 },
+        },
+        data: {
+          content: {
+            ...template,
+            title: expected[0],
+            schedule: {
+              schedule_type: 'continuous',
+              starts_at: atTime(date, '11:00'),
+              ends_at: atTime(date, '12:00'),
+            },
+          },
+        },
+      });
+      await student.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await visible(student.getByText('所选时段已随安排更新失效，已回到日程。'));
+      await student.waitForURL((url) => !url.searchParams.has('slot'));
+      assert.equal(await student.locator('.schedule-detail').count(), 0);
+      assert.equal(new URL(student.url()).searchParams.has('slot'), false);
+      assert.equal(await rows.count(), 40);
+      assert.ok((await rows.first().innerText()).includes(expected[0]));
     });
 
     await t.test('日程 1-4 深分页刷新请求上限', async (t) => {

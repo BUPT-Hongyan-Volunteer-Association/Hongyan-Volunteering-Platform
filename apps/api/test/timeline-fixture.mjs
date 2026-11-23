@@ -10,11 +10,12 @@ export async function createScheduleDataset(
   db,
   { codePrefix, titlePrefix, date, count, ownerUsername = '0000000003' },
 ) {
-  const source = await db.activity.findUniqueOrThrow({
-    where: { activity_code: 'P2026-0001' },
-    include: { revisions: true },
-  });
-  const template = source.revisions[0].content;
+  const source = await db.activity.findUniqueOrThrow({ where: { activity_code: 'P2026-0001' } });
+  const template = (
+    await db.activityRevision.findFirstOrThrow({
+      where: { activity_id: source.id, revision: 1 },
+    })
+  ).content;
   const owner = await db.account.findUniqueOrThrow({ where: { username: ownerUsername } });
   const width = String(count).length;
   const codes = Array.from(
@@ -92,11 +93,12 @@ export async function setActivityOwner(db, { activityCode, username, attached = 
  * 日期按运行时刻推导，页面回归直接从返回值取窗口，不再依赖写死的示例日期。
  */
 export async function createScheduleDemo(db) {
-  const first = await db.activity.findUniqueOrThrow({
-    where: { activity_code: 'P2026-0001' },
-    include: { revisions: true },
-  });
-  const template = first.revisions[0].content;
+  const first = await db.activity.findUniqueOrThrow({ where: { activity_code: 'P2026-0001' } });
+  const template = (
+    await db.activityRevision.findFirstOrThrow({
+      where: { activity_id: first.id, revision: 1 },
+    })
+  ).content;
   // 由另一位负责人管理，避免改变首位负责人的管理列表分页预期。
   const owner = await db.account.findUniqueOrThrow({ where: { username: '0000000003' } });
   const beijing = new Date(Date.now() + 8 * 3600_000);
@@ -152,3 +154,68 @@ export async function createScheduleDemo(db) {
   }
   return { anchor, before, paged, pagedOwner: owner };
 }
+
+/**
+ * 同一项每周活动的获批版 A 与待审版 B：A 是当日的两条例行时段；
+ * B 排除原日期取消当日例行时段，再用补充时段补办 16:15，展开后只剩这一段。
+ * 两版挂在同一项活动上，驳回与批准各能观察到一版。
+ */
+export async function createWeeklyRevisionPair(db, { activityCode, title, date, ownerUsername }) {
+  const source = await db.activity.findUniqueOrThrow({ where: { activity_code: 'P2026-0001' } });
+  const template = (
+    await db.activityRevision.findFirstOrThrow({
+      where: { activity_id: source.id, revision: 1 },
+    })
+  ).content;
+  const owner = await db.account.findUniqueOrThrow({ where: { username: ownerUsername } });
+  // 服务端按本地日期的 ISO 星期展开周规则：周一为 1，周日为 7。
+  const weekday = new Date(date + 'T00:00:00Z').getUTCDay() || 7;
+  const rule = (start_time, end_time) => ({
+    weekday,
+    start_time,
+    end_time,
+    end_day_offset: 0,
+  });
+  const approved = {
+    schedule_type: 'weekly',
+    duration_start_date: date,
+    duration_end_date: date,
+    weekly_slots: [rule('09:30', '10:45'), rule('14:15', '15:45')],
+  };
+  const pending = {
+    ...approved,
+    excluded_dates: [date],
+    additional_slots: [{ starts_at: atTime(date, '16:15'), ends_at: atTime(date, '17:15') }],
+  };
+  const activity = await db.activity.create({
+    data: {
+      activity_code: activityCode,
+      status: 'published',
+      working_revision: 2,
+      published_revision: 1,
+      members: { create: { account_id: owner.id, member_role: 'owner' } },
+      revisions: {
+        create: [
+          {
+            revision: 1,
+            revision_state: 'approved',
+            approved_at: new Date(),
+            created_by: owner.id,
+            content: { ...template, title, schedule: approved },
+          },
+          {
+            revision: 2,
+            revision_state: 'pending_review',
+            created_by: owner.id,
+            content: { ...template, title, schedule: pending },
+          },
+        ],
+      },
+    },
+  });
+  await db.activityReview.create({
+    data: { activity_id: activity.id, revision: 2, previous_revision: 1, submitted_by: owner.id },
+  });
+  return { activity, approved, pending };
+}
+
