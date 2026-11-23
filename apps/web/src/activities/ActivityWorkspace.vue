@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ActivityMemberListView from './ActivityMemberListView.vue';
 import TransferOwner from './TransferOwner.vue';
 import AddCollaborator from './AddCollaborator.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
@@ -46,7 +47,7 @@ const sections = [
   ['incidents', '异常记录'],
   ['requests', '退出与恢复'],
 ];
-const deniedRefresh = ['activity-attendance', 'hour-batches', 'hour-batch', 'activity-hours',
+const deniedRefresh = ['roster', 'activity-attendance', 'hour-batches', 'hour-batch', 'activity-hours',
   'activity-hour-appeals', 'activity-hour-corrections', 'activity-hour-incidents'];
 const team = ref<ActivityMemberList>({ items: [], version: 0 });
 const members = computed(() => team.value.items);
@@ -161,14 +162,8 @@ onUnmounted(() => {
     </RouterView>
     <section v-else class="reading-area">
       <h2>活动成员</h2>
-      <ul class="member-list">
-        <li v-for="m in members" :key="m.account_id">
-          <span class="item-icon"><UiIcon name="User" /></span><strong>{{ m.display_name }}</strong
-          ><span class="state-chip neutral">{{
-            m.member_role === 'owner' ? '主负责人' : '协作者'
-          }}</span>
-        </li>
-      </ul>
+      <ActivityMemberListView :key="activity.id + self.member_role" :activity="activity" :team="team"
+        :can-manage="self.member_role === 'owner'" :paused="verifying || !!error" @saved="applyTeam" @refresh="refresh" />
       <AddCollaborator v-if="self.member_role === 'owner'" :key="activity.id" :activity="activity"
         :team="team" :paused="verifying || !!error" @saved="applyTeam" @refresh="refresh" />
       <TransferOwner v-if="self.member_role === 'owner'" :key="activity.id + team.version" :activity="activity"
@@ -179,19 +174,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.member-list {
-  display: grid;
-  list-style: none;
-  padding: 0;
-  border-top: 1px solid var(--line);
-}
-.member-list li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
-}
 @media (max-width: 700px) {
   .workspace-tools {
     width: 100%;

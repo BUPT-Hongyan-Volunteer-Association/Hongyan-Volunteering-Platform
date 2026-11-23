@@ -576,6 +576,39 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal(after.items.find(m => m.account_id === oldOwner).member_role, 'collaborator');
       assert.equal(await db.auditEvent.count({ where: { resource_id: sample.id, action: 'transfer_activity_owner', actor_id: oldOwner, reason: body.reason } }), 1);
     });
+    await t.test('移除协作者只撤销该活动访问权，重放只记一次审计', async () => {
+      const base = '/organizer/activities/' + sample.id;
+      const team = base + '/members';
+      const before = (await other.request(team)).data;
+      const formerOwner = (await owner.request('/me')).data;
+      const currentOwner = (await other.request('/me')).data.account_id;
+      const endpoint = team + '/' + formerOwner.account_id;
+      const body = { expected_version: before.version, reason: '现场工作已交接' };
+      for (const route of ['/registrations', '/attendance'])
+        assert.equal((await owner.request(base + route)).status, 200);
+      assert.equal((await owner.write('DELETE', endpoint, body)).status, 404);
+      assert.equal((await other.write('DELETE', team + '/' + currentOwner, body)).status, 422);
+      assert.equal((await other.write('DELETE', endpoint, { ...body, reason: '  ' })).status, 422);
+      assert.equal((await other.write('DELETE', endpoint, { ...body, expected_version: before.version - 1 })).code, 'version_conflict');
+      const key = randomUUID();
+      const removed = await other.write('DELETE', endpoint, body, key);
+      assert.equal(removed.status, 200);
+      assert.deepEqual(await other.write('DELETE', endpoint, body, key), removed);
+      assert.equal(removed.data.version, before.version + 1);
+      assert.deepEqual(removed.data.items, before.items.filter(m => m.account_id !== formerOwner.account_id));
+      for (const route of ['/registrations', '/attendance'])
+        assert.equal((await owner.request(base + route)).status, 404);
+      assert.equal((await owner.request('/me/hours')).status, 200);
+      assert.equal((await owner.request(path + '/members')).status, 200);
+      assert.deepEqual((await owner.request('/me')).data.roles, formerOwner.roles);
+      const events = await db.auditEvent.findMany({ where: { resource_id: sample.id, action: 'remove_activity_member' } });
+      assert.equal(events.length, 1);
+      assert.equal(events[0].actor_id, currentOwner);
+      assert.equal(events[0].reason, body.reason);
+      const snapshot = data => ({ version: data.version, members: data.items.map(({ account_id, member_role }) => ({ account_id, member_role })) });
+      assert.deepEqual(events[0].before, snapshot(before));
+      assert.deepEqual(events[0].after, snapshot(removed.data));
+    });
     await t.test('账号只读范围先于分页，角色和详情不泄露高权限资料', async () => {
       const expires = new Date('2099-12-31T15:59:00Z');
       const create = (username, roles) => db.account.create({ data: {

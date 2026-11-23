@@ -1457,7 +1457,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await checkLedgerPages({ db, web, admin, owner, teacher, student, secondStudent: helper,
         worker: api.get(NoticeWorker), fits, pickOption, capture, holdResponse, settleRender });
     });
-    await t.test('主负责人核对并添加协作者，新成员原会话可读且不能管理团队', async () => {
+    await t.test('主负责人添加协作者并交接，移除原负责人后旧会话失去活动权限', async () => {
       const joined = await signIn(browser, web, '0000000003', password, 390);
       await joined.goto(web + '/managed/' + first.id);
       await visible(joined.getByRole('alert'));
@@ -1492,6 +1492,29 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(owner.getByText(/你是本活动的协作者/));
       await joined.reload();
       await visible(joined.getByText('交接主负责人', { exact: true }));
+      assert.equal(await owner.getByRole('button', { name: /移除协作者/ }).count(), 0);
+      await link(owner, '报名名单').click();
+      await visible(owner.locator('.status-filters'));
+      const remove = button(joined, '移除协作者 甲负责人');
+      await remove.click();
+      const dialog = joined.getByRole('dialog', { name: '移除协作者' });
+      await visible(dialog.getByText(/校园服务甲.*甲负责人.*0000000002/));
+      assert.equal(await button(joined, '确认移除').isDisabled(), true);
+      await button(joined, '取消').click();
+      await remove.click();
+      await joined.getByLabel('移除原因').fill('现场工作已交接');
+      await fits(joined);
+      await button(joined, '确认移除').click();
+      await visible(joined.getByText('已从本活动移除甲负责人。'));
+      assert.equal(await remove.count(), 0);
+      await owner.reload();
+      await visible(owner.getByRole('alert').filter({ hasText: '记录不存在或不可见' }));
+      assert.equal(await owner.locator('.status-filters').count(), 0);
+      await owner.goto(web + '/managed/' + first.id + '/attendance');
+      await visible(owner.getByRole('alert').filter({ hasText: '记录不存在或不可见' }));
+      await owner.goto(web + '/mine');
+      await visible(owner.getByRole('heading', { name: '甲负责人' }));
+
 
     });
   } finally {

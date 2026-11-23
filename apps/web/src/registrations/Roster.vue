@@ -14,6 +14,7 @@ import UiIcon from '@hongyan/ui/UiIcon.vue';
 import { registrationLabels } from './labels';
 import Pager from '@hongyan/ui/Pager.vue';
 const props = defineProps<{ writesPaused: boolean }>();
+const emit = defineEmits<{ denied: [] }>();
 const route = useRoute(),
   q = ref(''),
   state = ref<Registration['status'] | ''>('submitted'),
@@ -69,6 +70,7 @@ async function load() {
     if (turn !== serial) return;
     readError.value = e instanceof Error ? e.message : '名单读取失败';
     if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) {
+      emit('denied');
       selected.value.clear();
       notice.value = '';
       writeError.value = '';
@@ -96,6 +98,7 @@ async function accept(row: Registration) {
   } catch (e) {
     if (!mounted) return;
     if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) {
+      emit('denied');
       selected.value.clear();
       notice.value = '';
       inspected.value = undefined;

@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Header, HttpCode, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
-import type { MemberAdd, OwnerTransfer } from '@hongyan/contracts/types';
+import { Body, Controller, Delete, Get, Header, HttpCode, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
+import type { MemberAdd, OwnerTransfer, ReasonAction } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import { audit } from '../audit.js';
 import type { SessionRequest } from '../auth/session.guard.js';
@@ -33,6 +33,15 @@ async function readTeam(db: Tx, where: Prisma.ActivityWhereInput) {
 const teamSnapshot = (team: Awaited<ReturnType<typeof readTeam>>) => ({
   version: team.version, members: team.items.map(({ account_id, member_role }) => ({ account_id, member_role })),
 });
+
+async function recordTeamChange(tx: Tx, id: string, before: Awaited<ReturnType<typeof readTeam>>,
+  actorId: string, action: string, reason: string) {
+  await tx.activity.update({ where: { id }, data: { team_version: { increment: 1 } } });
+  const after = await readTeam(tx, { id });
+  await audit(tx, { actor_id: actorId, action, resource_type: 'activity', resource_id: id,
+    reason, before: teamSnapshot(before), after: teamSnapshot(after) });
+  return after;
+}
 
 @Controller('organizer/activities')
 export class ManagedController {
@@ -99,13 +108,28 @@ export class ManagedController {
       if (!await tx.account.count({ where: { id: input.account_id, ...eligible(new Date()) } }))
         invalid('account_id', '该账号当前没有有效的负责人资格，请重新核对');
       await tx.activityMember.create({ data: { activity_id: id, account_id: input.account_id, member_role: 'collaborator' } });
-      await tx.activity.update({ where: { id }, data: { team_version: { increment: 1 } } });
-      const after = await readTeam(tx, { id });
-      await audit(tx, { actor_id: actor.account_id, action: 'add_activity_member', resource_type: 'activity',
-        resource_id: id, reason, before: teamSnapshot(before), after: teamSnapshot(after) });
-      return after;
+      return recordTeamChange(tx, id, before, actor.account_id, 'add_activity_member', reason);
     });
   }
+  @Delete(':id/members/:account_id')
+  remove(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Param('account_id', ParseUUIDPipe) accountId: string, @Body() body: unknown) {
+    return this.workflow.run(req, { activityId: id }, 'team', async (tx, _row, actor, reauthorize) => {
+      const input = validate<ReasonAction>('reason_action', body);
+      const reason = input.reason.trim();
+      if (!reason) invalid('reason', '请填写移除原因');
+      await tx.$queryRaw`SELECT id FROM account WHERE id = ${actor.account_id}::uuid FOR SHARE`;
+      await reauthorize();
+      const before = await readTeam(tx, { id });
+      checkVersion(before.version, input.expected_version);
+      const member = before.items.find(person => person.account_id === accountId.toLowerCase());
+      if (!member) invisible();
+      if (member.member_role === 'owner') invalid('account_id', '请先交接主负责人，再移除该成员');
+      await tx.activityMember.delete({ where: { activity_id_account_id: { activity_id: id, account_id: accountId } } });
+      return recordTeamChange(tx, id, before, actor.account_id, 'remove_activity_member', reason);
+    });
+  }
+
   @Post(':id/transfer-owner')
   @HttpCode(200)
   transfer(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
@@ -123,11 +147,7 @@ export class ManagedController {
         invalid('target_account_id', '请选择本活动中仍有负责人资格的协作者');
       await tx.activityMember.updateMany({ where: { activity_id: id, member_role: 'owner' }, data: { member_role: 'collaborator' } });
       await tx.activityMember.update({ where: { activity_id_account_id: { activity_id: id, account_id: target } }, data: { member_role: 'owner' } });
-      await tx.activity.update({ where: { id }, data: { team_version: { increment: 1 } } });
-      const after = await readTeam(tx, { id });
-      await audit(tx, { actor_id: actor.account_id, action: 'transfer_activity_owner', resource_type: 'activity',
-        resource_id: id, reason, before: teamSnapshot(before), after: teamSnapshot(after) });
-      return after;
+      return recordTeamChange(tx, id, before, actor.account_id, 'transfer_activity_owner', reason);
     });
   }
 }
