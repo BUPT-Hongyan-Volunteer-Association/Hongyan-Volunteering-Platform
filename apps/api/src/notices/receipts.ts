@@ -1,3 +1,4 @@
+import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
 import type { Prisma } from '../generated/prisma/client.js';
 import { invalid } from '../http.js';
 
@@ -8,7 +9,6 @@ export interface ReceiptFilters {
   follow_up_only: boolean;
 }
 export const attendanceKinds = ['change', 'gathering'];
-export const activeStatuses = ['submitted', 'waitlisted', 'accepted'];
 
 export function receiptStatus(value: string | undefined): ReceiptStatus | undefined {
   if (value !== undefined && !receiptStatuses.includes(value as ReceiptStatus))
@@ -32,7 +32,7 @@ export function receiptWhere(
       attendanceKinds.includes(notice.notice_kind) && {
         student: {
           registrations: {
-            some: { activity_id: notice.activity_id, status: { in: activeStatuses } },
+            some: { activity_id: notice.activity_id, status: { in: activeRegistrationStatuses } },
           },
         },
       }),

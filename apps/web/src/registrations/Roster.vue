@@ -159,6 +159,9 @@ function toggleAll(checked: boolean) {
       <strong>{{ result.accepted_count }} / {{ result.capacity }}</strong> 人
     </p>
   </div>
+  <div class="page-actions">
+    <RouterLink class="button" :to="{ path: '/managed/' + route.params.id + '/requests', query: { page: route.query.page } }">退出与恢复</RouterLink>
+  </div>
   <div v-if="result" class="status-filters" aria-label="报名状态">
     <button v-for="key in filters" :key="key" :aria-pressed="state === key" @click="state = key">
       {{ key ? labels[key] : '全部' }}

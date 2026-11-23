@@ -9,9 +9,13 @@ const shown = (element) => element.first().waitFor();
 const text = (page, value) => page.getByText(value, { exact: typeof value === 'string' });
 
 async function tab(page, name) {
-  const entry = page.getByRole('navigation', { name: '活动工作区' }).getByRole('link', { name, exact: true });
-  if (!await entry.isVisible()) await text(page, '更多').click();
-  await entry.click();
+  const nav = page.getByRole('navigation', { name: '活动工作区' });
+  if (name === '漏记反馈') {
+    await link(nav, '时长台账').click();
+    await link(page, name).click();
+  } else {
+    await link(nav, name).click();
+  }
 }
 
 async function sendWorkbook(page, name, bytes) {

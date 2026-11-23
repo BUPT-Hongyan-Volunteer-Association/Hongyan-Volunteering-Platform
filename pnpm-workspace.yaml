@@ -2,6 +2,10 @@ packages:
   - apps/*
   - packages/*
 
+overrides:
+  '@hey-api/json-schema-ref-parser@1.4.4>js-yaml': 4.3.2
+  '@prisma/config@7.10.1>effect': 3.22.5
+
 onlyBuiltDependencies:
   - '@nestjs/core'
   - '@prisma/engines'

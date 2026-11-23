@@ -14,6 +14,7 @@ export function usePageRead<T>(
   source: WatchSource,
   read: (signal: AbortSignal) => Promise<T>,
   denied?: () => void,
+  { keepPrevious = false } = {},
 ) {
   const data = shallowRef<T>(),
     error = ref(''),
@@ -46,7 +47,7 @@ export function usePageRead<T>(
       if (!current.signal.aborted) loading.value = false;
     }
   }
-  watch(source, () => void refresh(), { immediate: true, flush: 'sync' });
+  watch(source, () => void refresh(!keepPrevious), { immediate: true, flush: 'sync' });
   onScopeDispose(() => {
     disposed = true;
     active?.abort();
