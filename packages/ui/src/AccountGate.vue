@@ -69,6 +69,8 @@ async function submit(action: 'login' | 'change' | 'logout') {
     if (action === 'login' && e instanceof ApiError && e.body?.code === 'unauthorized') {
       await restore();
       if (stage.value === 'login') message.value = '登录页面已过期，会话已更新，请再次登录。';
+    } else if (action === 'login' && e instanceof ApiError && e.body?.code === 'invalid_credentials') {
+      message.value = '登录失败，请核对账号和密码。如果你刚办理过凭证重置，旧密码已失效，请联系办理老师确认发放进度。';
     } else {
       if (e instanceof ApiError && e.status === 401 && action !== 'login') await restore();
       message.value = e instanceof Error ? e.message : '请求失败';

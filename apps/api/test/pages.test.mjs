@@ -13,6 +13,7 @@ import { checkHourPages } from './hour-pages-fixture.mjs';
 import { checkStudentImportPages } from './student-import-pages-fixture.mjs';
 import { checkLedgerPages } from './hour-ledger-pages.mjs';
 
+const loginFailureMessage = '登录失败，请核对账号和密码。如果你刚办理过凭证重置，旧密码已失效，请联系办理老师确认发放进度。';
 const link = (page, name) => page.getByRole('link', { name, exact: true });
 const button = (page, name) => page.getByRole('button', { name, exact: true });
 const visible = (locator) => locator.first().waitFor({ state: 'visible' });
@@ -1128,7 +1129,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         await visible(page.getByText('登录页面已过期，会话已更新，请再次登录。'));
         await page.getByLabel('当前密码').fill('wrong-password');
         await button(page, '登录').click();
-        await visible(page.getByText('账号或密码不正确'));
+        await visible(page.getByText(loginFailureMessage, { exact: true }));
         await page.getByLabel('当前密码').fill(password);
         await button(page, '登录').click();
         await visible(button(page, '退出登录'));
@@ -1617,7 +1618,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await owner.getByLabel('账号', { exact: true }).fill('0000000002');
       await owner.getByLabel('当前密码').fill(password);
       await button(owner, '登录').click();
-      await visible(owner.getByText('账号或密码不正确'));
+      await visible(owner.getByText(loginFailureMessage, { exact: true }));
     });
   } finally {
     try {
