@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Header, HttpCode, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
-import type { MemberAdd } from '@hongyan/contracts/types';
+import type { MemberAdd, OwnerTransfer } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import { audit } from '../audit.js';
 import type { SessionRequest } from '../auth/session.guard.js';
@@ -102,6 +102,30 @@ export class ManagedController {
       await tx.activity.update({ where: { id }, data: { team_version: { increment: 1 } } });
       const after = await readTeam(tx, { id });
       await audit(tx, { actor_id: actor.account_id, action: 'add_activity_member', resource_type: 'activity',
+        resource_id: id, reason, before: teamSnapshot(before), after: teamSnapshot(after) });
+      return after;
+    });
+  }
+  @Post(':id/transfer-owner')
+  @HttpCode(200)
+  transfer(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.workflow.run(req, { activityId: id }, 'team', async (tx, _row, actor, reauthorize) => {
+      const input = validate<OwnerTransfer>('owner_transfer', body);
+      const reason = input.reason.trim();
+      if (!reason) invalid('reason', '请填写交接原因');
+      const target = input.target_account_id;
+      await tx.$queryRaw`SELECT id FROM account WHERE id IN (${actor.account_id}::uuid, ${target}::uuid) ORDER BY id FOR SHARE`;
+      await reauthorize();
+      const before = await readTeam(tx, { id });
+      checkVersion(before.version, input.expected_version);
+      if (!before.items.some(member => member.account_id === target && member.member_role === 'collaborator') ||
+          !await tx.account.count({ where: { id: target, ...eligible(new Date()) } }))
+        invalid('target_account_id', '请选择本活动中仍有负责人资格的协作者');
+      await tx.activityMember.updateMany({ where: { activity_id: id, member_role: 'owner' }, data: { member_role: 'collaborator' } });
+      await tx.activityMember.update({ where: { activity_id_account_id: { activity_id: id, account_id: target } }, data: { member_role: 'owner' } });
+      await tx.activity.update({ where: { id }, data: { team_version: { increment: 1 } } });
+      const after = await readTeam(tx, { id });
+      await audit(tx, { actor_id: actor.account_id, action: 'transfer_activity_owner', resource_type: 'activity',
         resource_id: id, reason, before: teamSnapshot(before), after: teamSnapshot(after) });
       return after;
     });

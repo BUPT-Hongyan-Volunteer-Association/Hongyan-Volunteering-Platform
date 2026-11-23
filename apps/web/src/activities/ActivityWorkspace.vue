@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TransferOwner from './TransferOwner.vue';
 import AddCollaborator from './AddCollaborator.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
@@ -169,6 +170,8 @@ onUnmounted(() => {
         </li>
       </ul>
       <AddCollaborator v-if="self.member_role === 'owner'" :key="activity.id" :activity="activity"
+        :team="team" :paused="verifying || !!error" @saved="applyTeam" @refresh="refresh" />
+      <TransferOwner v-if="self.member_role === 'owner'" :key="activity.id + team.version" :activity="activity"
         :team="team" :paused="verifying || !!error" @saved="applyTeam" @refresh="refresh" />
       <p v-else>你是本活动的协作者。成员变更由主负责人或授权后台办理。</p>
     </section>

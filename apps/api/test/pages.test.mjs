@@ -1484,6 +1484,15 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(joined.getByText(/你是本活动的协作者/));
       assert.equal(await joined.getByText('添加协作者', {exact:true}).count(), 0);
       await fits(joined);
+      await owner.getByText('交接主负责人', { exact: true }).click();
+      await owner.getByLabel('接任协作者').selectOption({ label: '乙负责人 · 0000000003' });
+      await visible(owner.getByText(/你将保留协作者身份/));
+      await owner.getByLabel('交接原因').fill('现场换班');
+      await button(owner, '确认交接').click();
+      await visible(owner.getByText(/你是本活动的协作者/));
+      await joined.reload();
+      await visible(joined.getByText('交接主负责人', { exact: true }));
+
     });
   } finally {
     try {

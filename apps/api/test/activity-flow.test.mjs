@@ -553,6 +553,29 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal(events[0].before.members.length + 1, events[0].after.members.length);
       assert.deepEqual(Object.keys(events[0].after.members[0]).sort(), ['account_id','member_role']);
     });
+    await t.test('交接复核资格、版本，并发只产生一次换任', async () => {
+      const base = '/organizer/activities/' + sample.id;
+      const members = () => owner.request(base + '/members');
+      const before = (await members()).data;
+      const target = (await other.request('/me')).data.account_id;
+      const oldOwner = (await owner.request('/me')).data.account_id;
+      const body = { expected_version: before.version, target_account_id: target, reason: '现场交接' };
+      const post = (user, data) => user.write('POST', base + '/transfer-owner', data);
+      assert.equal((await post(other, body)).status, 404);
+      assert.equal((await post(owner, { ...body, target_account_id: oldOwner })).status, 422);
+      assert.equal((await post(owner, { ...body, expected_version: before.version - 1 })).status, 409);
+      const where = { account_id_role: { account_id: target, role: 'organizer' } };
+      await db.roleGrant.update({ where, data: { expires_at: new Date(0) } });
+      assert.equal((await post(owner, body)).status, 422);
+      await db.roleGrant.update({ where, data: { expires_at: null } });
+      const attempts = await Promise.all([post(owner, body), post(owner, body)]);
+      assert.deepEqual(attempts.map(r => r.status).sort(), [200, 404]);
+      const after = (await members()).data;
+      assert.equal(after.version, before.version + 1);
+      assert.deepEqual(after.items.filter(m => m.member_role === 'owner').map(m => m.account_id), [target]);
+      assert.equal(after.items.find(m => m.account_id === oldOwner).member_role, 'collaborator');
+      assert.equal(await db.auditEvent.count({ where: { resource_id: sample.id, action: 'transfer_activity_owner', actor_id: oldOwner, reason: body.reason } }), 1);
+    });
     await t.test('账号只读范围先于分页，角色和详情不泄露高权限资料', async () => {
       const expires = new Date('2099-12-31T15:59:00Z');
       const create = (username, roles) => db.account.create({ data: {
