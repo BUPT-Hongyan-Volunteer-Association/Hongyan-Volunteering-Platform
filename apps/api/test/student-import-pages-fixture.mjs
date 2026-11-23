@@ -73,6 +73,7 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
 
   // 切换批次：旧批次详情响应较慢时不得覆盖新批次，确认必须作用于当前批次
   const uploadReady = async (name, studentNo) => {
+    await page.waitForFunction(() => !document.querySelector('.dropzone')?.classList.contains('busy'));
     const before = new URL(page.url()).pathname;
     await page.getByLabel('名单文件', { exact: true }).setInputFiles({
       name,

@@ -31,6 +31,7 @@ const statusOptions = [
   { value: 'inactive', label: '停用' },
 ] as const;
 const selectedGrade = computed(() => String(route.query.grade ?? 'all'));
+const selected = ref(new Set<string>());
 const exportInput = computed(() => ({
   type: 'admin_students' as const,
   q: route.query.q ? String(route.query.q) : undefined,
@@ -38,6 +39,27 @@ const exportInput = computed(() => ({
   grade: selectedGrade.value !== 'all' ? selectedGrade.value : undefined,
   account_status: status.value !== 'all' ? status.value : undefined,
 }));
+const selectedExportInput = computed(() => ({
+  type: 'admin_students' as const,
+  student_ids: [...selected.value],
+}));
+const pageStudents = computed(() => rows.value.map((row) => row.id));
+const pageChecked = computed(() => pageStudents.value.length > 0 && pageStudents.value.every((id) => selected.value.has(id)));
+const pageIndeterminate = computed(() => !pageChecked.value && pageStudents.value.some((id) => selected.value.has(id)));
+function togglePage(checked: boolean) {
+  const next = new Set(selected.value);
+  for (const id of pageStudents.value) {
+    if (checked) next.add(id);
+    else next.delete(id);
+  }
+  selected.value = next;
+}
+function toggleStudent(id: string, checked: boolean) {
+  const next = new Set(selected.value);
+  if (checked) next.add(id);
+  else next.delete(id);
+  selected.value = next;
+}
 const selectedCohort = computed(() => String(route.query.cohort ?? 'all'));
 const cohortChoices = computed(() => [
   { value: 'all', label: '全部级部' },
@@ -101,6 +123,15 @@ function setFilter(field: 'cohort' | 'grade' | 'status', value: string) {
     query: { ...route.query, [field]: value === 'all' ? undefined : value, page: 1 },
   });
 }
+watch(
+  [
+    () => route.query.q,
+    () => route.query.cohort,
+    () => route.query.grade,
+    () => route.query.status,
+  ],
+  () => selected.value.clear(),
+);
 function goPage(next: number) {
   void router.push({ query: { ...route.query, page: next } });
 }
@@ -112,7 +143,16 @@ function goPage(next: number) {
       <h1>学生档案</h1>
       <span class="state-chip neutral">共 {{ total }} 人</span>
     </div>
-    <ExportButton :input="exportInput" :disabled="loading" @recheck="load" />
+    <div class="page-actions">
+      <ExportButton :input="exportInput" :disabled="loading" @recheck="load" />
+      <ExportButton
+        :input="selectedExportInput"
+        :disabled="loading || !selected.size"
+        :create-label="'导出所选学生' + (selected.size ? '（' + selected.size + '）' : '')"
+        download-label="下载所选学生"
+        @recheck="load"
+      />
+    </div>
   </div>
   <form class="filters" @submit.prevent="apply">
     <label>学号或姓名<input v-model="search" type="search" placeholder="输入学号或姓名" /></label>
@@ -135,6 +175,16 @@ function goPage(next: number) {
         <caption>学生档案</caption>
         <thead>
           <tr>
+            <th scope="col" class="select-cell">
+              <input
+                v-if="pageStudents.length"
+                type="checkbox"
+                aria-label="选择本页学生"
+                :checked="pageChecked"
+                :indeterminate="pageIndeterminate"
+                @change="togglePage(($event.target as HTMLInputElement).checked)"
+              />
+            </th>
             <th scope="col">学号</th>
             <th scope="col">姓名</th>
             <th scope="col">级部</th>
@@ -147,6 +197,14 @@ function goPage(next: number) {
         </thead>
         <tbody>
           <tr v-for="student in rows" :key="student.id">
+            <td class="select-cell">
+              <input
+                type="checkbox"
+                :aria-label="'选择学生 ' + student.student_no"
+                :checked="selected.has(student.id)"
+                @change="toggleStudent(student.id, ($event.target as HTMLInputElement).checked)"
+              />
+            </td>
             <th scope="row">{{ student.student_no }}</th>
             <td>{{ student.name }}</td>
             <td>{{ student.cohort || '—' }}</td>
@@ -187,5 +245,8 @@ function goPage(next: number) {
 }
 .filters .filter-select {
   --select-width: 10rem;
+}
+.select-cell {
+  width: 2.5rem;
 }
 </style>

@@ -159,6 +159,15 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     assert(rows.every((row) => row[3] === '已录取'));
     assert(rows.every((row) => /^0\d{9}$/.test(row[1])));
 
+    const selected = acceptedExpected.slice(0, 2);
+    const selectedJob = await createExport(owner, {
+      type: 'activity_roster', activity_id: rosterActivity.id,
+      registration_ids: selected.map((row) => row.id),
+    });
+    const selectedFile = await download(owner, (await waitExport(owner, selectedJob.id)).id);
+    assert.deepEqual(rowsWithoutHeader(selectedFile.body, '报名名单').map((row) => row[1]),
+      selected.map((row) => row.student_no));
+
     const filtered = await createExport(owner, { type: 'activity_roster', activity_id: rosterActivity.id, registration_status: 'accepted', q: '合成学生07' });
     const filteredFile = await download(owner, (await waitExport(owner, filtered.id)).id);
     const filteredRows = rowsWithoutHeader(filteredFile.body, '报名名单');
@@ -194,6 +203,14 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     assert.deepEqual(rows.slice(1).map((row) => row[0]), expected.items.map((row) => row.student_no));
     assert.equal(rows.length, 3);
     assert(rows.slice(1).every((row) => row[1].startsWith('合成学生0') && /^0\d{9}$/.test(row[0])));
+    const selectedJob = await createExport(teacher, {
+      type: 'admin_students', student_ids: expected.items.slice(0, 2).map((row) => row.id),
+    });
+    const selectedRows = sheetRows((await download(teacher, (await waitExport(teacher, selectedJob.id)).id)).body, '学生档案');
+    assert.deepEqual(selectedRows.slice(1).map((row) => row[0]), expected.items.slice(0, 2).map((row) => row.student_no));
+    assert.equal((await teacher.write('POST', '/exports', {
+      type: 'admin_students', student_ids: [randomUUID()],
+    }, randomUUID())).status, 422);
     assert.equal((await alice.write('POST', '/exports', { type: 'admin_students' }, randomUUID())).status, 403);
   });
 

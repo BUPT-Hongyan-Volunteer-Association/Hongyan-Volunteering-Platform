@@ -10173,7 +10173,15 @@ components:
           format: uuid
         student_ids:
           type: array
-          description: 仅 activity_hours 汇总导出使用；非空学生 ID 列表，须属于该活动时长范围。未传时导出全部明细。
+          description: activity_hours 汇总导出或 admin_students 选中导出使用；非空学生 ID 列表，须属于对应范围。未传时按筛选导出。
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        registration_ids:
+          type: array
+          description: activity_roster 选中导出使用；非空报名 ID 列表，须属于该活动。未传时按筛选导出。
           minItems: 1
           uniqueItems: true
           items:
@@ -10290,6 +10298,8 @@ components:
             - grade
           - required:
             - account_status
+          - required:
+            - registration_ids
         required:
         - notice_id
       - properties:
@@ -10317,6 +10327,8 @@ components:
             - grade
           - required:
             - account_status
+          - required:
+            - registration_ids
         required:
         - activity_id
       - properties:
@@ -10348,6 +10360,8 @@ components:
             - grade
           - required:
             - account_status
+          - required:
+            - registration_ids
       - properties:
           type:
             type: string
@@ -10375,6 +10389,8 @@ components:
             - grade
           - required:
             - account_status
+          - required:
+            - registration_ids
         required:
         - student_id
       - properties:
@@ -10391,7 +10407,7 @@ components:
           - required:
             - student_id
           - required:
-            - student_ids
+            - registration_ids
           - required:
             - registration_status
           - required:

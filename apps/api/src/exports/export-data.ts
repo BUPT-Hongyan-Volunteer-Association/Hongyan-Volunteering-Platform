@@ -70,11 +70,20 @@ export async function resolveExportScope(tx: Tx, actor: Actor, input: ExportInpu
       select: { id: true },
     });
     if (!activity) return invisible();
+    const registration_ids = input.registration_ids;
+    if (registration_ids) {
+      const count = await tx.registration.count({
+        where: { activity_id, id: { in: registration_ids } },
+      });
+      if (count !== registration_ids.length)
+        invalid('registration_ids', '所选报名不在该活动名单范围内');
+    }
     return compact({
       type: input.type,
       activity_id,
       registration_status: input.registration_status,
       q: input.q?.trim() || undefined,
+      registration_ids,
     });
   }
   if (input.type === 'notice_receipts') {
@@ -125,12 +134,18 @@ export async function resolveExportScope(tx: Tx, actor: Actor, input: ExportInpu
   }
   if (input.type === 'admin_students') {
     if (!staff(actor)) denied();
+    const student_ids = input.student_ids;
+    if (student_ids) {
+      const count = await tx.student.count({ where: { id: { in: student_ids } } });
+      if (count !== student_ids.length) invalid('student_ids', '所选学生不存在');
+    }
     return compact({
       type: input.type,
       q: input.q?.trim() || undefined,
       cohort: input.cohort?.trim() || undefined,
       grade: input.grade,
       account_status: input.account_status,
+      student_ids,
     });
   }
   const student_id = input.student_id ?? invalid('student_id', '请选择学生');
@@ -193,6 +208,7 @@ async function rosterContent(tx: Tx, scope: StoredScope): Promise<ExportContent>
   const rows = await tx.registration.findMany({
     where: {
       activity_id,
+      ...(scope.registration_ids && { id: { in: scope.registration_ids } }),
       ...(scope.registration_status && { status: scope.registration_status }),
       ...(q && {
         student: { OR: [
@@ -365,6 +381,7 @@ async function studentsContent(tx: Tx, scope: StoredScope): Promise<ExportConten
   const q = scope.q?.trim();
   const rows = await tx.student.findMany({
     where: {
+      ...(scope.student_ids && { id: { in: scope.student_ids } }),
       ...(scope.cohort && { cohort: scope.cohort }),
       ...(scope.grade && { grade: scope.grade }),
       ...(scope.account_status && { account: { active: scope.account_status === 'active' } }),
