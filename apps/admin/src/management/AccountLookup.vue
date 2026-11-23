@@ -5,6 +5,7 @@ import { ApiError, getAccount, getAccountRoles, listAccounts, type AccountSummar
 import { localDateTime } from '@hongyan/ui/activityDisplay';
 import OrganizerGrantForm from './OrganizerGrantForm.vue';
 
+import CredentialResetForm from './CredentialResetForm.vue';
 import AccountStatusForm from './AccountStatusForm.vue';
 import StaffAccountForm from './StaffAccountForm.vue';
 
@@ -73,6 +74,13 @@ function statusSaved(next: AccountSummary) {
     window.dispatchEvent(new Event('hongyan-session-expired'));
 }
 
+function credentialReset(next: AccountSummary) {
+  if (account.value?.account_id !== next.account_id || account.value.version > next.version) return;
+  account.value = next;
+  message.value = '旧凭证和登录会话已失效，新凭证待发放。';
+  if (next.account_id === props.profile.account_id) window.dispatchEvent(new Event('hongyan-session-expired'));
+}
+
 function validity(grant: RoleGrant) {
   if (!grant.expires_at) return '长期有效';
   return (Date.parse(grant.expires_at) <= now.value ? '已到期 · ' : '有效至 ') + localDateTime(grant.expires_at) + '（北京时间）';
@@ -106,12 +114,14 @@ function saved(roles: AccountRoles, notice: string) {
       <header class="section-heading"><h2>{{ account.display_name }}</h2><span class="state-chip">{{ account.status === 'active' ? '启用' : '停用' }}</span></header>
       <dl>
         <dt>{{ account.student_id ? '学号' : '登录账号' }}</dt><dd>{{ account.username }}</dd>
-        <template v-if="account.credential_pending"><dt>初始凭证</dt><dd>待发放，暂不可登录</dd></template>
+        <template v-if="account.credential_pending"><dt>登录凭证</dt><dd>待发放，暂不可登录</dd></template>
         <dt>角色与有效期</dt>
         <dd><ul><li v-for="grant in roleState.roles" :key="grant.role"><strong>{{ labels[grant.role] }}</strong> · {{ validity(grant) }}</li></ul>
           <span v-if="!roleState.roles.length">无角色</span></dd>
       </dl>
       <p v-if="account.student_id">具备负责人资格不等于已加入某个活动。</p>
+      <CredentialResetForm v-if="!account.credential_pending" :key="'reset' + account.account_id + account.version"
+        :account="account" :self="account.account_id === profile.account_id" @saved="credentialReset" @reload="lookup" />
       <AccountStatusForm v-if="technical && !account.student_id" :key="account.account_id + account.version"
         :account="account" :self="account.account_id === profile.account_id" @saved="statusSaved" @reload="lookup" />
       <OrganizerGrantForm v-if="account.student_id && roleState.roles.some(g => g.role === 'student')

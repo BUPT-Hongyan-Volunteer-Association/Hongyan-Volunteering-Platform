@@ -1599,6 +1599,26 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
 
 
     });
+    await t.test('老师核对姓名学号并确认本人后重置，负责人旧窗口退出', async () => {
+      await teacher.goto(admin + '/manage/accounts');
+      await teacher.getByLabel('学生学号').fill('0000000002');
+      await button(teacher, '查询账号').click();
+      await button(teacher, '重置登录凭证').click();
+      await visible(teacher.getByText('重置登录凭证 · 甲负责人（0000000002）'));
+      const confirmed = teacher.getByLabel('我已人工核验申请人本人，并核对上述账号');
+      await teacher.getByLabel('重置原因').fill('本人申请重置');
+      assert.equal(await button(teacher, '确认重置').isDisabled(), true);
+      await confirmed.check();
+      await button(teacher, '确认重置').click();
+      await visible(teacher.getByText('旧凭证和登录会话已失效，新凭证待发放。'));
+      await visible(teacher.getByText('待发放，暂不可登录'));
+      await owner.reload();
+      await visible(button(owner, '登录'));
+      await owner.getByLabel('账号', { exact: true }).fill('0000000002');
+      await owner.getByLabel('当前密码').fill(password);
+      await button(owner, '登录').click();
+      await visible(owner.getByText('账号或密码不正确'));
+    });
   } finally {
     try {
       await browser?.close();

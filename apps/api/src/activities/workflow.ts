@@ -116,7 +116,7 @@ export function detail(row: LoadedActivity) {
 
 export type Tx = Prisma.TransactionClient;
 export type Reauthorize = () => Promise<Actor>;
-type AccountTarget = { accountId: string; checkAccess: (tx: Tx) => Promise<void> };
+type AccountTarget = { accountId: string; checkAccess: (tx: Tx, actor: Actor) => Promise<void> };
 export type Target =
   | AccountTarget
   | { activityId: string }
@@ -221,7 +221,7 @@ export class Workflow {
         return actor;
       };
       const actor = await reauthorize();
-      if (target && 'accountId' in target) await target.checkAccess(tx);
+      if (target && 'accountId' in target) await target.checkAccess(tx, actor);
       const cached = await tx.commandReceipt.findUnique({
         where: { account_id_method_path_key: identity },
       });

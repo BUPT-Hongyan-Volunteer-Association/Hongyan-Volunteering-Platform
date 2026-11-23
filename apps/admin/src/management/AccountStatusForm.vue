@@ -39,7 +39,7 @@ async function submit() {
     <fieldset :disabled="stale || busy">
       <legend>{{ action }}账号 · {{ account.display_name }}（{{ account.username }}）</legend>
       <p v-if="disabling">{{ self ? '你当前的会话也将退出。' : '' }}停用将撤销该账号的全部登录会话，角色和历史记录保留。</p>
-      <p v-else>{{ account.credential_pending ? '该账号仍待发放初始凭证，启用后暂不可登录。' : '启用后需重新登录，原来的会话继续失效。' }}</p>
+      <p v-else>{{ account.credential_pending ? '该账号仍待发放登录凭证，启用后暂不可登录。' : '启用后需重新登录，原来的会话继续失效。' }}</p>
       <label>办理原因<textarea v-model="reason" required rows="2" maxlength="2000" /></label>
       <div class="page-actions">
         <button class="primary" :disabled="!reason.trim()">{{ busy ? '正在办理…' : '确认' + action }}</button>

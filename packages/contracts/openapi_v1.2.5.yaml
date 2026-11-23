@@ -11829,7 +11829,7 @@ components:
           - inactive
         credential_pending:
           type: boolean
-          description: 尚未发放初始凭证时为 true，此时无法登录。
+          description: 初始凭证或重置后的新凭证待发放时为 true，此时无法登录。
         roles:
           type: array
           items:

@@ -12,6 +12,7 @@ import { browser } from './api-client.mjs';
 test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持一致', async (t) => {
   const staffPassword = randomUUID();
   const adminPassword = randomUUID();
+  const ownerPassword = 't1' + randomUUID();
   await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: staffPassword, DEMO_ADMIN_PASSWORD: adminPassword });
   let app;
   try {
@@ -22,7 +23,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     const [student, owner, other, teacher] = Array.from({ length: 4 }, () => browser(base));
     await Promise.all([
       student.signIn('0000000001', '000001', 't1' + randomUUID()),
-      owner.signIn('0000000002', '000002', 't1' + randomUUID()),
+      owner.signIn('0000000002', '000002', ownerPassword),
       other.signIn('0000000003', '000003', 't1' + randomUUID()),
       teacher.signIn('demo.teacher', staffPassword),
     ]);
@@ -836,6 +837,62 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.deepEqual(events[0].after, {roles:body.roles});
       await db.roleGrant.create({data:{account_id, role:'reviewer'}});
       assert.equal((await put(body, key)).status, 403);
+    });
+    await t.test('老师核验后重置普通负责人凭证，旧密码和全部会话作废', async () => {
+      const second = browser(base), admin = browser(base);
+      await second.signIn('0000000002', ownerPassword);
+      await admin.signIn('demo.admin', adminPassword);
+      const id = (await owner.request('/me')).data.account_id;
+      const path = '/admin/accounts/' + id;
+      const before = (await teacher.request(path)).data;
+      const body = { expected_version: before.version, reason: '本人申请找回凭证' };
+      const reset = (actor, data, key) => actor.write('POST', path + '/password-reset', data, key);
+      assert.equal((await reset(owner, body)).status, 403);
+      assert.equal((await reset(teacher, { ...body, reason: ' ' })).status, 422);
+      assert.equal((await reset(teacher, { ...body, expected_version: before.version + 1 })).code, 'version_conflict');
+      const key = randomUUID();
+      const results = await Promise.all([reset(teacher, body, key), reset(teacher, body, key)]);
+      assert.equal(results[0].status, 200);
+      assert.deepEqual(results[0], results[1]);
+      assert.deepEqual(results[0].data, { completed: true, resource_id: id, version: before.version + 1 });
+      assert.deepEqual((await teacher.request(path)).data, { ...before, credential_pending: true, version: before.version + 1 });
+      assert.equal((await owner.request('/me')).status, 401);
+      assert.equal((await second.request('/me')).status, 401);
+      await second.request('/auth/csrf');
+      for (const secret of [ownerPassword, '000002'])
+        assert.equal((await second.request('/auth/login', { method: 'POST', body: { username: '0000000002', password: secret } })).status, 401);
+      const events = await db.auditEvent.findMany({ where: { resource_id: id, action: 'reset_password' } });
+      assert.equal(events.length, 1);
+      assert.equal(events[0].reason, body.reason);
+      assert.equal(events[0].actor_id, (await teacher.request('/me')).data.account_id);
+      assert.deepEqual(events[0].before, { version: before.version, credential_pending: false });
+      assert.deepEqual(events[0].after, { version: before.version + 1, credential_pending: true });
+      await db.roleGrant.create({ data: { account_id: id, role: 'reviewer', expires_at: new Date(0) } });
+      assert.equal((await reset(teacher, body, key)).status, 403);
+      const teacherId = (await teacher.request('/me')).data.account_id;
+      const staffPath = '/admin/accounts/' + teacherId;
+      const staffBody = { expected_version: (await admin.request(staffPath)).data.version, reason: '老师本人申请' };
+      assert.equal((await teacher.write('POST', staffPath + '/password-reset', staffBody)).status, 403);
+      assert.equal((await admin.write('POST', staffPath + '/password-reset', staffBody)).status, 200);
+      assert.equal((await teacher.request('/me')).status, 401);
+    });
+    await t.test('重置与停用并发仍保留一个可用永久管理员', async () => {
+      const primary = browser(base), backup = browser(base);
+      await primary.signIn('demo.admin', adminPassword);
+      await backup.signIn('demo.dual', staffPassword);
+      const id = (await primary.request('/me')).data.account_id;
+      const otherId = (await backup.request('/me')).data.account_id;
+      const path = '/admin/accounts/' + id, otherPath = '/admin/accounts/' + otherId;
+      const body = { expected_version: (await primary.request(path)).data.version, reason: '核对管理员凭证' };
+      assert.equal((await primary.write('POST', path + '/password-reset', body)).code, 'invalid_state');
+      assert.equal((await primary.request('/me')).status, 200);
+      await db.roleGrant.update({ where: { account_id_role: { account_id: otherId, role: 'tech_admin' } }, data: { expires_at: null } });
+      const change = { status: 'inactive', expected_version: (await backup.request(otherPath)).data.version, reason: '管理员轮岗' };
+      const results = await Promise.all([primary.write('POST', path + '/password-reset', body), backup.write('PATCH', otherPath, change)]);
+      assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
+      const clients = [primary, backup];
+      for (const [i, result] of results.entries())
+        assert.equal((await clients[i].request('/me')).status, result.status === 200 ? 401 : 200);
     });
   } finally {
     await app?.close();

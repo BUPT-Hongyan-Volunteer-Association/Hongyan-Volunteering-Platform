@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
-import type { AccountStatusPatch, RoleReplacement, StaffAccountInput } from '@hongyan/contracts/types';
+import { Body, Controller, Get, Header, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import type { AccountStatusPatch, ReasonAction, RoleReplacement, StaffAccountInput } from '@hongyan/contracts/types';
 import { checkVersion, Workflow, type Tx } from '../activities/workflow.js';
 import { validate } from '../activities/validation.js';
 import { audit } from '../audit.js';
@@ -119,6 +119,31 @@ export class AdminAccountsController {
         resource_id: id, reason, before: { status: row.active ? 'active' : 'inactive', version: row.version },
         after: { status: input.status, version: next.version } });
       return summary(next);
+    });
+  }
+
+  @Post(':id/password-reset')
+  @HttpCode(200)
+  resetPassword(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    const checkAccess = async (tx: Tx, actor: Actor) => {
+      const visible = await tx.account.count({ where: { id, ...scope(actor) } });
+      if (!visible) return actor.roles.includes('tech_admin') ? invisible() : denied();
+    };
+    return this.workflow.run(req, { accountId: id, checkAccess }, 'review', async (tx, _row, actor) => {
+      const input = validate<ReasonAction>('reason_action', body);
+      const reason = input.reason.trim();
+      if (!reason) invalid('reason', '请填写核验后的重置原因');
+      const account = await tx.account.findUniqueOrThrow({ where: { id }, select: { version: true, password_hash: true } });
+      checkVersion(account.version, input.expected_version);
+      if (account.password_hash === null)
+        throw new BusinessError(409, 'invalid_state', '该账号的凭证已待发放，请重新核对');
+      const { version } = await tx.account.update({ where: { id },
+        data: { password_hash: null, must_change_password: true, version: { increment: 1 } }, select: { version: true } });
+      await requirePermanentAdmin(tx);
+      await tx.httpSession.deleteMany({ where: { account_id: id } });
+      await audit(tx, { actor_id: actor.account_id, action: 'reset_password', resource_type: 'account', resource_id: id,
+        reason, before: { credential_pending: false, version: account.version }, after: { credential_pending: true, version } });
+      return { completed: true, resource_id: id, version };
     });
   }
 
