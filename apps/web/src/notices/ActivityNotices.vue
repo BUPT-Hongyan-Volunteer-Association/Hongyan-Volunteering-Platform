@@ -30,8 +30,9 @@ const {
   error,
   refresh,
 } = usePageRead(
-  () => [activityId.value, item.value, page.value].join('/'),
+  () => compose.value ? '' : [activityId.value, item.value, page.value].join('/'),
   async (signal) => {
+    if (compose.value) return;
     const path = { id: activityId.value },
       id = item.value;
     const { data } = await listActivityNotices({
@@ -124,13 +125,13 @@ async function reloadReceipts() {
             v-for="row in listing.page.items"
             :key="row.id"
             :aria-current="row.id === item ? 'true' : undefined"
-            :to="{ path: '/managed/' + activityId + '/notices/' + row.id, query: listQuery }"
+            :to="{ path: listPath + '/' + row.id, query: listQuery }"
           >
             <div>
               <strong>{{ row.title }}</strong>
               <div class="meta-line">
                 {{ localDateTime(row.published_at) }} 发布 · 第 {{ row.information_version }} 版 ·
-                接收 {{ row.recipient_count ?? 0 }} 人
+                接收 {{ row.recipient_count }} 人
               </div>
             </div>
             <span class="state-chip">{{ row.is_current ? '当前有效' : '已被替代' }}</span>
@@ -145,7 +146,7 @@ async function reloadReceipts() {
           @change="
             (n) =>
               $router.push({
-                path: '/managed/' + activityId + '/notices',
+                path: listPath,
                 query: { ...listQuery, notice_page: n },
               })
           "
@@ -155,7 +156,7 @@ async function reloadReceipts() {
       <template #detail>
         <RouterLink
           class="back-link"
-          :to="{ path: '/managed/' + activityId + '/notices', query: listQuery }"
+          :to="{ path: listPath, query: listQuery }"
         >
           <UiIcon name="ArrowLeft" />返回通知列表
         </RouterLink>

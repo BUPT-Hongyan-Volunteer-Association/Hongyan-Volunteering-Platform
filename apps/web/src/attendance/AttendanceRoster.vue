@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { listActivityRegistrations } from '@hongyan/contracts';
+import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
+import { listActivityRegistrations, type Registration } from '@hongyan/contracts';
 import { usePageRead } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 
@@ -19,8 +20,8 @@ const { data: result, error, refresh } = usePageRead(query, async (signal) =>
   })).data.data, () => emit('denied'));
 defineExpose({ refresh });
 const items = computed(() => result.value?.items ?? []);
-const eligible = computed(() => items.value.filter((row) =>
-  !props.forNotice || ['submitted', 'waitlisted', 'accepted'].includes(row.status)));
+const canSelect = (row: Registration) => !props.forNotice || activeRegistrationStatuses.includes(row.status);
+const eligible = computed(() => items.value.filter(canSelect));
 const allSelected = computed(() => eligible.value.length > 0 && eligible.value.every((r) => selected.value.has(r.student_id)));
 
 function find() {
@@ -75,7 +76,7 @@ function toggle(ids: string[], event: Event) {
       选择本页
     </label>
     <label v-for="row in items" :key="row.student_id">
-      <input type="checkbox" :disabled="!eligible.includes(row) && !selected.has(row.student_id)" :checked="selected.has(row.student_id)" @change="toggle([row.student_id], $event)" />
+      <input type="checkbox" :disabled="!canSelect(row) && !selected.has(row.student_id)" :checked="selected.has(row.student_id)" @change="toggle([row.student_id], $event)" />
       <span>{{ row.student_name }} <small>{{ row.student_no }}</small></span>
     </label>
   </div>

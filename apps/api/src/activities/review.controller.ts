@@ -10,6 +10,7 @@ import {
   Req,
 } from '@nestjs/common';
 import type { ActivityReview } from '../generated/prisma/client.js';
+import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
 import type { ReviewDecision } from '@hongyan/contracts/types';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
@@ -164,7 +165,7 @@ export class ReviewController {
           .filter((k) => notifiedFields.has(k.split('.')[0]));
         if (changed_fields.length) {
           const recipients = await tx.registration.findMany({
-            where: { activity_id: row.id, status: { in: ['submitted', 'waitlisted', 'accepted'] } },
+            where: { activity_id: row.id, status: { in: activeRegistrationStatuses } },
             select: { student_id: true },
           });
           await tx.activityChangeEvent.createMany({

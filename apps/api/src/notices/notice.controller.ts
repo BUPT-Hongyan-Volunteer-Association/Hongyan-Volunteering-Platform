@@ -16,6 +16,7 @@ import type {
   ReasonAction,
   ReceiptPage,
 } from '@hongyan/contracts/types';
+import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
 import type { Prisma } from '../generated/prisma/client.js';
 import { Database } from '../database.js';
 import { BusinessError, denied, envelope, invalid, invisible } from '../http.js';
@@ -35,7 +36,6 @@ const noticeKinds = [
   'other',
 ];
 const attendanceKinds = ['change', 'gathering'];
-const activeStatuses = ['submitted', 'waitlisted', 'accepted'];
 const snapshot = { isolationLevel: 'RepeatableRead' } as const;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Filters = Record<string, string>;
@@ -92,7 +92,7 @@ export class NoticeController {
         requires_ack: true,
         OR: [
           { notice_kind: { notIn: attendanceKinds } },
-          { activity: { registrations: { some: { student_id, status: { in: activeStatuses } } } } },
+          { activity: { registrations: { some: { student_id, status: { in: activeRegistrationStatuses } } } } },
         ],
       },
     };
@@ -173,7 +173,7 @@ export class NoticeController {
       const recipients = await tx.registration.findMany({
         where: {
           activity_id,
-          status: input.recipient_mode === 'accepted' ? 'accepted' : { in: activeStatuses },
+          status: input.recipient_mode === 'accepted' ? 'accepted' : { in: activeRegistrationStatuses },
           ...(named && { student_id: { in: selected } }),
         },
         select: { student_id: true },
@@ -262,7 +262,7 @@ export class NoticeController {
           attendanceKinds.includes(notice.notice_kind) && {
             student: {
               registrations: {
-                some: { activity_id: notice.activity_id, status: { in: activeStatuses } },
+                some: { activity_id: notice.activity_id, status: { in: activeRegistrationStatuses } },
               },
             },
           }),

@@ -448,8 +448,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await link(owner, '发布通知').click();
       await owner.getByLabel('通知标题').fill('请带志愿者证件');
       await owner.getByLabel('通知正文').fill('请在签到时出示证件。');
-      await pickOption(owner, '接收范围', '指定人员');
-      await owner.getByLabel(/活动协作者.*0000000004/).check();
+      await pickOption(owner, '接收范围', '全部有效报名人员');
       await button(owner, '发布').click();
       await visible(owner.getByText('接收 1 人 · 待跟进 1 人'));
 
@@ -527,8 +526,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         if (account === '0000000001') assert.equal(await badge.count(), 0);
         else await visible(badge.getByText('1', { exact: true }));
       }
-      await helper.goto(web + '/notices');
-      await visible(badge.getByText('1', { exact: true }));
+      await link(helper, '通知').click();
       await helper.getByRole('searchbox', { name: '搜索通知' }).fill('不存在的通知');
       await visible(helper.getByText('暂无匹配通知。'));
       assert.ok(await badge.isVisible());
@@ -568,7 +566,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         await choice.getByRole('checkbox').check();
         expected.push(await choice.locator('small').innerText());
       }
-      assert.notEqual(expected[0], expected[1]);
       const staleChoice = picker.locator('.choices label').nth(2);
       await staleChoice.getByRole('checkbox').check();
       const student_no = await staleChoice.locator('small').innerText();

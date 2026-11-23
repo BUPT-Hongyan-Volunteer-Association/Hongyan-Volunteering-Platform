@@ -64,7 +64,7 @@ const crumb = computed(() => {
             :aria-current="isCurrent(item.to) ? 'page' : undefined"
           >
             <UiIcon :name="item.icon" /><span>{{ item.label }}</span>
-            <NoticeBadge v-if="item.to === '/notices'" :key="profile.account_id" />
+            <NoticeBadge v-if="item.to === '/notices'" />
           </RouterLink>
           <RouterLink
             v-if="canManage(profile)"
