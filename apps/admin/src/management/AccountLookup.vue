@@ -3,7 +3,7 @@ import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ApiError, getAccount, getAccountRoles, listAccounts, type AccountSummary, type AccountRoles, type Profile, type RoleGrant } from '@hongyan/contracts';
 import { localDateTime } from '@hongyan/ui/activityDisplay';
-import OrganizerGrantForm from './OrganizerGrantForm.vue';
+import AccountRoleForm from './AccountRoleForm.vue';
 
 import CredentialResetForm from './CredentialResetForm.vue';
 import AccountStatusForm from './AccountStatusForm.vue';
@@ -13,6 +13,7 @@ const props = defineProps<{ profile: Profile }>();
 const technical = computed(() => props.profile.roles.includes('tech_admin'));
 const route = useRoute();
 const number = ref('');
+const managedRole = ref<'organizer' | 'reviewer' | 'tech_admin'>('organizer');
 const account = ref<AccountSummary>();
 const roleState = ref<AccountRoles>();
 const now = ref(Date.now());
@@ -28,6 +29,7 @@ function reset() {
   serial++;
   account.value = undefined;
   roleState.value = undefined;
+  managedRole.value = 'organizer';
   message.value = '';
   busy.value = false;
 }
@@ -50,6 +52,11 @@ async function lookup() {
     if (serial !== current) return;
     roleState.value = roles;
     account.value = match;
+    if (technical.value && roles) {
+      const assigned = roles.roles.map(grant => grant.role);
+      if (assigned.includes('tech_admin')) managedRole.value = 'tech_admin';
+      else if (assigned.includes('reviewer')) managedRole.value = 'reviewer';
+    }
     if (!match) message.value = technical.value ? '没有找到匹配的登录账号。' : '没有找到可查看的账号，请核对学号。';
   } catch (error) {
     if (serial !== current) return;
@@ -87,9 +94,10 @@ function validity(grant: RoleGrant) {
 }
 
 function saved(roles: AccountRoles, notice: string) {
-  if (account.value?.account_id !== roles.account_id) return;
+  if (account.value?.account_id !== roles.account_id || (roleState.value && roleState.value.version > roles.version)) return;
   roleState.value = roles;
   message.value = notice;
+  if (roles.account_id === props.profile.account_id) window.dispatchEvent(new Event('hongyan-roles-changed'));
 }
 </script>
 
@@ -124,9 +132,13 @@ function saved(roles: AccountRoles, notice: string) {
         :account="account" :self="account.account_id === profile.account_id" @saved="credentialReset" @reload="lookup" />
       <AccountStatusForm v-if="technical && !account.student_id" :key="account.account_id + account.version"
         :account="account" :self="account.account_id === profile.account_id" @saved="statusSaved" @reload="lookup" />
-      <OrganizerGrantForm v-if="account.student_id && roleState.roles.some(g => g.role === 'student')
-        && !roleState.roles.some(g => g.role === 'reviewer' || g.role === 'tech_admin')"
-        :key="account.account_id" :account="account" :state="roleState" :now="now"
+      <label v-if="technical" class="role-choice">要办理的角色
+        <select v-model="managedRole"><option value="organizer">负责人</option><option value="reviewer">老师审核员</option><option value="tech_admin">技术管理员</option></select>
+      </label>
+      <AccountRoleForm v-if="technical || (account.student_id && roleState.roles.some(g => g.role === 'student')
+        && !roleState.roles.some(g => g.role === 'reviewer' || g.role === 'tech_admin'))"
+        :key="[account.account_id, roleState.version, managedRole].join('/')" :role="technical ? managedRole : 'organizer'"
+        :account="account" :state="roleState" :now="now"
         @saved="saved" @reload="lookup" />
     </section>
   </section>
@@ -134,6 +146,7 @@ function saved(roles: AccountRoles, notice: string) {
 
 <style scoped>
 .onboard { display:inline-block; margin-top:12px; }
+.role-choice { display:grid; gap:6px; max-width:20rem; margin:16px 0 8px; }
 .lookup { max-width: 48rem; }
 .lookup-form,.identity-card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:clamp(14px,3vw,24px); }
 .lookup-form label { font-weight:600; }

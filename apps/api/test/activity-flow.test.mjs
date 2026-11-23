@@ -838,6 +838,104 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       await db.roleGrant.create({data:{account_id, role:'reviewer'}});
       assert.equal((await put(body, key)).status, 403);
     });
+    await t.test('高权限授权按角色版本生效，老师原会话在到期和收回后立即恢复原范围', async (t) => {
+      const admin = browser(base);
+      await admin.signIn('demo.admin', adminPassword);
+      const adminId = (await admin.request('/me')).data.account_id;
+      const teacherId = (await teacher.request('/me')).data.account_id;
+      const target = '/admin/accounts/' + teacherId;
+      const path = target + '/roles';
+      const privileged = '/admin/accounts/' + adminId;
+      const original = (await admin.request(path)).data;
+      const accountVersion = (await admin.request(target)).data.version;
+      const now = Date.now(), expires_at = new Date(now + 120000).toISOString();
+      t.mock.timers.enable({ apis: ['Date'], now });
+      const body = { expected_version: original.version, reason: '临时技术值班',
+        roles: [...original.roles, { role: 'tech_admin', expires_at }] };
+      assert.equal((await teacher.write('PUT', path, body)).status, 403);
+      const key = randomUUID();
+      const issued = await admin.write('PUT', path, body, key);
+      assert.equal(issued.status, 200);
+      assert.deepEqual(await admin.write('PUT', path, body, key), issued);
+      assert.equal((await admin.write('PUT', path, body)).code, 'version_conflict');
+      assert.equal((await teacher.request(privileged)).status, 200);
+      t.mock.timers.setTime(Date.parse(expires_at));
+      assert.equal((await teacher.request(privileged)).status, 403);
+      assert.deepEqual((await teacher.request('/me')).data.roles, ['reviewer']);
+      const renew = { ...body, expected_version: issued.data.version, roles: [...original.roles, { role: 'tech_admin' }] };
+      assert.equal((await admin.write('PUT', path, renew)).status, 200);
+      assert.equal((await teacher.request(privileged)).status, 200);
+      const revoked = await admin.write('PUT', path, { ...body, roles: original.roles, expected_version: renew.expected_version + 1 });
+      assert.deepEqual(revoked.data, { ...original, version: original.version + 3 });
+      assert.equal((await teacher.request(privileged)).status, 403);
+      assert.equal((await admin.request(target)).data.version, accountVersion);
+      const events = await db.auditEvent.findMany({ where: { resource_id: teacherId, action: 'set_account_roles' } });
+      assert.equal(events.length, 3);
+      const issuedEvent = events.find(e => e.after.roles.some(g => g.expires_at === expires_at));
+      assert.equal(issuedEvent.actor_id, adminId);
+      assert.equal(issuedEvent.reason, body.reason);
+      assert.deepEqual(issuedEvent.before, { roles: original.roles });
+      assert.deepEqual(issuedEvent.after, { roles: body.roles });
+    });
+    await t.test('办理老师审核员角色时保留原学生身份和已到期的其他角色', async () => {
+      const admin = browser(base);
+      await admin.signIn('demo.admin', adminPassword);
+      const path = '/admin/accounts/' + (await other.request('/me')).data.account_id + '/roles';
+      const original = (await admin.request(path)).data;
+      const set = (version, roles) => admin.write('PUT', path, { expected_version: version, roles, reason: '审核轮岗' });
+      assert.equal((await set(original.version, [{ role: 'reviewer' }])).status, 403);
+      const updated = await set(original.version, [...original.roles, { role: 'reviewer' }]);
+      assert.equal(updated.status, 200);
+      assert.equal((await other.request('/admin/accounts')).status, 200);
+      assert.equal((await other.request('/me/hours')).status, 200);
+      const restored = await set(updated.data.version, original.roles);
+      assert.deepEqual(restored.data.roles, original.roles);
+      assert.equal((await other.request('/admin/accounts')).status, 403);
+    });
+    await t.test('限期、撤权和停用并发时保留一个长期管理员，失败的写入不改变角色或状态', async () => {
+      const admin = browser(base);
+      await admin.signIn('demo.admin', adminPassword);
+      const primary = '/admin/accounts/' + (await admin.request('/me')).data.account_id;
+      const backup = '/admin/accounts/' + (await teacher.request('/me')).data.account_id;
+      const expires_at = new Date(Date.now() + 86400000).toISOString();
+      const set = (client, path, version, roles) => client.write('PUT', path + '/roles', {
+        expected_version: version, reason: '管理员轮值', roles,
+      });
+      const state = async path => (await admin.request(path + '/roles')).data;
+      const primaryRoles = (await state(primary)).roles;
+      const backupRoles = (await state(backup)).roles;
+      const limited = primaryRoles.map(g => g.role === 'tech_admin' ? { ...g, expires_at } : g);
+      const sole = await state(primary);
+      assert.equal((await set(admin, primary, sole.version, sole.roles.filter(g => g.role !== 'tech_admin'))).code, 'invalid_state');
+      assert.deepEqual(await state(primary), sole);
+      for (const operation of ['revoke', 'disable']) {
+        const original = await state(backup);
+        const granted = await set(admin, backup, original.version, [...backupRoles, { role: 'tech_admin' }]);
+        assert.equal(granted.status, 200);
+        const primaryVersion = (await state(primary)).version;
+        const accountVersion = (await admin.request(backup)).data.version;
+        const results = await Promise.all([
+          set(admin, primary, primaryVersion, limited),
+          operation === 'revoke' ? set(teacher, backup, granted.data.version, backupRoles)
+            : teacher.write('PATCH', backup, { expected_version: accountVersion, status: 'inactive', reason: '值班交接' }),
+        ]);
+        assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
+        assert.equal(results.find(r => r.status === 409).code, 'invalid_state');
+        const primaryWon = results[0].status === 200;
+        assert.deepEqual((await state(primary)).roles, primaryWon ? limited : primaryRoles);
+        const backupState = await state(backup);
+        assert.deepEqual(backupState.roles, !primaryWon && operation === 'revoke' ? backupRoles : granted.data.roles);
+        assert.equal((await admin.request(backup)).data.status, !primaryWon && operation === 'disable' ? 'inactive' : 'active');
+        if (primaryWon) assert.equal((await set(admin, primary, primaryVersion + 1, primaryRoles)).status, 200);
+        if (!primaryWon && operation === 'disable') {
+          assert.equal((await admin.write('PATCH', backup, {
+            expected_version: accountVersion + 1, status: 'active', reason: '恢复履职',
+          })).status, 200);
+          await teacher.signIn('demo.teacher', staffPassword);
+        }
+        assert.equal((await set(admin, backup, backupState.version, backupRoles)).status, 200);
+      }
+    });
     await t.test('老师核验后重置普通负责人凭证，旧密码和全部会话作废', async () => {
       const second = browser(base), admin = browser(base);
       await second.signIn('0000000002', ownerPassword);

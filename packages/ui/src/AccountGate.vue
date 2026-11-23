@@ -94,11 +94,13 @@ async function refreshIdentity() {
 }
 onMounted(() => {
   window.addEventListener('focus', refreshIdentity);
+  window.addEventListener('hongyan-roles-changed', refreshIdentity);
   window.addEventListener('hongyan-session-expired', expired);
   void restore();
 });
 onUnmounted(() => {
   window.removeEventListener('focus', refreshIdentity);
+  window.removeEventListener('hongyan-roles-changed', refreshIdentity);
   window.removeEventListener('hongyan-session-expired', expired);
 });
 </script>

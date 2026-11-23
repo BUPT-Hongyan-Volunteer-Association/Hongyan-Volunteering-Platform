@@ -155,37 +155,44 @@ export class AdminAccountsController {
   }
 
   @Put(':id/roles')
-  async changeOrganizer(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
-    const checkAccess = async (tx: Tx) => {
-      const eligible = await tx.account.findFirst({ where: {
-        id, student: { isNot: null }, roles: { some: { role: 'student' }, none: { role: { in: ['reviewer', 'tech_admin'] } } },
-      }, select: { id: true } });
-      if (!eligible) denied();
+  async setRoles(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    let row: Row, input: RoleReplacement;
+    const checkAccess = async (tx: Tx, actor: Actor) => {
+      const technical = actor.roles.includes('tech_admin');
+      const target = await tx.account.findFirst({ where: { id, ...scope(actor) }, select: fields });
+      if (!target) return technical ? invisible() : denied();
+      row = target;
+      input = validate<RoleReplacement>('role_replacement', body);
+      const student = row.roles.find(g => g.role === 'student');
+      const requestedStudent = input.roles.find(g => g.role === 'student');
+      if (!technical && (!student || input.roles.some(g => g.role !== 'student' && g.role !== 'organizer'))) denied();
+      // A role change must preserve the student's underlying identity.
+      if (row.student && student && (!requestedStudent ||
+        (student.expires_at?.getTime() ?? null) !== (requestedStudent.expires_at ? Date.parse(requestedStudent.expires_at) : null))) denied();
+      if (!row.student && requestedStudent && !student) invalid('roles', '学生身份须关联学生档案');
     };
     return this.workflow.run(req, { accountId: id, checkAccess }, 'review', async (tx, _activity, actor) => {
-      const input = validate<RoleReplacement>('role_replacement', body);
       const reason = input.reason.trim();
       if (!reason) invalid('reason', '请填写办理原因');
       if (new Set(input.roles.map(grant => grant.role)).size !== input.roles.length)
         invalid('roles', '同一角色不能重复');
-      const row = await tx.account.findUniqueOrThrow({ where: { id }, select: fields });
       checkVersion(row.roles_version, input.expected_version);
       const before = grants(row);
-      const student = input.roles.find(grant => grant.role === 'student');
-      const unchanged = before.find(grant => grant.role === 'student')!;
-      if (!student || (student.expires_at ? new Date(student.expires_at).toISOString() : undefined) !== unchanged.expires_at
-        || input.roles.some(grant => grant.role !== 'student' && grant.role !== 'organizer')) denied();
-      const next = input.roles.find(grant => grant.role === 'organizer');
-      const current = before.find(grant => grant.role === 'organizer');
-      const expiry = next?.expires_at ? new Date(next.expires_at) : null;
-      if (expiry && expiry.getTime() <= Date.now()) invalid('roles', '到期时间必须晚于当前时间');
-      if (!!current === !!next && current?.expires_at === expiry?.toISOString())
-        return { account_id: id, version: row.roles_version, roles: before };
-      if (next) await tx.roleGrant.upsert({
-        where: { account_id_role: { account_id: id, role: 'organizer' } },
-        create: { account_id: id, role: 'organizer', expires_at: expiry }, update: { expires_at: expiry },
+      const removed = before.filter(g => !input.roles.some(next => next.role === g.role)).map(g => g.role);
+      const changed = input.roles.map(g => ({ role: g.role, expires_at: g.expires_at ? new Date(g.expires_at) : null }))
+        .filter(g => {
+          const previous = row.roles.find(old => old.role === g.role);
+          return !previous || previous.expires_at?.getTime() !== g.expires_at?.getTime();
+        });
+      if (!removed.length && !changed.length) return { account_id: id, version: row.roles_version, roles: before };
+      if (changed.some(g => g.expires_at && g.expires_at.getTime() <= Date.now()))
+        invalid('roles', '到期时间必须晚于当前时间');
+      if (removed.length) await tx.roleGrant.deleteMany({ where: { account_id: id, role: { in: removed } } });
+      for (const grant of changed) await tx.roleGrant.upsert({
+        where: { account_id_role: { account_id: id, role: grant.role } },
+        create: { account_id: id, ...grant }, update: { expires_at: grant.expires_at },
       });
-      else await tx.roleGrant.delete({ where: { account_id_role: { account_id: id, role: 'organizer' } } });
+      if (removed.includes('tech_admin') || changed.some(g => g.role === 'tech_admin')) await requirePermanentAdmin(tx);
       const updated = await tx.account.update({ where: { id }, data: { roles_version: { increment: 1 } }, select: fields });
       const after = grants(updated);
       await audit(tx, { actor_id: actor.account_id, resource_type: 'account', resource_id: id,

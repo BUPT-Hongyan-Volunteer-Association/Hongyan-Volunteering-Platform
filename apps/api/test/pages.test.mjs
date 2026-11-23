@@ -519,6 +519,43 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await button(tech, '查询账号').click();
       await visible(tech.getByRole('heading', { name: '合成教师' }));
     });
+    await t.test('管理员办理限期技术角色、收回授权，并看到最后一名长期管理员保护提示', async () => {
+      await tech.goto(admin + '/manage/accounts');
+      await teacher.goto(admin + '/manage/accounts');
+      const lookup = async username => {
+        await tech.getByLabel('登录账号', { exact: true }).fill(username);
+        await button(tech, '查询账号').click();
+        await tech.getByLabel('要办理的角色').selectOption('tech_admin');
+      };
+      await lookup('demo.teacher');
+      await button(tech, '授予技术管理员角色').click();
+      await visible(tech.getByText('长期授权没有到期日。', { exact: false }));
+      await tech.getByLabel('限期授权').check();
+      await tech.getByLabel('到期时间（北京时间）').fill('2099-12-31T12:00');
+      await tech.getByLabel('办理原因').fill('代班期间维护账号');
+      await button(tech, '保存技术管理员角色').click();
+      await visible(tech.getByText('技术管理员角色已保存。'));
+      await button(tech, '调整有效期').click();
+      assert.equal(await tech.getByLabel('到期时间（北京时间）').inputValue(), '2099-12-31T12:00');
+      await button(tech, '取消').click();
+      await teacher.reload();
+      await visible(teacher.getByText('创建后台账号', { exact: true }));
+      await button(tech, '收回技术管理员角色').click();
+      await tech.getByLabel('办理原因').fill('代班结束');
+      await button(tech, '确认收回技术管理员角色').click();
+      await visible(tech.getByText('技术管理员角色已收回。'));
+      await teacher.reload();
+      await visible(teacher.getByLabel('学生学号'));
+      assert.equal(await teacher.getByText('创建后台账号', { exact: true }).count(), 0);
+      await lookup('demo.admin');
+      await button(tech, '调整有效期').click();
+      await tech.getByLabel('限期授权').check();
+      await tech.getByLabel('到期时间（北京时间）').fill('2099-12-31T12:00');
+      await tech.getByLabel('办理原因').fill('核对长期管理员保护');
+      await button(tech, '保存技术管理员角色').click();
+      await visible(tech.getByRole('alert').filter({ hasText: '须保留至少一个可登录' }));
+      await fits(tech);
+    });
     await t.test('技术管理员停启独立账号，老师原窗口需重新登录', async () => {
       const affected = await signIn(browser, admin, 'demo.dual', password, 390);
       await tech.goto(admin + '/manage/accounts');
