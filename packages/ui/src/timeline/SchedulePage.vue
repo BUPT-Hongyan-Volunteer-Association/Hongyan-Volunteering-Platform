@@ -1,14 +1,11 @@
 <script setup lang="ts">
-import { campuses, campusName } from '@hongyan/contracts/activity';
 import UiSelect from '../UiSelect.vue';
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
-  ApiError,
   getTimeline,
   type GetTimelineData,
   type TimelineActivity,
-  type TimelineActivityPage,
   type TimelineItem,
 } from '@hongyan/contracts';
 import UiIcon from '../UiIcon.vue';
@@ -23,11 +20,19 @@ import {
   timelineColors,
 } from '../activityDisplay';
 import { units, validDate, validUnit, dateWindow, shiftDate, windowLabel } from './window';
+import { createScheduleRange } from './scheduleRange';
+import {
+  campusOptionsFor,
+  ownerOptionsFor,
+  revisionOptions,
+  statusOptionsFor,
+  unitArrows,
+} from './scheduleOptions';
 import ScheduleDatePicker from './ScheduleDatePicker.vue';
 import TimelineChart from './TimelineChart.vue';
 
 type Query = GetTimelineData['query'];
-type LoadMode = 'initial' | 'more' | 'refresh';
+type LoadMode = 'initial' | 'refresh' | 'more' | 'retry';
 
 const props = defineProps<{ scope: Query['scope']; showPersonalScope?: boolean }>();
 const scopes = { public: '活动日程', mine: '活动日程', managed: '本人管理日程', all: '全院日程' };
@@ -35,18 +40,6 @@ const route = useRoute(),
   router = useRouter();
 const media = window.matchMedia('(max-width: 700px)');
 const mobile = ref(media.matches);
-const pages = shallowRef<TimelineActivityPage[]>([]);
-const rows = computed(() => pages.value.flatMap((page) => page.items));
-const lastPage = computed(() => pages.value.at(-1));
-const total = computed(() => lastPage.value?.total ?? 0);
-const hasMore = computed(() => {
-  const page = lastPage.value;
-  return !!page && page.page * page.page_size < page.total;
-});
-const evaluatedAt = computed(() => pages.value[0]?.state_evaluated_at ?? '');
-const loading = ref(false);
-const error = ref('');
-let retryMode: LoadMode = 'initial';
 const detailHeading = ref<HTMLElement>();
 const managed = computed(() => props.scope === 'managed' || props.scope === 'all');
 const revision = computed<'working' | 'published'>(() =>
@@ -64,13 +57,7 @@ const range = computed(() => dateWindow(date.value, unit.value));
 const start = computed(() => range.value.start),
   end = computed(() => range.value.end);
 const periodLabel = computed(() => windowLabel(start.value, end.value, unit.value));
-const arrows = computed(() =>
-  unit.value === 'week'
-    ? ['上一周', '下一周']
-    : unit.value === 'month'
-      ? ['上个月', '下个月']
-      : ['前一天', '后一天'],
-);
+const arrows = computed(() => unitArrows(unit.value));
 const shift = (direction: number) => set('date', shiftDate(date.value, unit.value, direction));
 const filterCount = computed(
   () =>
@@ -83,67 +70,6 @@ const filterCount = computed(
       ...(managed.value ? ['owner', 'pending'] : []),
     ].filter((k) => route.query[k]).length,
 );
-const activity = computed(() => rows.value.find((r) => r.activity_id === route.query.item));
-const segment = computed(() =>
-  route.query.slot === undefined
-    ? activity.value?.segments[0]
-    : activity.value?.segments.find((s) => s.occurrence_key === route.query.slot),
-);
-const selected = computed(() => (segment.value ? activity.value : undefined));
-const selectionMessage = ref('');
-const fullMobileDetail = computed(
-  () => mobile.value && selected.value && route.query.detail !== 'summary',
-);
-const actionNotice = ref(
-  typeof window.history.state?.scheduleNotice === 'string'
-    ? window.history.state.scheduleNotice
-    : '',
-);
-if (actionNotice.value)
-  window.history.replaceState({ ...window.history.state, scheduleNotice: null }, '');
-function clearSelection() {
-  void router.replace({
-    query: { ...route.query, item: undefined, slot: undefined, detail: undefined },
-  });
-}
-function checkSelection() {
-  if (!route.query.item || selected.value) return;
-  selectionMessage.value =
-    route.query.slot !== undefined ? '所选时段已移出当前窗口' : '所选活动已移出当前筛选。';
-  clearSelection();
-}
-const revisionOptions = [
-  { value: 'working', label: '工作版本' },
-  { value: 'published', label: '获批版本' },
-];
-const availableStates = computed(() =>
-  Object.entries(statusLabels).filter(
-    ([key]) => managed.value || ['published', 'cancelled', 'completed'].includes(key),
-  ),
-);
-const statusOptions = computed(() => [
-  { value: '', label: '所有状态' },
-  ...availableStates.value.map(([value, label]) => ({ value, label })),
-]);
-const campusOptions = computed(() => {
-  const selected = String(route.query.campus || '');
-  const options = campuses.map((campus) => ({ value: campus, label: campus }));
-  // 保留筛选值：历史链接可能带旧简称，仍能显示并区分。
-  if (selected && !options.some((option) => option.value === selected))
-    options.unshift({ value: selected, label: campusName(selected) });
-  return [{ value: '', label: '所有校区' }, ...options];
-});
-const ownerOptions = computed(() => {
-  const selected = String(route.query.owner || '');
-  const options = (lastPage.value?.owner_options ?? []).map((owner) => ({
-    value: owner.account_id,
-    label: owner.display_name,
-  }));
-  // 服务端候选按授权范围独立取得，不随当前页或筛选收缩；已选值缺失时也保留。
-  if (selected && !options.some((option) => option.value === selected))
-    options.push({ value: selected, label: '所选负责人' });
-  return [{ value: '', label: '所有负责人' }, ...options];
-});
 const filterValue = (name: string) => String(route.query[name] ?? '') || undefined;
 const query = computed<Query>(() => ({
   scope: props.scope,
@@ -159,58 +85,148 @@ const query = computed<Query>(() => ({
   review_status: route.query.pending ? 'pending_review' : undefined,
 }));
 
-let request = 0;
-async function load(mode: LoadMode) {
-  // 新查询可替换旧请求。页面聚焦和定时刷新沿用正在进行的读取。
-  if (mode !== 'initial' && loading.value) return;
-  const current = ++request;
-  const params = query.value;
-  const readPage = async (page: number) => {
+// 查询以本轮开始时的条件为准；条件变化由代际截断旧轮，不会串到新条件上。
+const pageSize = 20;
+let readParams!: Query;
+let lastReadError = '';
+const readPage = async (page: number) => {
+  try {
     const { data } = await getTimeline({
-      query: { ...params, page, page_size: 20 },
+      query: { ...readParams, page, page_size: pageSize },
       throwOnError: true,
     });
     return data.data;
-  };
-  if (mode === 'initial') pages.value = [];
-  loading.value = true;
-  error.value = '';
-  let retry = mode;
-  try {
-    if (mode !== 'more') {
-      const numbers = pages.value.length ? pages.value.map((page) => page.page) : [1];
-      const updated = await Promise.all(numbers.map(readPage));
-      if (current !== request) return;
-      pages.value = updated.filter((page) => page.page === 1 || page.items.length > 0);
-    }
-    // “加载更多”追加一页。从详情返回时，找到选中活动即可停止。
-    let nextPageRequested = mode === 'more';
-    while (hasMore.value && (nextPageRequested || (route.query.item && !activity.value))) {
-      retry = 'more';
-      const next = await readPage(lastPage.value!.page + 1);
-      if (current !== request) return;
-      pages.value = [...pages.value, next];
-      nextPageRequested = false;
-    }
-    checkSelection();
   } catch (e) {
-    if (current !== request) return;
-    retryMode = retry;
-    if (e instanceof ApiError && e.status === 403) {
-      pages.value = [];
-      if (route.query.item) clearSelection();
-      error.value = '当前身份无权查看该日程范围，请重新登录或返回。';
-    } else if (pages.value.length) {
-      error.value = retry === 'more' ? '未能加载更多，请重试' : '状态待刷新，请重试';
-    } else {
-      error.value = e instanceof Error ? e.message : '读取活动日程失败';
+    lastReadError = e instanceof Error ? e.message : '读取活动日程失败';
+    throw e;
+  }
+};
+
+const schedule = createScheduleRange(readPage, {
+  maxInFlight: 3,
+  pageSize,
+  window: () => ({
+    from: new Date(start.value).toISOString(),
+    to: new Date(end.value).toISOString(),
+  }),
+  selection: () => ({
+    item: typeof route.query.item === 'string' ? route.query.item : undefined,
+    slot: typeof route.query.slot === 'string' ? route.query.slot : undefined,
+  }),
+});
+const pages = schedule.pages;
+const rows = schedule.rows;
+const total = schedule.total;
+const hasMore = schedule.hasMore;
+const evaluatedAt = schedule.evaluatedAt;
+const loading = schedule.running;
+const selection = schedule.selection;
+const lastPage = computed(() => pages.value.at(-1));
+const selected = computed(() =>
+  selection.value.kind === 'kept' ? selection.value.activity : undefined,
+);
+const segment = computed(() => (selection.value.kind === 'kept' ? selection.value.slot : undefined));
+const selectionMessage = ref('');
+const fullMobileDetail = computed(
+  () => mobile.value && selected.value && route.query.detail !== 'summary',
+);
+const actionNotice = ref(
+  typeof window.history.state?.scheduleNotice === 'string'
+    ? window.history.state.scheduleNotice
+    : '',
+);
+if (actionNotice.value)
+  window.history.replaceState({ ...window.history.state, scheduleNotice: null }, '');
+
+const statusOptions = computed(() => statusOptionsFor(managed.value));
+const campusOptions = computed(() => campusOptionsFor(String(route.query.campus || '')));
+const ownerOptions = computed(() =>
+  ownerOptionsFor(lastPage.value, String(route.query.owner || '')),
+);
+const error = ref('');
+let retryMode: LoadMode = 'initial';
+let lastMode: LoadMode = 'initial';
+let pendingRefresh = false;
+// 条件切换从发起到本轮结束都算读取中：旧结果仍留在画面上，但不再接受点击与加载更多。
+// 计数是响应式的：行按钮按它呈禁用态，与「加载更多」在读取中禁用一致。
+const switching = ref(0);
+
+function clearSelection() {
+  void router.replace({
+    query: { ...route.query, item: undefined, slot: undefined, detail: undefined },
+  });
+}
+
+/** 读取成功后才判选中失效：页面只按 kind 映射说明并清空 URL，不自己解析时段键。 */
+function applySelection() {
+  const state = selection.value;
+  if (state.kind === 'kept' || state.kind === 'none') return;
+  selectionMessage.value =
+    state.kind === 'window-moved'
+      ? '所选时段已移出当前窗口'
+      : state.kind === 'schedule-updated'
+        ? '所选时段已随安排更新失效，已回到日程。'
+        : '所选活动已移出当前筛选。';
+  clearSelection();
+}
+
+/** 选中活动不在已加载范围且还有更多页时，按 §1.6 补读到它或范围耗尽；一次挂载最多一次。 */
+let backfilled = false;
+function needsBackfill() {
+  const item = typeof route.query.item === 'string' ? route.query.item : undefined;
+  return !!item && !rows.value.some((row) => row.activity_id === item) && hasMore.value;
+}
+
+async function load(mode: LoadMode) {
+  if (mode !== 'initial' && (loading.value || switching.value > 0)) return;
+  readParams = { ...query.value };
+  if (mode !== 'retry') lastMode = mode;
+  if (mode === 'initial') switching.value += 1;
+  error.value = '';
+  let refreshAfter = false;
+  try {
+    let outcome = await schedule.run(mode === 'retry' ? { kind: 'retry' } : { kind: mode });
+    if (outcome.status === 'ok' && !backfilled && needsBackfill()) {
+      backfilled = true;
+      outcome = await schedule.run({ kind: 'focus', activityId: String(route.query.item) });
+    }
+    if (outcome.status === 'aborted') return;
+    if (outcome.status !== 'ok') {
+      retryMode = 'retry';
+      pendingRefresh = false;
+      if (outcome.status === 'unstable') {
+        error.value = pages.value.length ? '状态待刷新，请重试' : lastReadError || '读取活动日程失败';
+        return;
+      }
+      if (outcome.forbidden) {
+        if (route.query.item) clearSelection();
+        error.value = '当前身份无权查看该日程范围，请重新登录或返回。';
+      } else if (pages.value.length) {
+        error.value = lastMode === 'more' ? '未能加载更多，请重试' : '状态待刷新，请重试';
+      } else {
+        error.value = lastReadError;
+      }
+      return;
+    }
+    retryMode = 'initial';
+    applySelection();
+    if (pendingRefresh) {
+      pendingRefresh = false;
+      refreshAfter = true;
     }
   } finally {
-    if (current === request) loading.value = false;
+    if (mode === 'initial') switching.value -= 1;
   }
+  if (refreshAfter) void load('refresh');
 }
+
 const refresh = () => {
-  if (document.visibilityState === 'visible') void load('refresh');
+  if (document.visibilityState !== 'visible') return;
+  if (loading.value) {
+    pendingRefresh = true;
+    return;
+  }
+  void load('refresh');
 };
 let timer: number | undefined;
 const listQuery = computed(() => ({
@@ -229,6 +245,8 @@ function set(key: string, value: string) {
 const valueOf = (event: Event) => (event.target as HTMLInputElement).value;
 let opener: Element | null = null;
 async function choose(r: TimelineActivity, s: TimelineItem) {
+  // 切换条件期间旧行仍在画面上，但不能据此改地址栏（DESIGN.md「切换期间…禁止交互」）。
+  if (switching.value > 0) return;
   selectionMessage.value = '';
   opener = document.activeElement;
   await router.push({
@@ -270,9 +288,10 @@ watch(
   { immediate: true },
 );
 watch([() => route.query.item, () => route.query.slot], () => {
-  if (!route.query.item || selected.value || loading.value || error.value) return;
-  if (!activity.value && hasMore.value) void load('more');
-  else checkSelection();
+  if (!route.query.item || loading.value || error.value) return;
+  if (selection.value.kind === 'kept') return;
+  if (hasMore.value) void load('more');
+  else applySelection();
 });
 onMounted(() => {
   media.addEventListener('change', resized);
@@ -282,7 +301,7 @@ onMounted(() => {
   timer = window.setInterval(refresh, 60000);
 });
 onUnmounted(() => {
-  request++;
+  schedule.cancel();
   window.clearInterval(timer);
   media.removeEventListener('change', resized);
   window.removeEventListener('keydown', keydown);
@@ -506,7 +525,11 @@ onUnmounted(() => {
               :key="r.activity_id"
               :class="{ picked: r.activity_id === selected?.activity_id }"
             >
-              <button class="row-button" @click="choose(r, r.segments[0])">
+              <button
+                class="row-button"
+                :disabled="switching > 0"
+                @click="choose(r, r.segments[0])"
+              >
                 <i :style="{ background: timelineColors[r.color_index] }" />{{ r.title }}
               </button>
               <p class="meta-line">
@@ -519,6 +542,7 @@ onUnmounted(() => {
                   v-for="s in r.segments"
                   :key="s.occurrence_key"
                   class="compact"
+                  :disabled="switching > 0"
                   @click="choose(r, s)"
                 >
                   <UiIcon name="Clock" />{{ localTime(s.starts_at) }} – {{ localTime(s.ends_at) }}
@@ -841,6 +865,9 @@ onUnmounted(() => {
   font-size: 16px;
   font-weight: 650;
   color: var(--ink);
+}
+.schedule-list .row-button:disabled {
+  color: #647186;
 }
 .row-button i {
   width: 5px;

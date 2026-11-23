@@ -1,7 +1,94 @@
 const day = 86_400_000;
 
+export const atTime = (date, time) => date + 'T' + time + ':00+08:00';
+
 /**
- * 独立库里的日程演示数据：一项当天正在进行的活动，和一项跨两天、共三段的多时段活动。
+ * 独立编号前缀与独立日期窗口的日程数据集：同日同时段、按编号升序，正好 `count` 项。
+ * 一次写入活动、版本与负责人，深分页的 1001 项也能在数秒内就绪。
+ */
+export async function createScheduleDataset(
+  db,
+  { codePrefix, titlePrefix, date, count, ownerUsername = '0000000003' },
+) {
+  const source = await db.activity.findUniqueOrThrow({
+    where: { activity_code: 'P2026-0001' },
+    include: { revisions: true },
+  });
+  const template = source.revisions[0].content;
+  const owner = await db.account.findUniqueOrThrow({ where: { username: ownerUsername } });
+  const width = String(count).length;
+  const codes = Array.from(
+    { length: count },
+    (_, index) => codePrefix + String(index + 1).padStart(width, '0'),
+  );
+  const schedule = {
+    schedule_type: 'continuous',
+    starts_at: atTime(date, '10:00'),
+    ends_at: atTime(date, '12:00'),
+  };
+  await db.activity.createMany({
+    data: codes.map((activity_code) => ({
+      activity_code,
+      status: 'published',
+      working_revision: 1,
+      published_revision: 1,
+    })),
+  });
+  const rows = await db.activity.findMany({
+    where: { activity_code: { in: codes } },
+    select: { id: true, activity_code: true },
+  });
+  const ids = new Map(rows.map((row) => [row.activity_code, row.id]));
+  await db.activityRevision.createMany({
+    data: codes.map((code) => ({
+      activity_id: ids.get(code),
+      revision: 1,
+      revision_state: 'approved',
+      approved_at: new Date(),
+      created_by: owner.id,
+      content: { ...template, title: titlePrefix + ' ' + code.slice(codePrefix.length), schedule },
+    })),
+  });
+  await db.activityMember.createMany({
+    data: rows.map((row) => ({
+      activity_id: row.id,
+      account_id: owner.id,
+      member_role: 'owner',
+    })),
+  });
+  return { date, codePrefix, codes, count };
+}
+
+/** 报名关系预置：直接写关系表，绕开尚未合入的真实报名入口。 */
+export async function presetRegistration(db, { activityCode, studentNo, status }) {
+  const student = await db.student.findUniqueOrThrow({ where: { student_no: studentNo } });
+  const activity = await db.activity.findUniqueOrThrow({ where: { activity_code: activityCode } });
+  return db.registration.upsert({
+    where: { activity_id_student_id: { activity_id: activity.id, student_id: student.id } },
+    update: { status },
+    create: { activity_id: activity.id, student_id: student.id, status },
+  });
+}
+
+/** 交接预置：把负责人关系挂到单项活动上，或把它摘掉。 */
+export async function setActivityOwner(db, { activityCode, username, attached = true }) {
+  const account = await db.account.findUniqueOrThrow({ where: { username } });
+  const activity = await db.activity.findUniqueOrThrow({ where: { activity_code: activityCode } });
+  const key = { activity_id_account_id: { activity_id: activity.id, account_id: account.id } };
+  if (!attached)
+    return db.activityMember.deleteMany({
+      where: { activity_id: activity.id, account_id: account.id },
+    });
+  return db.activityMember.upsert({
+    where: key,
+    update: {},
+    create: { activity_id: activity.id, account_id: account.id, member_role: 'owner' },
+  });
+}
+
+/**
+ * 独立库里的日程演示数据：一项当天正在进行的活动、一项跨两天共三段的多时段活动，
+ * 以及 41 项分页演示数据（`TL-9201`–`TL-9241`，第 21 项归首位负责人）。
  * 日期按运行时刻推导，页面回归直接从返回值取窗口，不再依赖写死的示例日期。
  */
 export async function createScheduleDemo(db) {
