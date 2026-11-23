@@ -101,7 +101,6 @@ const {
       if (!signal.aborted) {
         readCommand.confirmed();
         notice = read.data.data;
-        void refreshList(false);
       }
     } catch (e) {
       if (!signal.aborted) {
@@ -134,7 +133,6 @@ async function ack(notice: Notice) {
     window.dispatchEvent(new Event('hongyan-notice-updated'));
     if (route.fullPath === origin) {
       feedback.value = '已确认收到，负责人可在回执里看到。';
-      await refreshList(false);
       if (item.value === notice.id) await refreshDetail(false);
     }
   } catch (e) {
@@ -170,10 +168,12 @@ const reloadInbox = () => void refreshList(false);
 onMounted(() => {
   window.addEventListener('focus', focus);
   window.addEventListener('hongyan-inbox-changed', reloadInbox);
+  window.addEventListener('hongyan-notice-updated', reloadInbox);
 });
 onUnmounted(() => {
   window.removeEventListener('focus', focus);
   window.removeEventListener('hongyan-inbox-changed', reloadInbox);
+  window.removeEventListener('hongyan-notice-updated', reloadInbox);
 });
 </script>
 

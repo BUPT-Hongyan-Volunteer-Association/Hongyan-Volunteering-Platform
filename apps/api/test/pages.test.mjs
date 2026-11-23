@@ -486,8 +486,25 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await notice.click();
       await visible(helper.getByText('已读未确认', { exact: true }));
       await visible(badge.getByText('1', { exact: true }));
-      await button(helper, '确认收到').click();
+      await link(helper, '返回通知').click();
+      await link(helper, '全部 2').click();
+      const releaseAck = Promise.withResolvers();
+      await helper.route('**/me/notices/*/ack', async route => {
+        await releaseAck.promise;
+        await route.continue();
+      }, { times: 1 });
+      try {
+        await button(helper, '确认收到').click();
+        await link(helper, '待确认 1').click();
+        await helper.locator('[aria-busy="false"]').waitFor();
+        await visible(notice);
+      } finally {
+        releaseAck.resolve();
+      }
       await badge.waitFor({ state: 'detached' });
+      await visible(link(helper, '待确认 0'));
+      await visible(helper.getByText('没有待确认的通知。'));
+      assert.equal(await button(helper, '确认收到').count(), 0);
       await button(owner, '刷新回执').click();
       await visible(owner.getByText('接收 1 人 · 待跟进 0 人'));
 
