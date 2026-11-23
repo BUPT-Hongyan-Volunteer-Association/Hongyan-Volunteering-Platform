@@ -146,7 +146,7 @@ export class Workflow {
     req: SessionRequest,
     target: Target,
     // 'self' 用于本人资源操作（如通知已读/确认），不做活动范围校验。
-    access: 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 'team',
+    access: 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 'team' | 'tech',
     execute: (tx: Tx, row: LoadedActivity | null, actor: Actor, reauthorize: Reauthorize) => Promise<unknown>,
     scope?: string,
     commandInput: unknown = req.body ?? {},
@@ -184,6 +184,8 @@ export class Workflow {
         row = await tx.activity.findUnique({ where: { id }, include: includeView });
         if (!row) invisible();
       }
+      if (access === 'tech' && !target)
+        await tx.$queryRaw`SELECT id FROM account WHERE id=${account_id}::uuid FOR UPDATE`;
       const reauthorize: Reauthorize = async () => {
         const now = new Date();
         const account = await tx.account.findFirst({
@@ -204,6 +206,7 @@ export class Workflow {
           invisible();
         if (access === 'self' && studentId(actor) !== account.student?.id) invisible();
         if (access === 'create' && !actor.roles.includes('organizer')) denied();
+        if (access === 'tech' && !actor.roles.includes('tech_admin')) denied();
         if (access === 'review' && !staff(actor)) denied();
         if (access === 'team' && (!row || !await tx.activity.count({
           where: { id: row.id, ...teamManagerScope(actor) },

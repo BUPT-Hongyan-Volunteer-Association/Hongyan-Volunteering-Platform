@@ -1,17 +1,17 @@
-import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Put, Query, Req, UseGuards } from '@nestjs/common';
-import type { RoleReplacement } from '@hongyan/contracts/types';
+import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import type { RoleReplacement, StaffAccountInput } from '@hongyan/contracts/types';
 import { checkVersion, Workflow, type Tx } from '../activities/workflow.js';
 import { validate } from '../activities/validation.js';
 import { audit } from '../audit.js';
 import { Prisma, Role } from '../generated/prisma/client.js';
 import { pagination } from '../activities/read.js';
 import { Database } from '../database.js';
-import { denied, envelope, invalid, invisible } from '../http.js';
+import { BusinessError, denied, envelope, invalid, invisible } from '../http.js';
 import { StaffGuard } from '../students/staff.guard.js';
 import type { Actor, SessionRequest } from './session.guard.js';
 
 const fields = {
-  id: true, username: true, display_name: true, active: true, version: true, roles_version: true,
+  id: true, username: true, password_hash: true, display_name: true, active: true, version: true, roles_version: true,
   student: { select: { id: true } },
   roles: { select: { role: true, expires_at: true }, orderBy: { role: 'asc' } },
 } satisfies Prisma.AccountSelect;
@@ -34,7 +34,7 @@ function summary(row: Row) {
   return {
     account_id: row.id, version: row.version, username: row.username, display_name: row.display_name,
     status: row.active ? 'active' : 'inactive', ...(row.student && { student_id: row.student.id }),
-    roles: grants(row),
+    ...(row.password_hash === null && { credential_pending: true }), roles: grants(row),
   };
 }
 
@@ -47,12 +47,15 @@ export class AdminAccountsController {
   @Header('Cache-Control', 'no-store')
   async list(@Req() req: SessionRequest, @Query() query: Record<string, string>) {
     const { page, page_size, skip } = pagination(query);
-    const { q, status, role } = query;
+    const { q, status, role, username } = query;
     if (q !== undefined && (typeof q !== 'string' || q.length > 100)) invalid('q', '查询条件最多 100 字');
     if (status !== undefined && !['active', 'inactive'].includes(status)) invalid('status', '账号状态无效');
     if (role !== undefined && (typeof role !== 'string' || !Object.hasOwn(Role, role))) invalid('role', '角色无效');
+    if (username !== undefined && (typeof username !== 'string' || !username || username.length > 64))
+      invalid('username', '请输入完整登录账号，最多 64 字');
     const where: Prisma.AccountWhereInput = { AND: [
       scope(req.actor),
+      username ? { username } : {},
       q && /^\d{10}$/.test(q) ? { student: { student_no: q } } : q ? {
         OR: [{ username: { contains: q } }, { display_name: { contains: q } }],
       } : {},
@@ -124,6 +127,37 @@ export class AdminAccountsController {
       await audit(tx, { actor_id: actor.account_id, resource_type: 'account', resource_id: id,
         action: 'set_account_roles', reason, before: { roles: before }, after: { roles: after } });
       return { account_id: id, version: updated.roles_version, roles: after };
+    });
+  }
+}
+
+@Controller('admin/staff-accounts')
+@UseGuards(StaffGuard)
+export class StaffAccountsController {
+  constructor(private workflow: Workflow) {}
+
+  @Post()
+  create(@Req() req: SessionRequest, @Body() body: unknown) {
+    return this.workflow.run(req, null, 'tech', async (tx, _row, actor) => {
+      const input = validate<StaffAccountInput>('staff_account_input', body);
+      const username = input.username.trim(), display_name = input.display_name.trim(), reason = input.reason.trim();
+      if (!username) invalid('username', '请填写登录账号');
+      if (!display_name) invalid('display_name', '请填写姓名');
+      if (!reason) invalid('reason', '请填写创建原因');
+      let row: Row;
+      try {
+        row = await tx.account.create({ data: {
+          username, display_name, password_hash: null, roles: { create: { role: input.role } },
+        }, select: fields });
+      } catch (e) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')
+          throw new BusinessError(409, 'conflict', '该登录账号已被使用，请核对');
+        throw e;
+      }
+      const roles = grants(row);
+      await audit(tx, { actor_id: actor.account_id, action: 'create_staff_account', resource_type: 'account',
+        resource_id: row.id, reason, before: { exists: false }, after: { status: 'active', credential_pending: true, roles } });
+      return { account_id: row.id, version: row.roles_version, roles };
     });
   }
 }

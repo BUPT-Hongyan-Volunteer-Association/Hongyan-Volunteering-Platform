@@ -11,7 +11,8 @@ import { browser } from './api-client.mjs';
 
 test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持一致', async (t) => {
   const staffPassword = randomUUID();
-  await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: staffPassword });
+  const adminPassword = randomUUID();
+  await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: staffPassword, DEMO_ADMIN_PASSWORD: adminPassword });
   let app;
   try {
     app = await createApp();
@@ -653,6 +654,51 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal(events.length, 1);
       assert.equal(events[0].actor_id, (await teacher.request('/me')).data.account_id);
       assert.equal(events[0].before.version + 1, events[0].after.version);
+    });
+    await t.test('创建后台账号仅限技术管理员，重放和重名不会多建或泄露凭证', async () => {
+      const tech = browser(base);
+      await tech.signIn('demo.dual', staffPassword);
+      const techId = (await tech.request('/me')).data.account_id;
+      // The seeded permanent administrator remains available while this grant expires.
+      await db.roleGrant.create({ data: { account_id: techId, role: 'tech_admin' } });
+      const endpoint = '/admin/staff-accounts';
+      const body = { username: 'staff.fixture', display_name: '独立老师', role: 'reviewer', reason: '新教师入职' };
+      const key = randomUUID();
+      const post = (data, token) => tech.write('POST', endpoint, data, token);
+      assert.equal((await teacher.write('POST', endpoint, body)).status, 403);
+      assert.equal((await student.write('POST', endpoint, body)).status, 403);
+      assert.equal((await post({ ...body, role: 'student' })).status, 422);
+      assert.equal((await post({ ...body, reason: '  ' })).status, 422);
+      const [created, replay] = await Promise.all([post(body, key), post(body, key)]);
+      assert.equal(created.status, 201);
+      assert.deepEqual(created, replay);
+      assert.deepEqual(Object.keys(created.data).sort(), ['account_id', 'roles', 'version']);
+      assert.deepEqual(created.data.roles, [{ role: 'reviewer' }]);
+      assert.equal((await post({ ...body, role: 'tech_admin' }, key)).status, 409);
+      assert.equal((await post(body)).status, 409);
+      const lookup = '/admin/accounts?username=' + body.username;
+      assert.equal((await teacher.request(lookup)).data.total, 0);
+      const account = (await tech.request(lookup)).data.items[0];
+      assert.equal(account.account_id, created.data.account_id);
+      assert.equal(account.credential_pending, true);
+      assert.equal(account.student_id, undefined);
+      const row = await db.account.findUniqueOrThrow({ where: { id: account.account_id } });
+      assert.equal(row.password_hash, null);
+      const guest = browser(base);
+      await guest.request('/auth/csrf');
+      assert.equal((await guest.request('/auth/login', { method: 'POST', body: { username: body.username, password: '000002' } })).status, 401);
+      const events = await db.auditEvent.findMany({ where: { resource_id: account.account_id, action: 'create_staff_account' } });
+      assert.equal(events.length, 1);
+      assert.equal(events[0].reason, body.reason);
+      assert.deepEqual(events[0].after, { status: 'active', credential_pending: true, roles: [{ role: 'reviewer' }] });
+      assert.equal(events[0].actor_id, techId);
+      const second = { ...body, username: 'new.technical', role: 'tech_admin' };
+      const race = await Promise.all([post(second), post(second)]);
+      assert.deepEqual(race.map(r => r.status).sort(), [201, 409]);
+      // A cached success must not outlive the operator's technical role.
+      await db.roleGrant.update({ where: { account_id_role: { account_id: techId, role: 'tech_admin' } }, data: { expires_at: new Date(0) } });
+      assert.equal((await post(body, key)).status, 403);
+
     });
     await t.test('账号只读范围先于分页，角色和详情不泄露高权限资料', async () => {
       const expires = new Date('2099-12-31T15:59:00Z');

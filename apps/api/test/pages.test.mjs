@@ -495,6 +495,29 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       assert.deepEqual(writes, []);
       for (const p of [owner, teacher, tech]) p.off('request', collect);
     });
+    await t.test('技术管理员核对后建后台账号，老师保留学生建档入口', async () => {
+      await teacher.goto(admin + '/manage/accounts');
+      await visible(link(teacher, '导入学生名单建档'));
+      assert.equal(await teacher.getByText('创建后台账号', { exact: true }).count(), 0);
+      await tech.goto(admin + '/');
+      await link(tech, '账号与角色').click();
+      await tech.getByText('创建后台账号', { exact: true }).click();
+      await tech.getByLabel('新账号登录名').fill('faculty.demo');
+      await tech.getByLabel('姓名', { exact: true }).fill('合成教师');
+      await tech.getByLabel('后台角色').selectOption('reviewer');
+      await tech.getByLabel('创建原因').fill('合成验收');
+      await button(tech, '核对创建信息').click();
+      await visible(tech.getByRole('heading', { name: '核对后台账号' }));
+      assert.equal(await db.account.count({ where: { username: 'faculty.demo' } }), 0);
+      await button(tech, '确认创建').click();
+      await visible(tech.getByText('已创建 faculty.demo，待发放初始凭证。'));
+      await link(tech, '查看新账号详情').click();
+      await visible(tech.getByText('待发放，暂不可登录'));
+      await link(tech, '返回账号查询').click();
+      await tech.getByLabel('登录账号', { exact: true }).fill('faculty.demo');
+      await button(tech, '查询账号').click();
+      await visible(tech.getByRole('heading', { name: '合成教师' }));
+    });
     await t.test('老师按身份卡授权与收回，学生原会话保留学生入口', async () => {
       await teacher.goto(admin + '/manage/accounts');
       const input = teacher.getByLabel('学生学号');

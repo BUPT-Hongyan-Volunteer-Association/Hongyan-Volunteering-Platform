@@ -28,7 +28,7 @@ const router = createRouter({
         { path: 'manage/imports/:item?', component: StudentImports },
         { path: 'manage/teams', component: () => import('./activities/TeamsPage.vue') },
         { path: 'manage/teams/:id', component: () => import('./activities/TeamDetail.vue'), props: true },
-        { path: 'manage/accounts/:item?', component: () => import('./management/AccountLookup.vue') },
+        { path: 'manage/accounts/:item?', component: () => import('./management/AccountLookup.vue'), meta: { profile: true } },
         { path: 'manage/students/:item?', component: StudentsPage },
         { path: 'manage/students/:item/hours', component: () => import('./hours/StudentHours.vue') },
         { path: 'manage/corrections/:item?', component: () => import('@hongyan/ui/HourCorrectionGroups.vue'), props: { admin: true }, meta: { profile: true } },

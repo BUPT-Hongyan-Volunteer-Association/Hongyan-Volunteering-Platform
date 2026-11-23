@@ -37,7 +37,7 @@ export class AccountController {
     if (bucket.attempts > 8)
       throw new BusinessError(429, 'rate_limited', '尝试次数过多，请稍后再试');
     const account = await this.db.account.findUnique({ where: { username } });
-    if (!(await matches(password, account?.password_hash ?? (await dummyHash))) || !account?.active)
+    if (!(await matches(password, account?.password_hash ?? (await dummyHash))) || !account?.active || !account.password_hash)
       throw badCredentials();
     const issued = issueSession(account.id);
     const roles = await this.db.$transaction(async (tx) => {
@@ -88,7 +88,7 @@ export class AccountController {
     const id = req.actor.account_id;
     const account = await this.db.account.findUniqueOrThrow({ where: { id } });
     if (
-      typeof body.current_password !== 'string' ||
+      !account.password_hash || typeof body.current_password !== 'string' ||
       !(await matches(body.current_password, account.password_hash))
     )
       invalid('current_password', '当前密码不正确');
