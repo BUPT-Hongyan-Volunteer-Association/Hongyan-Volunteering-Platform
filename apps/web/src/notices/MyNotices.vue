@@ -286,16 +286,15 @@ onUnmounted(() => window.removeEventListener('focus', focus));
               <dd>{{ localDateTime(selected.acknowledged_at) }}</dd></template
             >
           </dl>
-          <div class="confirm-action" v-if="selected.requires_ack && !selected.acknowledged_at && selected.is_current">
+          <div class="row-actions">
             <button
+              v-if="selected.requires_ack && !selected.acknowledged_at && selected.is_current"
               class="primary"
               :disabled="busy"
               @click="ack(selected)"
             >
               确认收到
             </button>
-          </div>
-          <div class="row-actions">
             <RouterLink
               class="button"
               :to="{
@@ -334,6 +333,7 @@ onUnmounted(() => window.removeEventListener('focus', focus));
 }
 .row-actions {
   display: flex;
+  justify-content: center;
   gap: 12px;
   flex-wrap: wrap;
   margin-top: 16px;
