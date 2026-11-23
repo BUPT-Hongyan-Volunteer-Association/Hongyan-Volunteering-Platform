@@ -4,7 +4,7 @@ import { listActivityRegistrations } from '@hongyan/contracts';
 import { usePageRead } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 
-const props = defineProps<{ activityId: string }>();
+const props = defineProps<{ activityId: string; forNotice?: boolean }>();
 const emit = defineEmits<{ denied: [] }>();
 const studentIds = defineModel<string[]>({ required: true });
 const selected = computed(() => new Set(studentIds.value));
@@ -18,12 +18,14 @@ const { data: result, error, refresh } = usePageRead(query, async (signal) =>
     signal, cache: 'no-store', throwOnError: true,
   })).data.data, () => emit('denied'));
 const items = computed(() => result.value?.items ?? []);
-const allSelected = computed(() => items.value.length > 0 && items.value.every((r) => selected.value.has(r.student_id)));
+const eligible = computed(() => items.value.filter((row) =>
+  !props.forNotice || ['submitted', 'waitlisted', 'accepted'].includes(row.status)));
+const allSelected = computed(() => eligible.value.length > 0 && eligible.value.every((r) => selected.value.has(r.student_id)));
 
 function find() {
   const q = search.value.trim();
   if (q === query.value.q && query.value.page === 1) return void refresh();
-  if (q !== query.value.q && studentIds.value.length) {
+  if (!props.forNotice && q !== query.value.q && studentIds.value.length) {
     studentIds.value = [];
     selectionNotice.value = '搜索条件已变更，已清空选择。';
   }
@@ -65,13 +67,14 @@ function toggle(ids: string[], event: Event) {
       <input
         type="checkbox"
         :checked="allSelected"
-        :indeterminate="!allSelected && items.some((r) => selected.has(r.student_id))"
-        @change="toggle(items.map((r) => r.student_id), $event)"
+        :disabled="!eligible.length"
+        :indeterminate="!allSelected && eligible.some((r) => selected.has(r.student_id))"
+        @change="toggle(eligible.map((r) => r.student_id), $event)"
       />
       选择本页
     </label>
     <label v-for="row in items" :key="row.student_id">
-      <input type="checkbox" :checked="selected.has(row.student_id)" @change="toggle([row.student_id], $event)" />
+      <input type="checkbox" :disabled="!eligible.includes(row)" :checked="selected.has(row.student_id)" @change="toggle([row.student_id], $event)" />
       <span>{{ row.student_name }} <small>{{ row.student_no }}</small></span>
     </label>
   </div>

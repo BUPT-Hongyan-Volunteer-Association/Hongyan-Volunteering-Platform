@@ -230,9 +230,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           '错账修复组',
           '异常记录',
         ]) {
-          if (!(await link(owner, tab).isVisible()))
-            await owner.getByText('更多', { exact: true }).click();
-          await link(owner, tab).click();
+          const nav = owner.getByRole('navigation', { name: '活动工作区' });
+          const parent = { '退出与恢复': '报名名单', '漏记反馈': '时长台账', '错账修复组': '时长台账', '异常记录': '现场人员记录' }[tab];
+          if (parent) await link(nav, parent).click();
+          await link(parent ? owner.getByRole('main') : nav, tab).click();
+          await visible(nav.locator('a.current').filter({ hasText: parent ?? tab }));
           if (tab === '通知与回执') {
             await visible(owner.getByText(/本活动还没有发出过通知/));
             await fits(owner);
@@ -438,6 +440,84 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await fits(helper);
     });
 
+    await t.test('发布活动通知，收件箱去重提醒与筛选切换', async () => {
+      await owner.goto(web + '/managed/' + first.id + '/notices');
+      await link(owner, '发布通知').click();
+      await owner.getByLabel('通知标题').fill('请带志愿者证件');
+      await owner.getByLabel('通知正文').fill('请在签到时出示证件。');
+      await pickOption(owner, '接收范围', '指定人员');
+      await owner.getByLabel(/活动协作者.*0000000004/).check();
+      await button(owner, '发布').click();
+      await visible(owner.getByText('接收 1 人 · 待跟进 1 人'));
+
+      await helper.goto(web);
+      const badge = helper.locator('.notice-badge');
+      await visible(badge.getByText('1', { exact: true }));
+      await helper.getByRole('navigation', { name: '学生导航' }).locator('a[href="/notices"]').click();
+      const notice = link(helper, '请带志愿者证件');
+      await visible(notice);
+      const slow = await holdResponse(helper, url => url.pathname.endsWith('/me/notices') && url.searchParams.has('unread_only'));
+      await link(helper, '未读 1').click();
+      await slow.received;
+      const retained = helper.locator('[inert] a').filter({ hasText: '请带志愿者证件' });
+      assert.ok(await retained.isVisible());
+      assert.ok(await retained.evaluate(el => el.closest('[inert]').inert));
+      await link(helper, '待确认 1').click();
+      await helper.locator('[aria-busy="false"]').waitFor();
+      await slow.release();
+      await visible(notice);
+      assert.equal(await link(helper, '待确认 1').getAttribute('aria-current'), 'true');
+
+      for (const width of [1440, 390]) {
+        await helper.setViewportSize({ width, height: 900 });
+        await fits(helper);
+        const badgeBox = await badge.boundingBox();
+        const anchor = await badge.locator('..').boundingBox();
+        assert.ok(badgeBox.x >= anchor.x && badgeBox.x + badgeBox.width <= anchor.x + anchor.width);
+        const action = button(helper, '确认收到');
+        const box = await action.boundingBox(), area = await action.locator('..').boundingBox();
+        assert.ok(Math.abs((box.x - area.x) * 2 + box.width - area.width) < 2);
+      }
+      await notice.click();
+      await visible(helper.getByText('已读未确认', { exact: true }));
+      await visible(badge.getByText('1', { exact: true }));
+      await button(helper, '确认收到').click();
+      await badge.waitFor({ state: 'detached' });
+      await button(owner, '刷新回执').click();
+      await visible(owner.getByText('接收 1 人 · 待跟进 0 人'));
+
+      await link(owner, '发布通知').click();
+      await owner.getByLabel('通知标题').fill('签到处开放时间');
+      await owner.getByLabel('通知正文').fill('上午八点开放。');
+      await owner.getByLabel('需要学生确认').uncheck();
+      await button(owner, '发布').click();
+      await visible(owner.getByText('0000000004', { exact: true }));
+      // 同一浏览器会话切换身份，登录后的首次计数必须来自新账号。
+      await helper.goto(web);
+      await visible(badge.getByText('1', { exact: true }));
+      for (const account of ['0000000001', '0000000004']) {
+        await button(helper, '退出登录').click();
+        await helper.getByLabel('账号', { exact: true }).fill(account);
+        await helper.getByLabel('当前密码').fill(password);
+        const counted = helper.waitForResponse(url => url.url().includes('/me/notices?') && url.status() === 200);
+        await button(helper, '登录').click();
+        await counted;
+        if (account === '0000000001') assert.equal(await badge.count(), 0);
+        else await visible(badge.getByText('1', { exact: true }));
+      }
+      await helper.goto(web + '/notices');
+      await visible(badge.getByText('1', { exact: true }));
+      await helper.getByRole('searchbox', { name: '搜索通知' }).fill('不存在的通知');
+      await visible(helper.getByText('暂无匹配通知。'));
+      assert.ok(await badge.isVisible());
+      await helper.getByRole('searchbox', { name: '搜索通知' }).fill('');
+      await link(helper, '签到处开放时间').click();
+      await badge.waitFor({ state: 'detached' });
+      assert.equal(await button(helper, '确认收到').count(), 0);
+      await button(owner, '刷新回执').click();
+      await visible(owner.getByRole('cell', { name: '已读', exact: true }));
+    });
+
     // Persist the roster fixture in this disposable DB. The browser uses the normal API.
     const fixtureStatuses = [
       ...Array(9).fill('submitted'), ...Array(17).fill('accepted'),
@@ -452,6 +532,28 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         } } } },
       } });
     }
+    await t.test('指定通知接收人可跨页勾选，回执只含所选学生', async () => {
+      await owner.goto(web + '/managed/' + first.id + '/notices');
+      await link(owner, '发布通知').click();
+      await owner.getByLabel('通知标题').fill('分组签到');
+      await owner.getByLabel('通知正文').fill('请到第二签到点。');
+      await pickOption(owner, '接收范围', '指定人员');
+      const picker = owner.getByRole('group', { name: '选择接收人' });
+      const choice = picker.locator('.choices label').nth(1);
+      const expected = [];
+      for (const page of [1, 2]) {
+        if (page === 2) await button(picker, '下一页').click();
+        await choice.getByRole('checkbox').check();
+        expected.push(await choice.locator('small').innerText());
+      }
+      assert.notEqual(expected[0], expected[1]);
+      await visible(picker.getByText('已选 2 人'));
+      await button(owner, '发布').click();
+      await visible(owner.getByText('接收 2 人 · 待跟进 2 人'));
+      for (const number of expected)
+        await visible(owner.getByRole('cell', { name: number, exact: true }));
+    });
+
     await t.test('名单批量预览和账号示例不会发送业务写请求', async () => {
       const writes = [];
       const collect = (r) => {

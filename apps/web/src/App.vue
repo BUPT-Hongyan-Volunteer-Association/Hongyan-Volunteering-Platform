@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import type { Profile } from '@hongyan/contracts';
 import { hasStudentAccess } from './identity';
 import AccountGate from '@hongyan/ui/AccountGate.vue';
+import NoticeBadge from './notices/NoticeBadge.vue';
 import AccountIdentity from '@hongyan/ui/AccountIdentity.vue';
 import BrandName from '@hongyan/ui/BrandName.vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
@@ -57,10 +58,13 @@ const crumb = computed(() => {
             v-for="item in hasStudentAccess(profile) ? studentNav : studentNav.slice(0, 1)"
             :key="item.to"
             :to="item.to"
+            :aria-label="item.label"
+            :aria-describedby="item.to === '/notices' ? 'notice-attention-description' : undefined"
             :class="{ current: isCurrent(item.to) }"
             :aria-current="isCurrent(item.to) ? 'page' : undefined"
           >
             <UiIcon :name="item.icon" /><span>{{ item.label }}</span>
+            <NoticeBadge v-if="item.to === '/notices'" :key="profile.account_id" />
           </RouterLink>
           <RouterLink
             v-if="canManage(profile)"

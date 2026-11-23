@@ -10541,12 +10541,13 @@ components:
         inbox_counts:
           type: object
           description: 本人通知列表请求 with_counts 时返回，计数覆盖整个筛选范围。
-          required: [all, unread, pending]
+          required: [all, unread, pending, attention]
           additionalProperties: false
           properties:
             all: { type: integer, minimum: 0 }
             unread: { type: integer, minimum: 0 }
             pending: { type: integer, minimum: 0 }
+            attention: { type: integer, minimum: 0, description: 未读或当前待确认的通知条数，同一条只计一次。 }
         items:
           type: array
           items:

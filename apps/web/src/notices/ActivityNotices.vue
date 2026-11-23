@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import PublishNotice from './PublishNotice.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { listActivityNotices, listNoticeReceipts } from '@hongyan/contracts';
 import RecordWorkspace from '@hongyan/ui/RecordWorkspace.vue';
@@ -9,6 +10,8 @@ import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { localDateTime } from '@hongyan/ui/activityDisplay';
 import { pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 
+defineProps<{ writesPaused?: boolean }>();
+const emit = defineEmits<{ denied: [] }>();
 const route = useRoute(),
   router = useRouter();
 const activityId = computed(() => String(route.params.id));
@@ -19,14 +22,8 @@ const listQuery = computed(() => ({
   page: route.query.page,
   notice_page: route.query.notice_page,
 }));
-const followUp = computed({
-  get: () => (route.query.receipts === 'all' ? '0' : '1'),
-  set: (value) => {
-    void router.push({
-      query: { ...listQuery.value, receipts: value === '0' ? 'all' : undefined },
-    });
-  },
-});
+const listPath = computed(() => '/managed/' + activityId.value + '/notices');
+const compose = computed(() => !item.value && route.query.compose === '1');
 
 const {
   data: listing,
@@ -58,6 +55,14 @@ const {
   },
 );
 const current = computed(() => listing.value?.selected);
+const followUp = computed({
+  get: () => (route.query.receipts === 'all' || (!route.query.receipts && !current.value?.requires_ack) ? '0' : '1'),
+  set: (value) => {
+    void router.push({
+      query: { ...listQuery.value, receipts: value === '0' ? 'all' : 'pending' },
+    });
+  },
+});
 const {
   data: receiptPage,
   loading,
@@ -102,8 +107,14 @@ async function reloadReceipts() {
 
 <template>
   <section :class="{ 'reading-area': !item }">
-    <h2>通知与回执</h2>
-    <p v-if="error" role="alert">{{ error }} <button @click="refresh()">重新读取</button></p>
+    <div class="page-heading">
+      <h2>通知与回执</h2>
+      <RouterLink v-if="!compose" class="button primary" :to="{ path: listPath, query: { ...listQuery, compose: '1' } }">发布通知</RouterLink>
+    </div>
+    <PublishNotice v-if="compose" :activity-id="activityId" :writes-paused="writesPaused"
+      @published="(id) => router.replace({ path: listPath + '/' + id, query: { page: route.query.page } })"
+      @cancel="router.replace({ path: listPath, query: listQuery })" @denied="emit('denied')" />
+    <p v-else-if="error" role="alert">{{ error }} <button @click="refresh()">重新读取</button></p>
     <p v-else-if="!listing" role="status">正在读取通知…</p>
 
     <RecordWorkspace v-else :selected="!!item">
@@ -125,7 +136,7 @@ async function reloadReceipts() {
             <span class="state-chip">{{ row.is_current ? '当前有效' : '已被替代' }}</span>
           </RouterLink>
         </div>
-        <p v-else>本活动还没有发出过通知。修改活动地点等关键信息并经审核后，系统会通知相关学生。</p>
+        <p v-else>本活动还没有发出过通知。</p>
         <Pager
           v-if="page > 1 || listing.page.total > listing.page.page_size"
           :page="page"
@@ -193,7 +204,7 @@ async function reloadReceipts() {
                         row.status === 'acknowledged'
                           ? '已确认'
                           : row.status === 'read'
-                            ? '已读未确认'
+                            ? (current.requires_ack ? '已读未确认' : '已读')
                             : '未读'
                       }}
                     </td>
@@ -213,9 +224,7 @@ async function reloadReceipts() {
               :total="receipts.total"
               @change="(n) => $router.push({ query: { ...route.query, receipt_page: n } })"
             />
-            <p class="hint">
-              「待跟进」只算当前有效、需要确认且尚未确认的学生。已退出活动的学生会移出集合和变更通知的待跟进名单。
-            </p>
+
           </template>
           <p v-if="!current.is_current" class="hint">
             这条通知已被后续版本替代，回执仅作为历史记录保留。

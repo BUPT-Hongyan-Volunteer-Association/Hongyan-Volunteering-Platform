@@ -115,6 +115,28 @@ test('站内通知、确认回执与事件队列', async (t) => {
     (await owner.request('/organizer/notices/' + id + '/receipts?' + query)).data;
   const eventById = (id) => db.notificationEvent.findUniqueOrThrow({ where: { id } });
 
+  await t.test('普通通知按有效名单发布，幂等重试且独立保留', async () => {
+    const a = await publish('手动通知范围');
+    const path = '/organizer/activities/' + a.id + '/notices';
+    const content = { title: '提醒', body: '请带证件', requires_ack: true, recipient_mode: 'accepted', notice_kind: 'other' };
+    const key = randomUUID();
+    const send = (fields, token) => owner.write('POST', path, { ...content, ...fields }, token);
+    assert.equal((await ownerB.write('POST', path, content)).status, 404);
+    const [first, replay] = await Promise.all([send({}, key), send({}, key)]);
+    assert.equal(first.status, 201);
+    assert.equal(first.data.id, replay.data.id);
+    assert.equal(first.data.recipient_count, 1);
+    const second = await studentRow('0000000004');
+    assert.equal((await send({ recipient_mode: 'selected', recipient_student_ids: [second.id] })).status, 422);
+    await db.registration.create({ data: { activity_id: a.id, student_id: second.id, status: 'waitlisted' } });
+    const all = await send({ recipient_mode: 'all_applicants', requires_ack: false });
+    assert.equal(all.data.recipient_count, 2);
+    assert.equal((await inbox(student, 'activity_id=' + a.id + '&unacknowledged_only=true')).items[0].id, first.data.id);
+    await db.registration.updateMany({ where: { activity_id: a.id }, data: { status: 'withdrawn' } });
+    assert.equal((await send({})).status, 422);
+    assert.equal((await receipts(all.data.id)).total, 2);
+  });
+
   await t.test('审批快照、重复投递、本人读写与活动管理范围', async () => {
     const a = await publish('通知范围');
     await a.amend({ location: '乙' });
@@ -139,8 +161,8 @@ test('站内通知、确认回执与事件队列', async (t) => {
     const filters = 'activity_id=' + a.id + '&unread_only=true&with_counts=true&q=';
     const found = await inbox(student, filters + encodeURIComponent('活动地点'));
     assert.equal(found.total, 1);
-    assert.deepEqual(found.inbox_counts, { all: 1, unread: 1, pending: 1 });
-    assert.deepEqual((await inbox(other, filters)).inbox_counts, { all: 0, unread: 0, pending: 0 });
+    assert.deepEqual(found.inbox_counts, { all: 1, unread: 1, pending: 1, attention: 1 });
+    assert.deepEqual((await inbox(other, filters)).inbox_counts, { all: 0, unread: 0, pending: 0, attention: 0 });
     assert.equal((await inbox(student, filters + '%25')).total, 0);
     const read = await student.write('POST', target + '/read');
     assert.ok(read.data.read_at);
@@ -151,7 +173,7 @@ test('站内通知、确认回执与事件队列', async (t) => {
     assert.ok(ack.data.acknowledged_at);
     const afterAck = await inbox(student, filters);
     assert.equal(afterAck.total, 0);
-    assert.deepEqual(afterAck.inbox_counts, { all: 1, unread: 0, pending: 0 });
+    assert.deepEqual(afterAck.inbox_counts, { all: 1, unread: 0, pending: 0, attention: 0 });
     assert.equal(
       (await student.write('POST', target + '/ack')).data.acknowledged_at,
       ack.data.acknowledged_at,
@@ -219,7 +241,7 @@ test('站内通知、确认回执与事件队列', async (t) => {
     const historicalPage = await inbox(student, 'activity_id=' + a.id + '&page_size=1&page=2&with_counts=true');
     assert.equal(historicalPage.items.length, 1);
     assert.equal(historicalPage.total, 4);
-    assert.deepEqual(historicalPage.inbox_counts, { all: 4, unread: 4, pending: 1 });
+    assert.deepEqual(historicalPage.inbox_counts, { all: 4, unread: 4, pending: 1, attention: 4 });
     assert.match(final.body, /入群方式：已更新/);
     assert.doesNotMatch(final.body, /第一次修改|第二次修改/);
     await db.registration.updateMany({

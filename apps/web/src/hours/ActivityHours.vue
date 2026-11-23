@@ -8,6 +8,7 @@ const props = defineProps<{ writesPaused?: boolean }>();
 const emit = defineEmits<{ denied: [] }>();
 const route = useRoute(), router = useRouter();
 const id = String(route.params.id), base = '/managed/' + id;
+const scope = { type: 'activity_hours', activity_id: id } as const;
 const ledger = ref<InstanceType<typeof HourLedger>>();
 const record = ref<HourRecord>(), reason = ref(''), sending = ref(false), error = ref('');
 const command = createCommand();
@@ -41,12 +42,13 @@ async function submit() {
 }
 </script>
 <template>
-  <HourLedger ref="ledger" :scope="{ type: 'activity_hours', activity_id: id }" title="时长台账"
+  <HourLedger ref="ledger" :scope="scope" title="时长台账"
     :batch-base="base + '/batches'" :group-base="base + '/corrections'" @denied="denied">
     <template #links>
       <div class="page-actions">
-        <RouterLink :to="base + '/batches'">时长批次</RouterLink>
-        <RouterLink :to="base + '/corrections'">错账修复组</RouterLink>
+        <RouterLink class="button" :to="{ path: base + '/batches', query: { page: route.query.page } }">时长批次</RouterLink>
+        <RouterLink class="button" :to="{ path: base + '/appeals', query: { page: route.query.page } }">漏记反馈</RouterLink>
+        <RouterLink class="button" :to="{ path: base + '/corrections', query: { page: route.query.page } }">错账修复组</RouterLink>
       </div>
     </template>
     <template #actions="{ row }">

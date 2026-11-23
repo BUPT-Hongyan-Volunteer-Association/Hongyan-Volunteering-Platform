@@ -46,7 +46,7 @@ const kinds: Record<Notice['notice_kind'], string> = {
   cancellation: '活动取消',
   hours_result: '时长结果',
   appeal_result: '申诉结果',
-  other: '其他',
+  other: '活动通知',
 };
 const readCommand = createCommand(),
   ackCommand = createCommand();
@@ -61,25 +61,24 @@ watch(
 const {
   data: listing,
   error: listError,
+  loading: listLoading,
   refresh: refreshList,
 } = usePageRead(
-  () => route.fullPath,
-  async (signal) =>
-    (
-      await listMyNotices({
-        query: {
-          activity_id: activity.value,
-          page: page.value,
-          page_size: 10,
-          q: search.value.trim() || undefined,
-          unread_only: range.value === 'unread' || undefined,
-          unacknowledged_only: range.value === 'pending' || undefined,
-          with_counts: true,
-        },
-        signal,
-        throwOnError: true,
-      })
-    ).data.data,
+  () => JSON.stringify([activity.value, page.value, search.value, range.value]),
+  async (signal) => {
+    const filter = range.value, q = search.value.trim();
+    const { data } = await listMyNotices({
+      query: {
+        activity_id: activity.value, page: page.value, page_size: 10, q: q || undefined,
+        unread_only: filter === 'unread' || undefined,
+        unacknowledged_only: filter === 'pending' || undefined,
+        with_counts: true,
+      },
+      signal, throwOnError: true,
+    });
+    return { ...data.data, filter, q };
+  },
+  undefined, { keepPrevious: true },
 );
 const {
   data: detail,
@@ -98,6 +97,7 @@ const {
         signal,
         throwOnError: true,
       });
+      window.dispatchEvent(new Event('hongyan-notice-updated'));
       if (!signal.aborted) {
         readCommand.confirmed();
         notice = read.data.data;
@@ -131,6 +131,7 @@ async function ack(notice: Notice) {
       throwOnError: true,
     });
     ackCommand.confirmed();
+    window.dispatchEvent(new Event('hongyan-notice-updated'));
     if (route.fullPath === origin) {
       feedback.value = '已确认收到，负责人可在回执里看到。';
       await refreshList(false);
@@ -206,7 +207,7 @@ onUnmounted(() => window.removeEventListener('focus', focus));
           {{ listError }} <button @click="refreshList()">重新读取</button>
         </p>
         <p v-else-if="!listing" role="status">正在读取通知…</p>
-        <template v-else>
+        <div v-else :aria-busy="listLoading" :inert="listLoading">
           <div v-if="item && rows.length" class="entry-list notice-queue">
             <RouterLink
               v-for="row in rows"
@@ -225,25 +226,21 @@ onUnmounted(() => window.removeEventListener('focus', focus));
               }}</RouterLink>
             </template>
             <template #action="{ row }">
-              <button
-                v-if="
-                  row.notice.requires_ack && row.notice.is_current && !row.notice.acknowledged_at
-                "
-                class="compact"
-                :disabled="busy"
-                @click="ack(row.notice)"
+              <div
+                v-if="row.notice.requires_ack && row.notice.is_current && !row.notice.acknowledged_at"
+                class="confirm-action"
               >
-                确认收到
-              </button>
+                <button class="compact" :disabled="busy" @click="ack(row.notice)">确认收到</button>
+              </div>
             </template>
           </RecordSummaryList>
           <p v-else role="status">
             {{
-              search
+              listing.q
                 ? '暂无匹配通知。'
-                : range === 'pending'
+                : listing.filter === 'pending'
                   ? '没有待确认的通知。'
-                  : range === 'unread'
+                  : listing.filter === 'unread'
                     ? '没有未读通知。'
                     : '暂时没有通知。'
             }}
@@ -255,7 +252,7 @@ onUnmounted(() => window.removeEventListener('focus', focus));
             :total="listing.total"
             @change="(n) => router.push({ path: '/notices', query: { ...route.query, page: n } })"
           />
-        </template>
+        </div>
       </template>
       <template #detail>
         <RouterLink class="back-link" :to="{ path: '/notices', query: route.query }"
@@ -289,15 +286,16 @@ onUnmounted(() => window.removeEventListener('focus', focus));
               <dd>{{ localDateTime(selected.acknowledged_at) }}</dd></template
             >
           </dl>
-          <div class="row-actions">
+          <div class="confirm-action" v-if="selected.requires_ack && !selected.acknowledged_at && selected.is_current">
             <button
-              v-if="selected.requires_ack && !selected.acknowledged_at && selected.is_current"
               class="primary"
               :disabled="busy"
               @click="ack(selected)"
             >
               确认收到
             </button>
+          </div>
+          <div class="row-actions">
             <RouterLink
               class="button"
               :to="{
@@ -325,6 +323,7 @@ onUnmounted(() => window.removeEventListener('focus', focus));
 </template>
 
 <style scoped>
+.confirm-action { display: flex; justify-content: center; flex-basis: 100%; margin-block: 8px; }
 .notice-body {
   white-space: pre-line;
   line-height: 1.8;

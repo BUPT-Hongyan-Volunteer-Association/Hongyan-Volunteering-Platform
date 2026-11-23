@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type {
   NoticePage,
+  NoticeInput,
   NotificationEventPage,
   ReasonAction,
   ReceiptPage,
@@ -106,6 +107,7 @@ export class NoticeController {
       });
       const counts = withCounts
         ? {
+            attention: await tx.noticeReceipt.count({ where: { ...scope, OR: [{ read_at: null }, followUp] } }),
             all: await tx.noticeReceipt.count({ where: scope }),
             unread: await tx.noticeReceipt.count({ where: { ...scope, read_at: null } }),
             pending: await tx.noticeReceipt.count({ where: { ...scope, AND: followUp } }),
@@ -155,6 +157,42 @@ export class NoticeController {
         data: { read_at: receipt.read_at ?? now, ...(acknowledge && { acknowledged_at: now }) },
       });
       return noticeView(receipt.notice, updated);
+    });
+  }
+
+  @Post('organizer/activities/:id/notices')
+  publish(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) activity_id: string, @Body() body: unknown) {
+    return this.workflow.run(req, { activityId: activity_id }, 'manage', async (tx, _, actor) => {
+      const input = validate<NoticeInput>('notice_input', body);
+      const title = input.title.trim(), content = input.body.trim();
+      if (!title || !content) invalid(!title ? 'title' : 'body', '请填写通知标题和正文');
+      if (input.notice_kind !== 'other' || input.supersedes_id)
+        invalid('notice_kind', '此入口只发布独立的普通活动通知');
+      const selected = [...new Set(input.recipient_student_ids)];
+      const named = input.recipient_mode === 'selected';
+      if (named !== (selected.length > 0)) invalid('recipient_student_ids', '请核对接收范围与指定人员');
+      const recipients = await tx.registration.findMany({
+        where: {
+          activity_id,
+          status: input.recipient_mode === 'accepted' ? 'accepted' : { in: activeStatuses },
+          ...(named && { student_id: { in: selected } }),
+        },
+        select: { student_id: true },
+      });
+      if (named && recipients.length !== selected.length)
+        invalid('recipient_student_ids', '部分所选人员已不在有效报名名单，请重新选择');
+      if (!recipients.length) invalid('recipient_mode', '当前范围没有接收人，请调整范围');
+      const previous = await tx.notice.aggregate({
+        where: { activity_id, notice_kind: 'other' }, _max: { information_version: true },
+      });
+      const notice = await tx.notice.create({
+        data: {
+          activity_id, title, body: content, notice_kind: 'other', requires_ack: input.requires_ack,
+          published_by: actor.account_id, information_version: (previous._max.information_version ?? 0) + 1,
+          receipts: { createMany: { data: recipients } },
+        },
+      });
+      return { ...noticeView(notice), recipient_count: recipients.length };
     });
   }
 
