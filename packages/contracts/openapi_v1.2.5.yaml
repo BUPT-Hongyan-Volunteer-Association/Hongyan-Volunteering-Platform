@@ -5274,7 +5274,7 @@ paths:
       operationId: create_export
       summary: 创建受控数据导出
       description: 按type要求activity_id/notice_id/student_id。my_hours仅本人，admin_student_hours仅后台，其余按活动授权。复用列表的状态与日期筛选。记录范围与操作者，导出值防公式注入，不含密码。
-        导出与原列表共用服务端筛选及权限。notice_receipts支持follow_up_only。activity_hours传student_ids时导出所选学生汇总，每人一行且只计current；未传时导出全部明细。
+        导出与原列表共用服务端筛选及权限。notice_receipts支持follow_up_only。activity_hours传student_ids时导出所选学生汇总，每人一行且只计current；未传时导出全部明细。admin_students按当前学生档案筛选导出全部匹配学生。
       tags:
       - 导出
       x-requirement: FR06
@@ -10161,6 +10161,7 @@ components:
           - activity_hours
           - my_hours
           - admin_student_hours
+          - admin_students
         activity_id:
           type: string
           format: uuid
@@ -10201,8 +10202,22 @@ components:
           format: date
         q:
           type: string
-          description: 复用报名名单的姓名或学号筛选。
+          description: 复用名单或学生档案的姓名或学号筛选。
           maxLength: 100
+        cohort:
+          type: string
+          description: admin_students 按级部筛选。
+          maxLength: 100
+        grade:
+          type: string
+          description: admin_students 按四位入学年份筛选。
+          pattern: ^[0-9]{4}$
+        account_status:
+          type: string
+          description: admin_students 按账号状态筛选。
+          enum:
+          - active
+          - inactive
         include_history:
           type: boolean
           default: false
@@ -10238,6 +10253,12 @@ components:
             - follow_up_only
           - required:
             - student_ids
+          - required:
+            - cohort
+          - required:
+            - grade
+          - required:
+            - account_status
         required:
         - activity_id
       - properties:
@@ -10263,6 +10284,12 @@ components:
             - include_history
           - required:
             - student_ids
+          - required:
+            - cohort
+          - required:
+            - grade
+          - required:
+            - account_status
         required:
         - notice_id
       - properties:
@@ -10284,6 +10311,12 @@ components:
             - q
           - required:
             - follow_up_only
+          - required:
+            - cohort
+          - required:
+            - grade
+          - required:
+            - account_status
         required:
         - activity_id
       - properties:
@@ -10309,6 +10342,12 @@ components:
             - follow_up_only
           - required:
             - student_ids
+          - required:
+            - cohort
+          - required:
+            - grade
+          - required:
+            - account_status
       - properties:
           type:
             type: string
@@ -10330,8 +10369,41 @@ components:
             - follow_up_only
           - required:
             - student_ids
+          - required:
+            - cohort
+          - required:
+            - grade
+          - required:
+            - account_status
         required:
         - student_id
+      - properties:
+          type:
+            type: string
+            enum:
+            - admin_students
+        not:
+          anyOf:
+          - required:
+            - activity_id
+          - required:
+            - notice_id
+          - required:
+            - student_id
+          - required:
+            - student_ids
+          - required:
+            - registration_status
+          - required:
+            - receipt_status
+          - required:
+            - from_date
+          - required:
+            - to_date
+          - required:
+            - include_history
+          - required:
+            - follow_up_only
     export_job:
       type: object
       properties:

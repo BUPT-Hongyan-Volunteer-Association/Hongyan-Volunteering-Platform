@@ -172,6 +172,31 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
       { type: 'activity_roster', activity_id: rosterActivity.id }, randomUUID())).status, 404);
   });
 
+  await t.test('后台学生档案可按筛选批量导出，仅教职工可用', async () => {
+    for (const [index, account] of synthetic.slice(0, 2).entries()) {
+      await db.student.update({
+        where: { id: account.student.id },
+        data: {
+          cohort: '本科生', grade: '2026', class_name: '0000009' + String(index).padStart(3, '0'),
+          college: '信息与通信工程学院',
+        },
+      });
+    }
+    const expected = result(await teacher.request('/admin/students?cohort=' + encodeURIComponent('本科生') +
+      '&grade=2026&q=' + encodeURIComponent('合成学生0') + '&page_size=100'), 200);
+    assert.equal(expected.total, 2);
+    const job = await createExport(teacher, {
+      type: 'admin_students', cohort: '本科生', grade: '2026', q: '合成学生0',
+    });
+    const file = await download(teacher, (await waitExport(teacher, job.id)).id);
+    const rows = sheetRows(file.body, '学生档案');
+    assert.deepEqual(rows[0], ['学号', '姓名', '级部', '年级', '班级', '学院', '账号状态']);
+    assert.deepEqual(rows.slice(1).map((row) => row[0]), expected.items.map((row) => row.student_no));
+    assert.equal(rows.length, 3);
+    assert(rows.slice(1).every((row) => row[1].startsWith('合成学生0') && /^0\d{9}$/.test(row[0])));
+    assert.equal((await alice.write('POST', '/exports', { type: 'admin_students' }, randomUUID())).status, 403);
+  });
+
   await t.test('回执导出沿用 follow_up_only 并剔除已确认、已退出', async () => {
     const expected = result(await owner.request('/organizer/notices/' + notice.id +
       '/receipts?follow_up_only=true&page_size=100'), 200);

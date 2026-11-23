@@ -35,7 +35,9 @@ const labels = computed(() => {
     ? { create: '导出名单', download: '下载名单文件', failed: '生成名单文件失败。', name: '报名名单.xlsx' }
     : props.input.type === 'notice_receipts'
       ? { create: '导出回执', download: '下载回执文件', failed: '生成回执文件失败。', name: '通知回执.xlsx' }
-      : fallback;
+      : props.input.type === 'admin_students'
+        ? { create: '批量导出', download: '下载学生档案', failed: '生成学生档案失败。', name: '学生档案.xlsx' }
+        : fallback;
   return {
     ...byType,
     ...(props.createLabel && { create: props.createLabel }),

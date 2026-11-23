@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Pager from '@hongyan/ui/Pager.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
+import ExportButton from '@hongyan/ui/ExportButton.vue';
 import { listStudents, type Student } from '@hongyan/contracts';
 
 const route = useRoute(),
@@ -30,6 +31,13 @@ const statusOptions = [
   { value: 'inactive', label: '停用' },
 ] as const;
 const selectedGrade = computed(() => String(route.query.grade ?? 'all'));
+const exportInput = computed(() => ({
+  type: 'admin_students' as const,
+  q: route.query.q ? String(route.query.q) : undefined,
+  cohort: route.query.cohort ? String(route.query.cohort) : undefined,
+  grade: selectedGrade.value !== 'all' ? selectedGrade.value : undefined,
+  account_status: status.value !== 'all' ? status.value : undefined,
+}));
 const selectedCohort = computed(() => String(route.query.cohort ?? 'all'));
 const cohortChoices = computed(() => [
   { value: 'all', label: '全部级部' },
@@ -104,6 +112,7 @@ function goPage(next: number) {
       <h1>学生档案</h1>
       <span class="state-chip neutral">共 {{ total }} 人</span>
     </div>
+    <ExportButton :input="exportInput" :disabled="loading" @recheck="load" />
   </div>
   <form class="filters" @submit.prevent="apply">
     <label>学号或姓名<input v-model="search" type="search" placeholder="输入学号或姓名" /></label>

@@ -2,9 +2,9 @@ import type { ExportInput } from '@hongyan/contracts/types';
 import type { Actor } from '../auth/session.guard.js';
 import { studentId } from '../auth/session.guard.js';
 import type { ExportJob } from '../generated/prisma/client.js';
-import { managedScope, workspaceScope } from '../activities/read.js';
+import { managedScope, staff, workspaceScope } from '../activities/read.js';
 import type { Tx } from '../activities/workflow.js';
-import { invalid, invisible } from '../http.js';
+import { denied, invalid, invisible } from '../http.js';
 import { approvedOrigin, authorizeHourLedger, readHourLedgerWithScope } from '../hours/read-ledger.js';
 import {
   followUpEmpty,
@@ -123,6 +123,16 @@ export async function resolveExportScope(tx: Tx, actor: Actor, input: ExportInpu
       include_history: input.include_history ?? false,
     });
   }
+  if (input.type === 'admin_students') {
+    if (!staff(actor)) denied();
+    return compact({
+      type: input.type,
+      q: input.q?.trim() || undefined,
+      cohort: input.cohort?.trim() || undefined,
+      grade: input.grade,
+      account_status: input.account_status,
+    });
+  }
   const student_id = input.student_id ?? invalid('student_id', '请选择学生');
   await authorizeHourLedger(tx, actor, { type: 'admin_student_hours', student_id });
   return compact({
@@ -155,6 +165,10 @@ export async function authorizeStoredScope(tx: Tx, actor: Actor, scope: StoredSc
   if (scope.type === 'my_hours') {
     const current = studentId(actor);
     if (scope.student_id !== current) invisible();
+    return;
+  }
+  if (scope.type === 'admin_students') {
+    if (!staff(actor)) denied();
     return;
   }
   await authorizeHourLedger(tx, actor, { type: 'admin_student_hours', student_id: scope.student_id! });
@@ -347,9 +361,46 @@ async function hoursContent(tx: Tx, scope: StoredScope): Promise<ExportContent> 
   };
 }
 
+async function studentsContent(tx: Tx, scope: StoredScope): Promise<ExportContent> {
+  const q = scope.q?.trim();
+  const rows = await tx.student.findMany({
+    where: {
+      ...(scope.cohort && { cohort: scope.cohort }),
+      ...(scope.grade && { grade: scope.grade }),
+      ...(scope.account_status && { account: { active: scope.account_status === 'active' } }),
+      ...(q && {
+        OR: [
+          { student_no: { contains: q } },
+          { account: { display_name: { contains: q } } },
+        ],
+      }),
+    },
+    include: { account: { select: { display_name: true, active: true } } },
+    orderBy: { student_no: 'asc' },
+  });
+  return {
+    fileName: '学生档案_' + workbookDate() + '.xlsx',
+    sheet: {
+      name: '学生档案',
+      headers: ['学号', '姓名', '级部', '年级', '班级', '学院', '账号状态'],
+      widths: [18, 18, 16, 12, 18, 24, 12],
+      rows: rows.map((row) => [
+        row.student_no,
+        row.account.display_name,
+        row.cohort ?? '',
+        row.grade ?? '',
+        row.class_name ?? '',
+        row.college ?? '',
+        row.account.active ? '启用' : '停用',
+      ]),
+    },
+  };
+}
+
 export async function exportContent(tx: Tx, scope: StoredScope): Promise<ExportContent> {
   if (scope.type === 'activity_roster') return rosterContent(tx, scope);
   if (scope.type === 'notice_receipts') return receiptContent(tx, scope);
+  if (scope.type === 'admin_students') return studentsContent(tx, scope);
   return hoursContent(tx, scope);
 }
 
