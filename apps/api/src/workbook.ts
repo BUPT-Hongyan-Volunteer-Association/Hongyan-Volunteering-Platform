@@ -27,23 +27,28 @@ function columnName(index: number) {
   return name;
 }
 
-function cell(column: number, row: number, value: string) {
-  return '<c r="' + columnName(column) + row + '" t="inlineStr"><is><t>' + escapeText(value) + '</t></is></c>';
+export type ExportCell = string | number;
+
+function cell(column: number, row: number, value: ExportCell) {
+  const ref = columnName(column) + row;
+  if (typeof value === 'number')
+    return '<c r="' + ref + '"><v>' + value + '</v></c>';
+  return '<c r="' + ref + '" t="inlineStr"><is><t>' + escapeText(value) + '</t></is></c>';
 }
 
-function rowXml(row: number, cells: string[]) {
+function rowXml(row: number, cells: ExportCell[]) {
   const content = cells.map((value, column) => (value === '' ? '' : cell(column, row, value))).join('');
   return '<row r="' + row + '">' + content + '</row>';
 }
 
 export interface ExportSheet {
   name: string;
-  notes?: string[];
-  headers: string[];
-  rows: string[][];
+  notes?: ExportCell[];
+  headers: ExportCell[];
+  rows: ExportCell[][];
   widths?: number[];
   /** 合计行：标签写在第一列，合计值写在 valueIndex 列。 */
-  total?: { label: string; value: string; valueIndex: number };
+  total?: { label: ExportCell; value: ExportCell; valueIndex: number };
 }
 
 export function exportWorkbook(sheet: ExportSheet) {
@@ -54,7 +59,7 @@ export function exportWorkbook(sheet: ExportSheet) {
   rows.push(rowXml(++row, sheet.headers));
   for (const item of sheet.rows) rows.push(rowXml(++row, item));
   if (sheet.total) {
-    const cells = Array.from(
+    const cells: ExportCell[] = Array.from(
       { length: Math.max(sheet.headers.length, sheet.total.valueIndex + 1) },
       () => '',
     );

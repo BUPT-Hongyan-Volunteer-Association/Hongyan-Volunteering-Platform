@@ -192,6 +192,50 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   await studentRow.waitFor();
   await fits(page);
 
+  // 教师后台批量导出与跨页勾选
+  await button('批量导出').click();
+  await button('下载学生档案').waitFor({ timeout: 30000 });
+  const filterDownload = page.waitForEvent('download');
+  await button('下载学生档案').click();
+  assert.match((await filterDownload).suggestedFilename(), /学生档案/);
+  await page.getByLabel('学号或姓名').fill('0000001202');
+  await button('查询').click();
+  await page.waitForURL((url) => url.searchParams.get('q') === '0000001202');
+  assert.equal(await button('下载学生档案').count(), 0);
+
+  for (let index = 0; index < 21; index++) {
+    const username = '0000006' + String(index).padStart(3, '0');
+    await db.account.create({
+      data: {
+        username, display_name: '勾选学生' + String(index).padStart(2, '0'),
+        password_hash: 'fixture', must_change_password: false,
+        roles: { create: { role: 'student' } },
+        student: { create: { student_no: username } },
+      },
+    });
+  }
+  await page.goto(admin + '/manage/students');
+  await page.getByRole('table').waitFor();
+  const firstChoice = page.getByLabel(/^选择学生 /).first();
+  const firstChoiceLabel = await firstChoice.getAttribute('aria-label');
+  await firstChoice.check();
+  await button('下一页').click();
+  const secondChoiceLabel = (await page.getByLabel(/^选择学生 /).evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute('aria-label')))).find((label) => label && label !== firstChoiceLabel);
+  assert.ok(secondChoiceLabel);
+  await page.getByLabel(secondChoiceLabel, { exact: true }).check();
+  await button(/^导出所选学生（2）$/).waitFor();
+  const selectedDownload = page.waitForEvent('download');
+  await button(/^导出所选学生（2）$/).click();
+  await button('下载所选学生').waitFor({ timeout: 30000 });
+  await button('下载所选学生').click();
+  assert.match((await selectedDownload).suggestedFilename(), /学生档案/);
+  await page.getByLabel(secondChoiceLabel, { exact: true }).uncheck();
+  await button(/^导出所选学生（1）$/).waitFor();
+  assert.equal(await button('下载所选学生').count(), 0);
+  await page.goto(admin + '/manage/students?q=0000001201');
+  await studentRow.waitFor();
+
   // 手机视口不产生横向溢出
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();

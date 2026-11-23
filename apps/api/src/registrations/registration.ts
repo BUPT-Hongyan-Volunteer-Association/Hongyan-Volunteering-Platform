@@ -4,11 +4,49 @@ import type {
   RegistrationDecision,
   RegistrationInput,
 } from '@hongyan/contracts/types';
-import type { Registration } from '../generated/prisma/client.js';
+import type { Prisma, Registration } from '../generated/prisma/client.js';
 import { slots } from '../activities/schedule.js';
 import { publishedRevision, type LoadedActivity } from '../activities/read.js';
 import { checkVersion, wrongState, type Tx } from '../activities/workflow.js';
 import { BusinessError, invalid, invisible } from '../http.js';
+
+export const rosterOrderBy = [
+  { submitted_at: 'asc' },
+  { id: 'asc' },
+] satisfies Prisma.RegistrationOrderByWithRelationInput[];
+
+/** 名单页面和导出共用的搜索条件；状态过滤由调用方决定是否叠加。 */
+export function rosterSearchWhere(filters: {
+  activity_id: string;
+  q?: string;
+  registration_ids?: string[];
+}): Prisma.RegistrationWhereInput {
+  const search = filters.q?.trim();
+  return {
+    activity_id: filters.activity_id,
+    ...(filters.registration_ids && { id: { in: filters.registration_ids } }),
+    ...(search && {
+      student: {
+        OR: [
+          { student_no: { contains: search } },
+          { account: { display_name: { contains: search } } },
+        ],
+      },
+    }),
+  };
+}
+
+export function rosterWhere(filters: {
+  activity_id: string;
+  q?: string;
+  registration_ids?: string[];
+  status?: string;
+}): Prisma.RegistrationWhereInput {
+  return {
+    ...rosterSearchWhere(filters),
+    ...(filters.status && { status: filters.status }),
+  };
+}
 
 function approvedContent(activity: LoadedActivity) {
   const revision = publishedRevision(activity);

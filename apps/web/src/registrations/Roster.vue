@@ -192,6 +192,7 @@ function toggleAll(checked: boolean) {
     </button>
     <button disabled aria-label="设为候补（待接入）" aria-describedby="roster-note">设为候补</button>
     <ExportButton
+      :key="JSON.stringify(filterExportInput)"
       :input="filterExportInput"
       :disabled="saving || !!readError"
       create-label="导出筛选结果"
@@ -199,6 +200,7 @@ function toggleAll(checked: boolean) {
       @recheck="load"
     />
     <ExportButton
+      :key="JSON.stringify(selectedExportInput)"
       :input="selectedExportInput"
       :disabled="!selected.size || saving"
       :create-label="'导出所选名单' + (selected.size ? '（' + selected.size + '）' : '')"

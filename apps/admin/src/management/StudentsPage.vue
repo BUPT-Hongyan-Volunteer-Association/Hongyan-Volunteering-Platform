@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import Pager from '@hongyan/ui/Pager.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import ExportButton from '@hongyan/ui/ExportButton.vue';
+import { useIdSelection } from '@hongyan/ui/useSelection';
 import { listStudents, type Student } from '@hongyan/contracts';
 
 const route = useRoute(),
@@ -31,7 +32,15 @@ const statusOptions = [
   { value: 'inactive', label: '停用' },
 ] as const;
 const selectedGrade = computed(() => String(route.query.grade ?? 'all'));
-const selected = ref(new Set<string>());
+const {
+  selected,
+  pageIds: pageStudents,
+  pageChecked,
+  pageIndeterminate,
+  togglePage,
+  toggleStudent,
+  clear: clearSelection,
+} = useIdSelection(computed(() => rows.value.map((row) => row.id)));
 const exportInput = computed(() => ({
   type: 'admin_students' as const,
   q: route.query.q ? String(route.query.q) : undefined,
@@ -43,23 +52,6 @@ const selectedExportInput = computed(() => ({
   type: 'admin_students' as const,
   student_ids: [...selected.value],
 }));
-const pageStudents = computed(() => rows.value.map((row) => row.id));
-const pageChecked = computed(() => pageStudents.value.length > 0 && pageStudents.value.every((id) => selected.value.has(id)));
-const pageIndeterminate = computed(() => !pageChecked.value && pageStudents.value.some((id) => selected.value.has(id)));
-function togglePage(checked: boolean) {
-  const next = new Set(selected.value);
-  for (const id of pageStudents.value) {
-    if (checked) next.add(id);
-    else next.delete(id);
-  }
-  selected.value = next;
-}
-function toggleStudent(id: string, checked: boolean) {
-  const next = new Set(selected.value);
-  if (checked) next.add(id);
-  else next.delete(id);
-  selected.value = next;
-}
 const selectedCohort = computed(() => String(route.query.cohort ?? 'all'));
 const cohortChoices = computed(() => [
   { value: 'all', label: '全部级部' },
@@ -130,7 +122,7 @@ watch(
     () => route.query.grade,
     () => route.query.status,
   ],
-  () => selected.value.clear(),
+  () => clearSelection(),
 );
 function goPage(next: number) {
   void router.push({ query: { ...route.query, page: next } });
@@ -144,8 +136,9 @@ function goPage(next: number) {
       <span class="state-chip neutral">共 {{ total }} 人</span>
     </div>
     <div class="page-actions">
-      <ExportButton :input="exportInput" :disabled="loading" @recheck="load" />
+      <ExportButton :key="JSON.stringify(exportInput)" :input="exportInput" :disabled="loading" @recheck="load" />
       <ExportButton
+        :key="JSON.stringify(selectedExportInput)"
         :input="selectedExportInput"
         :disabled="loading || !selected.size"
         :create-label="'导出所选学生' + (selected.size ? '（' + selected.size + '）' : '')"

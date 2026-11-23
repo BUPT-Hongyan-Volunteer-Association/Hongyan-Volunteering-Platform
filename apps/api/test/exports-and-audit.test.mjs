@@ -15,6 +15,9 @@ function result(response, expected) {
   assert.equal(response.status, expected, JSON.stringify(response));
   return response.data;
 }
+function sheetCells(buffer, name) {
+  return readXlsxSheet(buffer, name).rows.map((row) => row.cells);
+}
 function sheetRows(buffer, name) {
   const sheet = readXlsxSheet(buffer, name);
   return sheet.rows.map((row) => {
@@ -62,7 +65,25 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
   ]);
   const ownerAccount = await db.account.findUniqueOrThrow({ where: { username: '0000000002' } });
   const aliceStudent = await db.student.findUniqueOrThrow({ where: { student_no: '0000000001' } });
-  const bobStudent = await db.student.findUniqueOrThrow({ where: { student_no: '0000000004' } });
+  const teacherAccount = await db.account.findUniqueOrThrow({ where: { username: 'demo.teacher' } });
+
+  await t.test('新实例启动只回收超时的导出任务', async () => {
+    const running = await db.exportJob.create({
+      data: {
+        actor_id: ownerAccount.id, type: 'admin_students',
+        scope: { type: 'admin_students' }, status: 'running',
+      },
+    });
+    const second = await createApp();
+    await second.listen(0, '127.0.0.1');
+    try {
+      await delay(300);
+      assert.equal((await db.exportJob.findUniqueOrThrow({ where: { id: running.id } })).status, 'running');
+    } finally {
+      await second.close();
+      await db.exportJob.delete({ where: { id: running.id } });
+    }
+  });
 
   const synthetic = [];
   for (let index = 0; index < 25; index++) {
@@ -158,6 +179,8 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     assert.deepEqual(rows.map((row) => row[0]), acceptedExpected.map((row) => row.student_name));
     assert(rows.every((row) => row[3] === '已录取'));
     assert(rows.every((row) => /^0\d{9}$/.test(row[1])));
+    const rosterCells = sheetCells(file.body, '报名名单');
+    assert.equal(rosterCells[1].find((cell) => cell.column === 1).type, 'text');
 
     const selected = acceptedExpected.slice(0, 2);
     const selectedJob = await createExport(owner, {
@@ -244,9 +267,9 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     assert.deepEqual(activityRows[0], ['姓名', '学号', '活动名称', '活动编号', '服务日期', '时长（小时）', '记录状态']);
     assert.equal(activityRows.length, activityExpected.items.length + 2);
     assert.equal(activityRows.at(-1)[0], '合计（仅当前有效记录）');
-    assert.equal(activityRows.at(-1)[5], '3.0');
-    assert.deepEqual(activityRows.slice(1, -1).map((row) => row[5]),
-      activityExpected.items.map((row) => row.credited_hours));
+    assert.equal(activityRows.at(-1)[5], '3');
+    assert.deepEqual(activityRows.slice(1, -1).map((row) => Number(row[5])),
+      activityExpected.items.map((row) => Number(row.credited_hours)));
     assert.deepEqual(activityRows.slice(1, -1).map((row) => row[6]),
       activityExpected.items.map((row) => row.status === 'current' ? '当前有效' : '已更正'));
 
@@ -257,7 +280,7 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     const myRows = sheetRows(myFile.body, '志愿时长');
     assert.deepEqual(myRows[0], ['学生：体验学生（0000000001）']);
     assert.deepEqual(myRows[1], ['活动名称', '活动编号', '服务日期', '时长（小时）', '记录状态']);
-    assert.equal(myRows.at(-1)[3], '3.0');
+    assert.equal(myRows.at(-1)[3], '3');
     assert.equal(myRows.at(-1)[0], '合计（仅当前有效记录）');
     assert.equal(myRows.length, 1 + 1 + myExpected.items.length + 1);
 
@@ -269,7 +292,7 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     const adminFile = await download(teacher, (await waitExport(teacher, adminJob.id)).id);
     const adminRows = sheetRows(adminFile.body, '志愿时长');
     assert.deepEqual(adminRows[0], ['学生：体验学生（0000000001）']);
-    assert.equal(adminRows.at(-1)[3], '3.0');
+    assert.equal(adminRows.at(-1)[3], '3');
   });
 
   await t.test('真实送审批准并更正的账目导出与三端读数一致', async () => {
@@ -317,8 +340,13 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     });
     const file = await download(owner, (await waitExport(owner, job.id)).id);
     const rows = sheetRows(file.body, '志愿时长');
-    assert.equal(rows.at(-1)[5], '3.0');
+    assert.equal(rows.at(-1)[5], '3');
     assert.equal(rows.at(-1)[0], '合计（仅当前有效记录）');
+    const cells = sheetCells(file.body, '志愿时长');
+    assert.equal(cells[1].find((cell) => cell.column === 1).type, 'text');
+    assert.equal(cells[1].find((cell) => cell.column === 5).type, 'number');
+    assert.equal(cells.at(-1).find((cell) => cell.column === 5).type, 'number');
+    assert.equal(cells[1].find((cell) => cell.column === 0).type, 'text');
   });
 
   await t.test('活动时长可跨页选择学生导出汇总，每人一行且只计 current', async () => {
@@ -339,9 +367,12 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     const rows = sheetRows(file.body, '学生时长汇总');
     assert.deepEqual(rows[0], ['姓名', '学号', '合计时长（小时）']);
     assert.equal(rows.length, 3);
+    const summaryCells = sheetCells(file.body, '学生时长汇总');
+    assert.equal(summaryCells[1].find((cell) => cell.column === 1).type, 'text');
+    assert.equal(summaryCells[1].find((cell) => cell.column === 2).type, 'number');
     const byNo = new Map(rows.slice(1).map((row) => [row[1], row]));
     assert.deepEqual(byNo.get('0000000001').slice(0, 2), ['体验学生', '0000000001']);
-    assert.equal(byNo.get('0000000001')[2], '3.0');
+    assert.equal(byNo.get('0000000001')[2], '3');
     assert.equal(byNo.get(extra.student.student_no)[2], '1.5');
     assert.equal(rows.slice(1).some((row) => row[1] === synthetic[1].student.student_no), false);
 

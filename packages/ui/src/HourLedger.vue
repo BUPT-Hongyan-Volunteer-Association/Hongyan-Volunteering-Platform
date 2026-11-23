@@ -7,6 +7,7 @@ import ExportButton from './ExportButton.vue';
 import Pager from './Pager.vue';
 import { beijing } from './hourDisplay';
 import { pageNumber, usePageRead } from './usePageRead';
+import { useIdSelection } from './useSelection';
 
 const props = defineProps<{ scope: { type: 'my_hours' } | { type: 'activity_hours'; activity_id: string }
   | { type: 'admin_student_hours'; student_id: string }; title: string; batchBase?: string; groupBase?: string }>();
@@ -24,15 +25,6 @@ const from = ref(''), to = ref(''), history = ref(false);
 watch(filters, (current) => {
   from.value = current.from_date ?? ''; to.value = current.to_date ?? ''; history.value = current.include_history;
 }, { immediate: true });
-watch(
-  [
-    () => filters.value.from_date,
-    () => filters.value.to_date,
-    () => filters.value.include_history,
-    () => props.scope.type === 'activity_hours' ? props.scope.activity_id : '',
-  ],
-  () => selected.value.clear(),
-);
 function applyFilters() {
   return router.replace({ query: { ...route.query, from_date: from.value || undefined, to_date: to.value || undefined,
     include_history: history.value ? 'true' : undefined, hour_page: undefined } });
@@ -50,7 +42,15 @@ const { data, error, loading, refresh, clear } = usePageRead(
     return (await listStudentHours({ path: { id: scope.student_id }, ...options })).data.data;
   }, () => emit('denied'),
 );
-const selected = ref(new Set<string>());
+const {
+  selected,
+  pageIds: pageStudents,
+  pageChecked,
+  pageIndeterminate,
+  togglePage,
+  toggleStudent,
+  clear: clearSelection,
+} = useIdSelection(computed(() => (data.value?.items ?? []).map((row) => row.student_id)));
 const summaryExportInput = computed(() => ({
   type: 'activity_hours' as const,
   activity_id: props.scope.type === 'activity_hours' ? props.scope.activity_id : '',
@@ -58,23 +58,15 @@ const summaryExportInput = computed(() => ({
   to_date: filters.value.to_date,
   student_ids: [...selected.value],
 }));
-const pageStudents = computed(() => [...new Set((data.value?.items ?? []).map((row) => row.student_id))]);
-const pageChecked = computed(() => pageStudents.value.length > 0 && pageStudents.value.every((id) => selected.value.has(id)));
-const pageIndeterminate = computed(() => !pageChecked.value && pageStudents.value.some((id) => selected.value.has(id)));
-function togglePage(checked: boolean) {
-  const next = new Set(selected.value);
-  for (const id of pageStudents.value) {
-    if (checked) next.add(id);
-    else next.delete(id);
-  }
-  selected.value = next;
-}
-function toggleStudent(id: string, checked: boolean) {
-  const next = new Set(selected.value);
-  if (checked) next.add(id);
-  else next.delete(id);
-  selected.value = next;
-}
+watch(
+  [
+    () => filters.value.from_date,
+    () => filters.value.to_date,
+    () => filters.value.include_history,
+    () => props.scope.type === 'activity_hours' ? props.scope.activity_id : '',
+  ],
+  () => clearSelection(),
+);
 const statuses: Record<HourRecord['status'], string> = { current: '有效', superseded: '已更正', voided: '已撤销' };
 defineExpose({ refresh, clear });
 </script>

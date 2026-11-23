@@ -26,6 +26,7 @@
     "./RecordWorkspace.vue": "./src/RecordWorkspace.vue",
     "./usePageRead": "./src/usePageRead.ts",
     "./hourDisplay": "./src/hourDisplay.ts",
+    "./useSelection": "./src/useSelection.ts",
     "./ActivityChoice.vue": "./src/ActivityChoice.vue",
     "./HourWarnings.vue": "./src/HourWarnings.vue",
     "./ExportButton.vue": "./src/ExportButton.vue",

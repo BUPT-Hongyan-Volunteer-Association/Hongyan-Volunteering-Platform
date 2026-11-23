@@ -22,7 +22,14 @@ const emit = defineEmits<{ recheck: [] }>();
 const job = ref<ExportJob>(), busy = ref(false), error = ref('');
 const command = createCommand();
 let active = true;
+let serial = 0;
 onScopeDispose(() => { active = false; });
+watch(() => JSON.stringify(props.input), () => {
+  serial++;
+  job.value = undefined;
+  error.value = '';
+  busy.value = false;
+});
 
 const labels = computed(() => {
   const fallback = {
@@ -55,22 +62,25 @@ function report(reason: unknown) {
 async function start() {
   if (busy.value || props.disabled || job.value?.status === 'pending' || job.value?.status === 'running') return;
   const body = { ...props.input };
+  const current = ++serial;
   busy.value = true; error.value = ''; job.value = undefined;
   try {
     const { data } = await createExport({ body, throwOnError: true, headers: command.headers('create_export', body.type, body) });
     command.confirmed();
-    if (active) job.value = data.data;
+    if (active && current === serial) job.value = data.data;
   } catch (reason) {
-    if (active) report(reason);
-  } finally { if (active) busy.value = false; }
+    if (active && current === serial) report(reason);
+  } finally { if (active && current === serial) busy.value = false; }
 }
 async function readStatus() {
   if (!job.value) return;
-  const id = job.value.id;
+  const id = job.value.id, current = serial;
   try {
     const { data } = await getExport({ path: { id }, throwOnError: true });
-    if (active && job.value?.id === id) { job.value = data.data; error.value = ''; }
-  } catch (reason) { if (active && job.value?.id === id) report(reason); }
+    if (active && current === serial && job.value?.id === id) { job.value = data.data; error.value = ''; }
+  } catch (reason) {
+    if (active && current === serial && job.value?.id === id) report(reason);
+  }
 }
 watch(job, (current, _, cleanup) => {
   if (!current || (current.status !== 'pending' && current.status !== 'running')) return;
@@ -88,9 +98,10 @@ function filename(header: string | null) {
 async function download() {
   if (!job.value || job.value.status !== 'ready' || busy.value) return;
   busy.value = true; error.value = '';
+  const current = serial;
   try {
     const { data, response } = await downloadExport({ path: { id: job.value.id }, parseAs: 'blob', throwOnError: true });
-    if (!active) return;
+    if (!active || current !== serial) return;
     const url = URL.createObjectURL(data);
     const link = document.createElement('a');
     link.href = url;
@@ -98,14 +109,14 @@ async function download() {
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (reason) {
-    if (!active) return;
+    if (!active || current !== serial) return;
     if (reason instanceof ApiError && reason.status === 409) {
       await readStatus();
       if (job.value?.status !== 'ready') return;
     }
     report(reason);
   }
-  finally { if (active) busy.value = false; }
+  finally { if (active && current === serial) busy.value = false; }
 }
 </script>
 <template>

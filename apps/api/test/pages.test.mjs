@@ -488,6 +488,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         const box = await action.boundingBox(), area = await action.locator('..').boundingBox();
         assert.ok(Math.abs((box.x - area.x) * 2 + box.width - area.width) < 2);
       }
+      await helper.setViewportSize({ width: 1440, height: 900 });
       await notice.click();
       await visible(helper.getByText('已读未确认', { exact: true }));
       await visible(badge.getByText('1', { exact: true }));
@@ -807,6 +808,17 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(button(owner, '下载所选名单'));
       await button(owner, '下载所选名单').click();
       assert.match((await download).suggestedFilename(), /报名名单/);
+      await button(owner, '导出筛选结果').click();
+      await visible(button(owner, '下载名单文件'));
+      await button(owner, '已录取 18').click();
+      await visible(owner.getByText('已选 0 人', { exact: true }));
+      assert.equal(await button(owner, '下载名单文件').count(), 0);
+      await owner.getByLabel('选择名单测试10', { exact: true }).check();
+      await button(owner, /^导出所选名单（1）$/).click();
+      await visible(button(owner, '下载所选名单'));
+      await owner.getByLabel('选择名单测试10', { exact: true }).uncheck();
+      await visible(owner.getByText('已选 0 人', { exact: true }));
+      assert.equal(await button(owner, '下载所选名单').count(), 0);
       await fits(owner);
     });
 

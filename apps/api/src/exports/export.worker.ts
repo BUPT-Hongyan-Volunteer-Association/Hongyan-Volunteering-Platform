@@ -5,6 +5,7 @@ import { exportBuffer, exportContent, exportMime, exportedScope } from './export
 const expiryMs = 24 * 60 * 60 * 1000;
 const pollMs = 2000;
 const cleanupMs = 10 * 60 * 1000;
+const staleMs = 30 * 60 * 1000;
 
 @Injectable()
 export class ExportWorker implements OnApplicationBootstrap, OnModuleDestroy {
@@ -17,9 +18,9 @@ export class ExportWorker implements OnApplicationBootstrap, OnModuleDestroy {
   constructor(private db: Database) {}
 
   async onApplicationBootstrap() {
-    // 进程重启会丢失内存中的生成任务，把中断的 running 重新排队。
+    // 只回收超时的 running，避免滚动部署时干扰其他实例正在生成的任务。
     await this.db.exportJob.updateMany({
-      where: { status: 'running' },
+      where: { status: 'running', updated_at: { lt: new Date(Date.now() - staleMs) } },
       data: { status: 'pending', version: { increment: 1 }, error_message: null },
     });
     this.timer = setInterval(() => this.wake(), pollMs);

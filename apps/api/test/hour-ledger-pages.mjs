@@ -244,7 +244,14 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   const firstLabel = await firstStudent.getAttribute('aria-label');
   await firstStudent.check();
   await shown(text(owner, /已选 1 名学生/));
+  const pageTwo = owner.waitForResponse((response) =>
+    response.request().method() === 'GET' && response.url().includes('/hours')
+    && new URL(response.url()).searchParams.get('page') === '2');
   await button(owner, '下一页').click();
+  await pageTwo;
+  await owner.waitForFunction((previous) =>
+    [...document.querySelectorAll('input[aria-label^="选择学生 "]')]
+      .some((node) => node.getAttribute('aria-label') !== previous), firstLabel);
   const secondLabel = (await owner.getByLabel(/^选择学生 /).evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute('aria-label')))).find((label) => label && label !== firstLabel);
   assert.ok(secondLabel);

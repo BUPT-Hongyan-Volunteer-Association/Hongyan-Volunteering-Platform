@@ -3,6 +3,8 @@ import type { Actor } from '../auth/session.guard.js';
 import { studentId } from '../auth/session.guard.js';
 import type { ExportJob } from '../generated/prisma/client.js';
 import { managedScope, staff, workspaceScope } from '../activities/read.js';
+import { rosterOrderBy, rosterWhere } from '../registrations/registration.js';
+import { studentWhere } from '../students/query.js';
 import type { Tx } from '../activities/workflow.js';
 import { denied, invalid, invisible } from '../http.js';
 import { approvedOrigin, authorizeHourLedger, readHourLedgerWithScope } from '../hours/read-ledger.js';
@@ -11,7 +13,7 @@ import {
   receiptWhere,
   type ReceiptStatus,
 } from '../notices/receipts.js';
-import { exportWorkbook, type ExportSheet } from './workbook.js';
+import { exportWorkbook, type ExportSheet } from '../workbook.js';
 
 export const exportMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -204,21 +206,15 @@ async function rosterContent(tx: Tx, scope: StoredScope): Promise<ExportContent>
     where: { id: activity_id }, select: { activity_code: true },
   });
   if (!activity) return invisible();
-  const q = scope.q?.trim();
   const rows = await tx.registration.findMany({
-    where: {
+    where: rosterWhere({
       activity_id,
-      ...(scope.registration_ids && { id: { in: scope.registration_ids } }),
-      ...(scope.registration_status && { status: scope.registration_status }),
-      ...(q && {
-        student: { OR: [
-          { student_no: { contains: q } },
-          { account: { display_name: { contains: q } } },
-        ] },
-      }),
-    },
+      q: scope.q,
+      status: scope.registration_status,
+      registration_ids: scope.registration_ids,
+    }),
     include: { student: { select: { student_no: true, account: { select: { display_name: true } } } } },
-    orderBy: [{ submitted_at: 'asc' }, { id: 'asc' }],
+    orderBy: rosterOrderBy,
   });
   return {
     fileName: '报名名单_' + fileNamePart(activity.activity_code) + '_' + workbookDate() + '.xlsx',
@@ -309,7 +305,7 @@ async function selectedSummaryContent(tx: Tx, scope: StoredScope): Promise<Expor
         .map((student) => [
           student.account.display_name,
           student.student_no,
-          (sums.get(student.id) ?? 0).toFixed(1),
+          Number((sums.get(student.id) ?? 0).toFixed(1)),
         ]),
     },
   };
@@ -365,12 +361,12 @@ async function hoursContent(tx: Tx, scope: StoredScope): Promise<ExportContent> 
         row.activity_title ?? '',
         row.activity_code,
         row.service_date,
-        row.credited_hours,
+        Number(row.credited_hours),
         hourStatusLabels[row.status] ?? row.status,
       ]),
       total: {
         label: '合计（仅当前有效记录）',
-        value: result.total_hours,
+        value: Number(result.total_hours),
         valueIndex,
       },
     },
@@ -378,20 +374,14 @@ async function hoursContent(tx: Tx, scope: StoredScope): Promise<ExportContent> 
 }
 
 async function studentsContent(tx: Tx, scope: StoredScope): Promise<ExportContent> {
-  const q = scope.q?.trim();
   const rows = await tx.student.findMany({
-    where: {
-      ...(scope.student_ids && { id: { in: scope.student_ids } }),
-      ...(scope.cohort && { cohort: scope.cohort }),
-      ...(scope.grade && { grade: scope.grade }),
-      ...(scope.account_status && { account: { active: scope.account_status === 'active' } }),
-      ...(q && {
-        OR: [
-          { student_no: { contains: q } },
-          { account: { display_name: { contains: q } } },
-        ],
-      }),
-    },
+    where: studentWhere({
+      q: scope.q,
+      cohort: scope.cohort,
+      grade: scope.grade,
+      status: scope.account_status,
+      student_ids: scope.student_ids,
+    }),
     include: { account: { select: { display_name: true, active: true } } },
     orderBy: { student_no: 'asc' },
   });
@@ -426,6 +416,6 @@ export function exportBuffer(sheet: ExportSheet) {
 }
 
 /** 导出输入只允许契约中的字段；用于拒绝未知筛选参数。 */
-export function exportedScope(job: ExportJob): StoredScope {
+export function exportedScope(job: Pick<ExportJob, 'scope'>): StoredScope {
   return job.scope as unknown as StoredScope;
 }
