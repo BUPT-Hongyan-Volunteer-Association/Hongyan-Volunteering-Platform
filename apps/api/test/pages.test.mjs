@@ -495,6 +495,38 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       assert.deepEqual(writes, []);
       for (const p of [owner, teacher, tech]) p.off('request', collect);
     });
+    await t.test('老师按身份卡授权与收回，学生原会话保留学生入口', async () => {
+      await teacher.goto(admin + '/manage/accounts');
+      const input = teacher.getByLabel('学生学号');
+      await input.fill('0000000001');
+      await button(teacher, '查询账号').click();
+      await button(teacher, '授予负责人资格').click();
+      await teacher.getByLabel('办理原因').fill('不应带到下个账号');
+      await input.fill('0190000002');
+      await button(teacher, '查询账号').click();
+      await button(teacher, '授予负责人资格').click();
+      assert.equal(await teacher.getByLabel('办理原因').inputValue(), '');
+      await input.fill('0000000001');
+      await button(teacher, '查询账号').click();
+      await button(teacher, '授予负责人资格').click();
+      await teacher.getByLabel('限期授权').check();
+      await teacher.getByLabel('到期时间（北京时间）').fill('2099-06-30T23:59');
+      await teacher.getByLabel('办理原因').fill('合成志愿服务授权');
+      await button(teacher, '保存负责人资格').click();
+      await visible(teacher.getByText('负责人资格已保存，本次操作不会分配活动。'));
+      await visible(teacher.getByText(/有效至.*23:59/));
+      await student.goto(web + '/managed');
+      await visible(student.getByRole('heading', {name:'我的管理活动'}));
+      await button(teacher, '收回负责人资格').click();
+      await visible(teacher.getByText(/学生身份和历史记录保留/));
+      await teacher.getByLabel('办理原因').fill('合成授权结束');
+      await button(teacher, '确认收回资格').click();
+      await visible(teacher.getByText('已收回负责人资格，学生身份保留。'));
+      await student.reload();
+      await visible(student.getByText('当前账号无活动管理权限。'));
+      await student.goto(web + '/mine');
+      await visible(button(student, '退出登录'));
+    });
 
     await t.test('编辑中恢复焦点和网络后保留输入，后台核验失败时暂停保存', async () => {
       await owner.goto(web + '/managed/' + first.id + '/edit');

@@ -115,13 +115,15 @@ export function detail(row: LoadedActivity) {
 
 export type Tx = Prisma.TransactionClient;
 export type Reauthorize = () => Promise<Actor>;
+type AccountTarget = { accountId: string; checkAccess: (tx: Tx) => Promise<void> };
 export type Target =
+  | AccountTarget
   | { activityId: string }
   | { activityIds: (tx: Tx) => Promise<string[]> }
   | { reviewId: string }
   | { registrationId: string }
   | null;
-async function targetActivityId(tx: Tx, target: Exclude<Target, { activityIds: unknown } | null>) {
+async function targetActivityId(tx: Tx, target: Exclude<Target, AccountTarget | { activityIds: unknown } | null>) {
   if ('activityId' in target) return target.activityId;
   const reference =
     'reviewId' in target
@@ -162,7 +164,9 @@ export class Workflow {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${stable(identity)},0))`;
       let row: LoadedActivity | null = null;
       let ids: string[] | undefined;
-      if (target && 'activityIds' in target) {
+      if (target && 'accountId' in target) {
+        await tx.$queryRaw`SELECT id FROM account WHERE id IN (${target.accountId}::uuid, ${account_id}::uuid) ORDER BY id FOR UPDATE`;
+      } else if (target && 'activityIds' in target) {
         ids = [...new Set(await target.activityIds(tx))];
         const locked = await tx.$queryRaw<{ id: string }[]>`
           SELECT id FROM activity WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR UPDATE`;
@@ -210,6 +214,7 @@ export class Workflow {
         return actor;
       };
       const actor = await reauthorize();
+      if (target && 'accountId' in target) await target.checkAccess(tx);
       const cached = await tx.commandReceipt.findUnique({
         where: { account_id_method_path_key: identity },
       });

@@ -547,6 +547,48 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal(detail.version, 1);
       assert.deepEqual(grants.roles, [{ role:'student' }, { role:'organizer', expires_at:expires.toISOString() }]);
     });
+    await t.test('资格授予、到期和回收立即作用于原会话，角色并发及重放只记一次', async (t) => {
+      const { account_id } = (await student.request('/me')).data;
+      const path = '/admin/accounts/' + account_id + '/roles';
+      const original = (await teacher.request(path)).data;
+      const now = Date.now(), expires_at = new Date(now + 120000).toISOString();
+      t.mock.timers.enable({ apis:['Date'], now });
+      const body = { expected_version: original.version, reason:'合成授权核对',
+        roles:[...original.roles, { role:'organizer', expires_at }] };
+      const key = randomUUID();
+      const put = (payload, token) => teacher.write('PUT', path, payload, token);
+      assert.equal((await student.write('PUT', path, body)).status, 403);
+      for (const roles of [[], [{role:'student', expires_at}], [...original.roles, {role:'reviewer'}]]) {
+        assert.equal((await put({...body, roles})).status, 403);
+      }
+      const writes = await Promise.all([put(body, key), put(body, key)]);
+      assert.equal(writes[0].status, 200);
+      assert.deepEqual(writes[0], writes[1]);
+      assert.equal((await put({...body, reason:'不同内容'}, key)).code, 'conflict');
+      assert.equal((await put(body)).code, 'version_conflict');
+      const managed = () => student.request('/organizer/activities');
+      assert.equal((await managed()).status, 200);
+      assert.equal((await student.request('/organizer/activities/' + sample.id + '/registrations')).status, 404);
+      t.mock.timers.setTime(Date.parse(expires_at));
+      assert.deepEqual((await student.request('/me')).data.roles, ['student']);
+      assert.equal((await managed()).status, 403);
+      const permanent = {...body, expected_version:writes[0].data.version, roles:[...original.roles, {role:'organizer'}]};
+      const renewals = await Promise.all([put(permanent), put(permanent)]);
+      assert.deepEqual(renewals.map(result => result.status).sort(), [200,409]);
+      assert.equal((await managed()).status, 200);
+      const revoked = await put({...body, expected_version:permanent.expected_version + 1, roles:original.roles});
+      assert.equal(revoked.status, 200);
+      assert.equal((await managed()).status, 403);
+      assert.equal((await student.request('/me/registrations')).status, 200);
+      const events = await db.auditEvent.findMany({where:{resource_id:account_id, action:'set_account_roles'}, orderBy:{created_at:'asc'}});
+      assert.equal(events.length, 3);
+      assert.equal(events[0].actor_id, (await teacher.request('/me')).data.account_id);
+      assert.equal(events[0].reason, body.reason);
+      assert.deepEqual(events[0].before, {roles:original.roles});
+      assert.deepEqual(events[0].after, {roles:body.roles});
+      await db.roleGrant.create({data:{account_id, role:'reviewer'}});
+      assert.equal((await put(body, key)).status, 403);
+    });
   } finally {
     await app?.close();
   }

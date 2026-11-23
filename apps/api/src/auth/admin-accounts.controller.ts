@@ -1,4 +1,8 @@
-import { Controller, Get, Header, Param, ParseUUIDPipe, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Put, Query, Req, UseGuards } from '@nestjs/common';
+import type { RoleReplacement } from '@hongyan/contracts/types';
+import { checkVersion, Workflow, type Tx } from '../activities/workflow.js';
+import { validate } from '../activities/validation.js';
+import { audit } from '../audit.js';
 import { Prisma, Role } from '../generated/prisma/client.js';
 import { pagination } from '../activities/read.js';
 import { Database } from '../database.js';
@@ -37,7 +41,7 @@ function summary(row: Row) {
 @Controller('admin/accounts')
 @UseGuards(StaffGuard)
 export class AdminAccountsController {
-  constructor(private db: Database) {}
+  constructor(private db: Database, private workflow: Workflow) {}
 
   @Get()
   @Header('Cache-Control', 'no-store')
@@ -81,5 +85,45 @@ export class AdminAccountsController {
   async roles(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string) {
     const row = await this.read(req.actor, id);
     return envelope({ account_id: id, version: row.roles_version, roles: grants(row) });
+  }
+
+  @Put(':id/roles')
+  async changeOrganizer(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    const checkAccess = async (tx: Tx) => {
+      const eligible = await tx.account.findFirst({ where: {
+        id, student: { isNot: null }, roles: { some: { role: 'student' }, none: { role: { in: ['reviewer', 'tech_admin'] } } },
+      }, select: { id: true } });
+      if (!eligible) denied();
+    };
+    return this.workflow.run(req, { accountId: id, checkAccess }, 'review', async (tx, _activity, actor) => {
+      const input = validate<RoleReplacement>('role_replacement', body);
+      const reason = input.reason.trim();
+      if (!reason) invalid('reason', '请填写办理原因');
+      if (new Set(input.roles.map(grant => grant.role)).size !== input.roles.length)
+        invalid('roles', '同一角色不能重复');
+      const row = await tx.account.findUniqueOrThrow({ where: { id }, select: fields });
+      checkVersion(row.roles_version, input.expected_version);
+      const before = grants(row);
+      const student = input.roles.find(grant => grant.role === 'student');
+      const unchanged = before.find(grant => grant.role === 'student')!;
+      if (!student || (student.expires_at ? new Date(student.expires_at).toISOString() : undefined) !== unchanged.expires_at
+        || input.roles.some(grant => grant.role !== 'student' && grant.role !== 'organizer')) denied();
+      const next = input.roles.find(grant => grant.role === 'organizer');
+      const current = before.find(grant => grant.role === 'organizer');
+      const expiry = next?.expires_at ? new Date(next.expires_at) : null;
+      if (expiry && expiry.getTime() <= Date.now()) invalid('roles', '到期时间必须晚于当前时间');
+      if (!!current === !!next && current?.expires_at === expiry?.toISOString())
+        return { account_id: id, version: row.roles_version, roles: before };
+      if (next) await tx.roleGrant.upsert({
+        where: { account_id_role: { account_id: id, role: 'organizer' } },
+        create: { account_id: id, role: 'organizer', expires_at: expiry }, update: { expires_at: expiry },
+      });
+      else await tx.roleGrant.delete({ where: { account_id_role: { account_id: id, role: 'organizer' } } });
+      const updated = await tx.account.update({ where: { id }, data: { roles_version: { increment: 1 } }, select: fields });
+      const after = grants(updated);
+      await audit(tx, { actor_id: actor.account_id, resource_type: 'account', resource_id: id,
+        action: 'set_account_roles', reason, before: { roles: before }, after: { roles: after } });
+      return { account_id: id, version: updated.roles_version, roles: after };
+    });
   }
 }
