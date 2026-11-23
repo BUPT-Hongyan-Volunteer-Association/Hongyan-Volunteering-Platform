@@ -609,6 +609,51 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.deepEqual(events[0].before, snapshot(before));
       assert.deepEqual(events[0].after, snapshot(removed.data));
     });
+    await t.test('后台修复到期主负责人，旧版本和资格恢复均不能覆盖现状', async () => {
+      const path = '/admin/activities/' + sample.id + '/members';
+      const read = '/organizer/activities/' + sample.id + '/members';
+      const before = (await teacher.request(read)).data;
+      const oldId = (await other.request('/me')).data.account_id;
+      const nextId = (await owner.request('/me')).data.account_id;
+      const assignments = before.items.map(({ account_id, member_role }) => ({ account_id, member_role }));
+      const incoming = { account_id: nextId, member_role: 'collaborator' };
+      const add = { expected_version: before.version, require_unavailable_owner: true,
+        members: [...assignments, incoming], reason: '补入接任人' };
+      const put = (body, key) => teacher.write('PUT', path, body, key);
+      const where = { account_id_role: { account_id: oldId, role: 'organizer' } };
+      assert.equal((await put(add)).status, 409);
+      await db.roleGrant.update({ where, data: { expires_at: new Date(0) } });
+      assert.equal((await teacher.request(read)).data.owner_unavailable_reason, 'role_expired');
+      assert.equal((await other.request(read)).status, 403);
+      assert.equal((await other.request('/me/hours')).status, 200);
+      assert.equal((await owner.write('PUT', path, add)).status, 403);
+      assert.equal((await put({ ...add, members: [...add.members, incoming] })).status, 422);
+      const assign = member => ({ ...member, member_role: member.account_id === nextId ? 'owner' : 'collaborator' });
+      assert.equal((await put({ ...add, members: add.members.map(assign) })).status, 422);
+      const added = await put(add);
+      assert.equal(added.status, 200);
+      const repair = { ...add, expected_version: added.data.version, members: add.members.map(assign), reason: '老师核对后交接' };
+      assert.equal((await put({ ...repair, members: repair.members.filter(m => m.account_id !== oldId) })).status, 422);
+      const targetGrant = { account_id_role: { account_id: nextId, role: 'organizer' } };
+      await db.roleGrant.update({ where: targetGrant, data: { expires_at: new Date(0) } });
+      assert.equal((await put(repair)).status, 422);
+      await db.roleGrant.update({ where: targetGrant, data: { expires_at: null } });
+      const keys = [randomUUID(), randomUUID()];
+      const outcomes = await Promise.all(keys.map(key => put(repair, key)));
+      assert.deepEqual(outcomes.map(r => r.status).sort(), [200, 409]);
+      const winner = outcomes.findIndex(r => r.status === 200);
+      assert.deepEqual(await put(repair, keys[winner]), outcomes[winner]);
+      const after = (await teacher.request(read)).data;
+      assert.equal(after.owner_unavailable_reason, undefined);
+      assert.deepEqual(after.items.filter(m => m.member_role === 'owner').map(m => m.account_id), [nextId]);
+      assert.equal(after.items.find(m => m.account_id === oldId).member_role, 'collaborator');
+      assert.equal((await owner.request(read)).status, 200);
+      assert.equal((await other.request(read)).status, 403);
+      const events = await db.auditEvent.findMany({ where: { resource_id: sample.id, action: 'set_activity_members', reason: repair.reason } });
+      assert.equal(events.length, 1);
+      assert.equal(events[0].actor_id, (await teacher.request('/me')).data.account_id);
+      assert.equal(events[0].before.version + 1, events[0].after.version);
+    });
     await t.test('账号只读范围先于分页，角色和详情不泄露高权限资料', async () => {
       const expires = new Date('2099-12-31T15:59:00Z');
       const create = (username, roles) => db.account.create({ data: {

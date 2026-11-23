@@ -513,6 +513,8 @@ onUnmounted(() => {
               }"
               >查看待审版本<UiIcon name="Right"
             /></RouterLink>
+            <RouterLink v-if="scope === 'all' && selected.activity_id !== standalone" class="button"
+              :to="'/manage/teams/' + selected.activity_id">查看活动团队</RouterLink>
             <RouterLink
               class="button primary"
               v-if="scope === 'managed'"

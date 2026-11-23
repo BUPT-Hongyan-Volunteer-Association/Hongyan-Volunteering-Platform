@@ -1,12 +1,12 @@
-import { Body, Controller, Delete, Get, Header, HttpCode, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
-import type { MemberAdd, OwnerTransfer, ReasonAction } from '@hongyan/contracts/types';
+import { Body, Controller, Delete, Get, Header, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Req } from '@nestjs/common';
+import type { MemberAdd, MemberReplacement, OwnerTransfer, ReasonAction } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import { audit } from '../audit.js';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
-import { envelope, invalid, invisible } from '../http.js';
+import { BusinessError, envelope, invalid, invisible } from '../http.js';
 import { activityPage } from './list.js';
-import { managedScope, teamManagerScope } from './read.js';
+import { managedScope, staff, teamManagerScope } from './read.js';
 import { validate } from './validation.js';
 import { checkVersion, Workflow, type Tx } from './workflow.js';
 
@@ -30,9 +30,26 @@ async function readTeam(db: Tx, where: Prisma.ActivityWhereInput) {
   })) };
 }
 
+async function staffTeam(tx: Tx, team: Awaited<ReturnType<typeof readTeam>>) {
+  const owner = team.items.find(member => member.member_role === 'owner')!;
+  const account = await tx.account.findUniqueOrThrow({
+    where: { id: owner.account_id },
+    select: { active: true, roles: { where: { role: 'organizer' }, select: { expires_at: true } } },
+  });
+  const [grant] = account.roles;
+  const reason = !account.active ? 'account_disabled' : !grant ? 'role_missing'
+    : grant.expires_at && grant.expires_at <= new Date() ? 'role_expired' : undefined;
+  return reason ? { ...team, owner_unavailable_reason: reason } : team;
+}
+
 const teamSnapshot = (team: Awaited<ReturnType<typeof readTeam>>) => ({
   version: team.version, members: team.items.map(({ account_id, member_role }) => ({ account_id, member_role })),
 });
+
+async function switchOwner(tx: Tx, id: string, owner: string) {
+  await tx.activityMember.updateMany({ where: { activity_id: id, member_role: 'owner' }, data: { member_role: 'collaborator' } });
+  await tx.activityMember.update({ where: { activity_id_account_id: { activity_id: id, account_id: owner } }, data: { member_role: 'owner' } });
+}
 
 async function recordTeamChange(tx: Tx, id: string, before: Awaited<ReturnType<typeof readTeam>>,
   actorId: string, action: string, reason: string) {
@@ -73,8 +90,10 @@ export class ManagedController {
     @Req() req: SessionRequest,
     @Param('id', new ParseUUIDPipe()) id: string,
   ) {
-    return envelope(await this.db.$transaction(tx => readTeam(tx, { id, ...managedScope(req.actor) }),
-      { isolationLevel: 'RepeatableRead' }));
+    return this.db.$transaction(async tx => {
+      const team = await readTeam(tx, { id, ...managedScope(req.actor) });
+      return envelope(staff(req.actor) ? await staffTeam(tx, team) : team);
+    }, { isolationLevel: 'RepeatableRead' });
   }
 
   @Get(':id/member-candidates')
@@ -145,9 +164,52 @@ export class ManagedController {
       if (!before.items.some(member => member.account_id === target && member.member_role === 'collaborator') ||
           !await tx.account.count({ where: { id: target, ...eligible(new Date()) } }))
         invalid('target_account_id', '请选择本活动中仍有负责人资格的协作者');
-      await tx.activityMember.updateMany({ where: { activity_id: id, member_role: 'owner' }, data: { member_role: 'collaborator' } });
-      await tx.activityMember.update({ where: { activity_id_account_id: { activity_id: id, account_id: target } }, data: { member_role: 'owner' } });
+      await switchOwner(tx, id, target);
       return recordTeamChange(tx, id, before, actor.account_id, 'transfer_activity_owner', reason);
+    });
+  }
+}
+
+@Controller('admin/activities')
+export class AdminTeamController {
+  constructor(private workflow: Workflow) {}
+
+  @Put(':id/members')
+  replace(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.workflow.run(req, { activityId: id }, 'review', async (tx, _row, actor, reauthorize) => {
+      const input = validate<MemberReplacement>('member_replacement', body);
+      const reason = input.reason.trim();
+      if (!reason) invalid('reason', '请填写成员调整原因');
+      const desired = new Map(input.members.map(member => [member.account_id.toLowerCase(), member.member_role]));
+      const owners = [...desired.keys()].filter(account => desired.get(account) === 'owner');
+      if (owners.length !== 1 || desired.size !== input.members.length)
+        invalid('members', '成员不能重复，且必须保留一名主负责人');
+
+      const before = await readTeam(tx, { id });
+      checkVersion(before.version, input.expected_version);
+      const current = new Map(before.items.map(member => [member.account_id, member.member_role]));
+      const owner = owners[0];
+      const previous = before.items.find(member => member.member_role === 'owner')!.account_id;
+      if (owner !== previous && (current.get(owner) !== 'collaborator' || desired.get(previous) !== 'collaborator'))
+        invalid('members', '请先添加接任人为协作者，交接时原主负责人须保留为协作者');
+
+      const added = [...desired.keys()].filter(account => !current.has(account));
+      const removed = [...current.keys()].filter(account => !desired.has(account));
+      const qualify = owner === previous ? added : [...added, owner];
+      const locks = [...qualify, actor.account_id, previous];
+      await tx.$queryRaw`SELECT id FROM account WHERE id = ANY(${locks}::uuid[]) ORDER BY id FOR SHARE`;
+      await reauthorize();
+      if (input.require_unavailable_owner && !('owner_unavailable_reason' in await staffTeam(tx, before)))
+        throw new BusinessError(409, 'invalid_state', '现任主负责人资格已恢复，请重新核对');
+      if (qualify.length && await tx.account.count({ where: { id: { in: qualify }, ...eligible(new Date()) } }) !== qualify.length)
+        invalid('members', '新增成员和接任人均须具有有效负责人资格');
+      if (!added.length && !removed.length && owner === previous) return staffTeam(tx, before);
+      if (removed.length) await tx.activityMember.deleteMany({ where: { activity_id: id, account_id: { in: removed } } });
+      if (added.length) await tx.activityMember.createMany({ data: added.map(account_id => ({
+        activity_id: id, account_id, member_role: 'collaborator',
+      })) });
+      if (owner !== previous) await switchOwner(tx, id, owner);
+      return staffTeam(tx, await recordTeamChange(tx, id, before, actor.account_id, 'set_activity_members', reason));
     });
   }
 }

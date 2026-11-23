@@ -8509,6 +8509,9 @@ components:
         expected_version:
           type: integer
           minimum: 1
+        require_unavailable_owner:
+          type: boolean
+          description: 失效归属修复表单设为 true。若现任主负责人资格已恢复则返回 409，提示重新核对。
         members:
           type: array
           items:
@@ -10783,6 +10786,10 @@ components:
     activity_member_list:
       type: object
       properties:
+        owner_unavailable_reason:
+          type: string
+          enum: [account_disabled, role_missing, role_expired]
+          description: 授权后台核对现任主负责人时返回的失效原因，仅在归属需要修复时提供。
         items:
           type: array
           items:

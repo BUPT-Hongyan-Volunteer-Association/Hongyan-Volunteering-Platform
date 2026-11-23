@@ -27,7 +27,7 @@ import { Database } from './database.js';
 import { PublicController } from './activities/public.controller.js';
 import { RegistrationController } from './registrations/registration.controller.js';
 import { AttendanceController } from './attendance/attendance.controller.js';
-import { ManagedController } from './activities/managed.controller.js';
+import { AdminTeamController, ManagedController } from './activities/managed.controller.js';
 import { NoticeController } from './notices/notice.controller.js';
 import { NoticeWorker } from './notices/notice.worker.js';
 import { HourBatchesController, HourUploadScope } from './hours/batches.controller.js';
@@ -87,6 +87,7 @@ class HttpErrorFilter implements ExceptionFilter {
     AccountController,
     AdminAccountsController,
     ManagedController,
+    AdminTeamController,
     PublicController,
     DraftController,
     GroupImageController,

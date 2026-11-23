@@ -27,6 +27,7 @@ const groups = [
     { to: '/schedule', label: '全院日程', icon: 'Calendar' },
   ],
   [
+    { to: '/manage/teams', label: '活动团队', icon: 'User' },
     { to: '/reviews', label: '活动审核', icon: 'DocumentChecked' },
     { to: '/hours', label: '时长审核', icon: 'Clock' },
     ...managementLinks(['corrections', 'incidents', 'appeals']),

@@ -1514,6 +1514,35 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(owner.getByRole('alert').filter({ hasText: '记录不存在或不可见' }));
       await owner.goto(web + '/mine');
       await visible(owner.getByRole('heading', { name: '甲负责人' }));
+      await link(teacher, '账号与角色').click();
+      await teacher.getByLabel('学生学号').fill('0000000003');
+      await button(teacher, '查询账号').click();
+      await button(teacher, '收回负责人资格').click();
+      await teacher.getByLabel('办理原因').fill('负责人离任');
+      await button(teacher, '确认收回资格').click();
+      await visible(teacher.getByText('已收回负责人资格，学生身份保留。'));
+      await link(teacher, '活动团队').click();
+      await teacher.getByLabel('活动名称或编号').fill('P2026-0001');
+      await button(teacher, '查询活动').click();
+      await link(teacher, '校园服务甲').click();
+      await visible(teacher.getByText('当前没有负责人角色'));
+      await teacher.getByLabel('接任人学号').fill('0000000002');
+      await button(teacher, '核对接任人').click();
+      await visible(teacher.getByText('甲负责人 · 0000000002', { exact: true }));
+      await teacher.getByLabel('添加原因').fill('补充接任协作者');
+      await button(teacher, '确认添加协作者').click();
+      await visible(teacher.getByText('甲负责人已加入活动，请核对交接信息并填写交接原因。'));
+      assert.equal(await teacher.getByLabel('交接原因').inputValue(), '');
+      await teacher.getByLabel('交接原因').fill('老师核对后办理');
+      await button(teacher, '确认重新指定').click();
+      await visible(teacher.getByText('甲负责人已接任主负责人。'));
+      await visible(teacher.getByRole('heading', { name: '主负责人 · 甲负责人' }));
+      await owner.goto(web + '/managed/' + first.id);
+      await visible(owner.getByText('交接主负责人', { exact: true }));
+      await joined.goto(web + '/mine');
+      await visible(joined.getByRole('heading', { name: '乙负责人' }));
+      assert.equal(await joined.getByRole('link', { name: '活动管理', exact: true }).count(), 0);
+
 
 
     });
