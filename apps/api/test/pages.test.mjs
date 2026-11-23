@@ -1637,6 +1637,52 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
 
 
     });
+    await t.test('老师从学生档案停用甲、核实后恢复，两个原学生窗口均须重新登录', async () => {
+      const extra = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 } });
+      const second = await extra.newPage();
+      second.setDefaultTimeout(8000);
+      const loginAgain = async page => {
+        await page.getByLabel('账号', { exact: true }).fill('0000000002');
+        await page.getByLabel('当前密码').fill(password);
+        await button(page, '登录').click();
+        await visible(button(page, '退出登录'));
+      };
+      try {
+        await second.goto(web + '/mine');
+        await loginAgain(second);
+        await teacher.goto(admin + '/manage/students');
+        await teacher.setViewportSize({ width: 390, height: 844 });
+        await teacher.getByLabel('学号或姓名').fill('0000000002');
+        await button(teacher, '查询').click();
+        await link(teacher, '核对甲负责人的账号').click();
+        await button(teacher, '停用账号').click();
+        await visible(teacher.getByText('停用账号 · 甲负责人（0000000002）'));
+        await teacher.getByLabel('办理原因').fill('学生暂离试点');
+        await fits(teacher);
+        await button(teacher, '确认停用').click();
+        await visible(teacher.getByText('学生账号已停用，所有旧会话已撤销。'));
+        for (const page of [owner, second]) {
+          await page.goto(web + '/mine');
+          await visible(button(page, '登录'));
+        }
+        await button(teacher, '启用账号').click();
+        await teacher.getByLabel('办理原因').fill('已核对本期名单');
+        assert.equal(await button(teacher, '确认启用').isDisabled(), true);
+        await teacher.getByLabel('已核实该学生仍在学院核定试点范围内').check();
+        await button(teacher, '确认启用').click();
+        await visible(teacher.getByText('学生账号已恢复启用，原会话仍然失效。'));
+        await second.reload();
+        await visible(button(second, '登录'));
+        await loginAgain(owner);
+        await link(teacher, '返回学生档案').click();
+        await visible(link(teacher, '核对甲负责人的账号'));
+        assert.equal(await teacher.getByLabel('学号或姓名').inputValue(), '0000000002');
+      } finally {
+        await teacher.setViewportSize({ width: 1440, height: 900 });
+        await extra.close();
+      }
+    });
+
     await t.test('老师核对姓名学号并确认本人后重置，负责人旧窗口退出', async () => {
       await teacher.goto(admin + '/manage/accounts');
       await teacher.getByLabel('学生学号').fill('0000000002');

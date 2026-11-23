@@ -1,9 +1,16 @@
+import type { StudentPatch } from '@hongyan/contracts/types';
+import { Workflow, type Tx } from '../activities/workflow.js';
+import { managedAccountScope } from '../auth/account-access.js';
+import type { Actor } from '../auth/session.guard.js';
+import { Database } from '../database.js';
+import { updateStudent } from './student-profile.js';
 import {
   Body,
   Controller,
   Get,
   HttpCode,
   Param,
+  Patch,
   ParseUUIDPipe,
   Post,
   Query,
@@ -15,7 +22,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { validate } from '../activities/validation.js';
 import type { SessionRequest } from '../auth/session.guard.js';
-import { envelope } from '../http.js';
+import { denied, envelope, invisible } from '../http.js';
 import { maxImportBytes } from './import.js';
 import { StudentImportService, type UploadedStudentFile } from './import.service.js';
 import { StaffGuard } from './staff.guard.js';
@@ -23,7 +30,7 @@ import { StaffGuard } from './staff.guard.js';
 @Controller()
 @UseGuards(StaffGuard)
 export class StudentController {
-  constructor(private readonly imports: StudentImportService) {}
+  constructor(private readonly imports: StudentImportService, private readonly db: Database, private readonly workflow: Workflow) {}
 
   @Post('admin/student-imports')
   @HttpCode(202)
@@ -70,6 +77,18 @@ export class StudentController {
   ) {
     const input = validate<{ expected_version: number }>('version_action', body);
     return this.imports.retry(req, id, input);
+  }
+
+  @Patch('admin/students/:id')
+  async update(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    const target = await this.db.student.findUnique({ where: { id }, select: { account_id: true } });
+    if (!target) return req.actor.roles.includes('tech_admin') ? invisible() : denied();
+    const checkAccess = async (tx: Tx, actor: Actor) => {
+      const allowed = await tx.account.count({ where: { ...managedAccountScope(actor), id: target.account_id, student: { id } } });
+      if (!allowed) denied();
+    };
+    return this.workflow.run(req, { accountId: target.account_id, checkAccess }, 'review', (tx, _activity, actor) =>
+      updateStudent(tx, id, actor, validate<StudentPatch>('student_patch', body)));
   }
 
   @Get('admin/students')

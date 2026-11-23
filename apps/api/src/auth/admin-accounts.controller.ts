@@ -1,3 +1,4 @@
+import { managedAccountScope, requirePermanentAdmin } from './account-access.js';
 import { Body, Controller, Get, Header, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import type { AccountStatusPatch, ReasonAction, RoleReplacement, StaffAccountInput } from '@hongyan/contracts/types';
 import { checkVersion, Workflow, type Tx } from '../activities/workflow.js';
@@ -12,17 +13,10 @@ import type { Actor, SessionRequest } from './session.guard.js';
 
 const fields = {
   id: true, username: true, password_hash: true, display_name: true, active: true, version: true, roles_version: true,
-  student: { select: { id: true } },
+  student: { select: { id: true, version: true } },
   roles: { select: { role: true, expires_at: true }, orderBy: { role: 'asc' } },
 } satisfies Prisma.AccountSelect;
 type Row = Prisma.AccountGetPayload<{ select: typeof fields }>;
-
-function scope(actor: Actor): Prisma.AccountWhereInput {
-  return actor.roles.includes('tech_admin') ? {} : {
-    student: { isNot: null },
-    roles: { none: { role: { in: ['reviewer', 'tech_admin'] } } },
-  };
-}
 
 function grants(row: Row) {
   return row.roles.map(({ role, expires_at }) => ({
@@ -33,21 +27,9 @@ function grants(row: Row) {
 function summary(row: Row) {
   return {
     account_id: row.id, version: row.version, username: row.username, display_name: row.display_name,
-    status: row.active ? 'active' : 'inactive', ...(row.student && { student_id: row.student.id }),
+    status: row.active ? 'active' : 'inactive', ...(row.student && { student_id: row.student.id, student_version: row.student.version }),
     ...(row.password_hash === null && { credential_pending: true }), roles: grants(row),
   };
-}
-
-// Take the same transaction lock before checking the post-change administrator set.
-async function requirePermanentAdmin(tx: Tx) {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('account:permanent-tech-admin', 0))`;
-  const [result] = await tx.$queryRaw<{ available: boolean }[]>`
-    SELECT EXISTS (
-      SELECT 1 FROM account a JOIN role_grant g ON g.account_id = a.id
-      WHERE a.active AND a.password_hash ~ '^[^:]+:[0-9a-fA-F]{128}$'
-        AND g.role = 'tech_admin' AND g.expires_at IS NULL
-    ) AS available`;
-  if (!result.available) throw new BusinessError(409, 'invalid_state', '须保留至少一个可登录且角色长期有效的技术管理员');
 }
 
 @Controller('admin/accounts')
@@ -66,7 +48,7 @@ export class AdminAccountsController {
     if (username !== undefined && (typeof username !== 'string' || !username || username.length > 64))
       invalid('username', '请输入完整登录账号，最多 64 字');
     const where: Prisma.AccountWhereInput = { AND: [
-      scope(req.actor),
+      managedAccountScope(req.actor),
       username ? { username } : {},
       q && /^\d{10}$/.test(q) ? { student: { student_no: q } } : q ? {
         OR: [{ username: { contains: q } }, { display_name: { contains: q } }],
@@ -83,7 +65,7 @@ export class AdminAccountsController {
 
   private async read(actor: Actor, id: string) {
     const [row] = await this.db.$transaction([
-      this.db.account.findFirst({ where: { id, ...scope(actor) }, select: fields }),
+      this.db.account.findFirst({ where: { id, ...managedAccountScope(actor) }, select: fields }),
     ], { isolationLevel: 'RepeatableRead' });
     if (!row) return actor.roles.includes('tech_admin') ? invisible() : denied();
     return row;
@@ -126,7 +108,7 @@ export class AdminAccountsController {
   @HttpCode(200)
   resetPassword(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
     const checkAccess = async (tx: Tx, actor: Actor) => {
-      const visible = await tx.account.count({ where: { id, ...scope(actor) } });
+      const visible = await tx.account.count({ where: { id, ...managedAccountScope(actor) } });
       if (!visible) return actor.roles.includes('tech_admin') ? invisible() : denied();
     };
     return this.workflow.run(req, { accountId: id, checkAccess }, 'review', async (tx, _row, actor) => {
@@ -159,7 +141,7 @@ export class AdminAccountsController {
     let row: Row, input: RoleReplacement;
     const checkAccess = async (tx: Tx, actor: Actor) => {
       const technical = actor.roles.includes('tech_admin');
-      const target = await tx.account.findFirst({ where: { id, ...scope(actor) }, select: fields });
+      const target = await tx.account.findFirst({ where: { id, ...managedAccountScope(actor) }, select: fields });
       if (!target) return technical ? invisible() : denied();
       row = target;
       input = validate<RoleReplacement>('role_replacement', body);

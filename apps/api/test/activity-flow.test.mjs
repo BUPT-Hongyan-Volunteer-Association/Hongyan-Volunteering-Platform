@@ -790,7 +790,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
         assert.equal((await teacher.request(path + '/' + hidden.id + suffix)).status, 403);
       }
       const detail = (await teacher.request(path + '/' + firstVisible.id)).data;
-      assert.deepEqual(Object.keys(detail).sort(), ['account_id','display_name','roles','status','student_id','username','version']);
+      assert.deepEqual(Object.keys(detail).sort(), ['account_id','display_name','roles','status','student_id','student_version','username','version']);
       const grants = (await teacher.request(path + '/' + firstVisible.id + '/roles')).data;
       assert.equal(grants.version, 3);
       assert.equal(detail.version, 1);
@@ -936,6 +936,99 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
         assert.equal((await set(admin, backup, backupState.version, backupRoles)).status, 200);
       }
     });
+    await t.test('档案修正使用学生版本，旧状态表单须重新核对，姓名和班级修正脱敏记录', async () => {
+      const row = (await teacher.request('/admin/students?q=0999000003')).data.items[0];
+      const path = '/admin/students/' + row.id;
+      const patch = { expected_version: row.version, reason: '核对学院档案', name: '合成测试学生', class_name: '0123456789' };
+      assert.equal((await teacher.write('PATCH', path, { ...patch, class_name: '123' })).status, 422);
+      const changed = await teacher.write('PATCH', path, patch);
+      assert.equal(changed.status, 200);
+      assert.equal(changed.data.class_name, patch.class_name);
+      assert.equal((await teacher.write('PATCH', path, { expected_version: row.version, reason: '旧表单', status: 'inactive' })).code, 'version_conflict');
+      assert.equal((await teacher.request('/admin/accounts/' + row.account_id)).data.status, 'active');
+      const event = await db.auditEvent.findFirstOrThrow({ where: { resource_id: row.id, action: 'update_student' } });
+      assert.equal(event.after.class_name, '******6789');
+      assert.equal(event.after.name, '合＊');
+      assert.equal(event.after.version, row.version + 1);
+    });
+    await t.test('老师停用与恢复学生负责人需核实试点范围，两份旧会话失效且身份和报名历史保留', async () => {
+      const second = browser(base);
+      await second.signIn('0000000002', ownerPassword);
+      const me = (await owner.request('/me')).data;
+      const id = me.student.id;
+      const accountPath = '/admin/accounts/' + me.account_id;
+      const path = '/admin/students/' + id;
+      const before = (await teacher.request(accountPath)).data;
+      const roles = (await teacher.request(accountPath + '/roles')).data;
+      const history = await db.registration.findMany({ where: { student_id: id } });
+      const off = { expected_version: before.student_version, status: 'inactive', reason: '本期暂停参加试点' };
+      const key = randomUUID();
+      assert.equal((await owner.write('PATCH', path, off)).status, 403);
+      const results = await Promise.all([teacher.write('PATCH', path, off, key), teacher.write('PATCH', path, off, key)]);
+      assert.equal(results[0].status, 200);
+      assert.deepEqual(results[0], results[1]);
+      assert.equal(results[0].data.version, before.student_version + 1);
+      assert.equal((await teacher.write('PATCH', path, off)).code, 'version_conflict');
+      assert.equal((await owner.request('/me')).status, 401);
+      assert.equal((await second.request('/me')).status, 401);
+      await second.request('/auth/csrf');
+      assert.equal((await second.request('/auth/login', { method: 'POST', body: { username: me.username, password: ownerPassword } })).status, 401);
+      const on = { expected_version: results[0].data.version, status: 'active', reason: '已核对本期学院名单' };
+      for (const flag of [{}, { pilot_scope_verified: false }])
+        assert.equal((await teacher.write('PATCH', path, { ...on, ...flag })).status, 422);
+      assert.equal((await teacher.write('PATCH', path, { ...on, pilot_scope_verified: true })).status, 200);
+      assert.equal((await second.request('/me')).status, 401);
+      assert.equal((await owner.request('/me')).status, 401);
+      await owner.signIn(me.username, ownerPassword);
+      assert.equal((await owner.request('/me/hours')).status, 200);
+      assert.deepEqual((await teacher.request(accountPath + '/roles')).data, roles);
+      assert.deepEqual(await db.registration.findMany({ where: { student_id: id } }), history);
+      assert.deepEqual((await teacher.request(accountPath)).data, { ...before, student_version: before.student_version + 2, version: before.version + 2 });
+      const events = await db.auditEvent.findMany({ where: { resource_id: id, action: 'update_student' }, orderBy: { created_at: 'asc' } });
+      assert.deepEqual(events.map(e => [e.before.status, e.after.status, e.reason]), [
+        ['active', 'inactive', off.reason], ['inactive', 'active', on.reason],
+      ]);
+      assert.equal(events[1].after.pilot_scope_verified, true);
+      assert.equal(events[0].actor_id, (await teacher.request('/me')).data.account_id);
+      await db.roleGrant.create({ data: { account_id: me.account_id, role: 'reviewer' } });
+      assert.equal((await teacher.write('PATCH', path, off, key)).status, 403);
+      await db.roleGrant.delete({ where: { account_id_role: { account_id: me.account_id, role: 'reviewer' } } });
+    });
+
+    await t.test('学生档案停用与另一管理员改限期并发，仅能失去一名长期管理员', async () => {
+      const admin = browser(base);
+      await admin.signIn('demo.admin', adminPassword);
+      const primaryPath = '/admin/accounts/' + (await admin.request('/me')).data.account_id + '/roles';
+      const me = (await owner.request('/me')).data;
+      const target = '/admin/accounts/' + me.account_id;
+      const studentPath = '/admin/students/' + me.student.id;
+      const primary = (await admin.request(primaryPath)).data;
+      const original = (await admin.request(target + '/roles')).data;
+      const grant = await admin.write('PUT', target + '/roles', { expected_version: original.version,
+        roles: [...original.roles, {role: 'tech_admin'}], reason: '管理员轮值' });
+      assert.equal(grant.status, 200);
+      const status = { expected_version: (await admin.request(target)).data.student_version, status: 'inactive', reason: '结束轮值' };
+      const expires_at = new Date(Date.now() + 86400000).toISOString();
+      const results = await Promise.all([
+        admin.write('PUT', primaryPath, { expected_version: primary.version, reason: '临时值班',
+          roles: primary.roles.map(g => g.role === 'tech_admin' ? { ...g, expires_at } : g) }),
+        owner.write('PATCH', studentPath, status),
+      ]);
+      assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
+      assert.equal(results.find(r => r.status === 409).code, 'invalid_state');
+      if (results[0].status === 200) {
+        assert.equal((await owner.request('/me')).status, 200);
+        assert.equal((await admin.write('PUT', primaryPath, { expected_version: primary.version + 1, roles: primary.roles, reason: '恢复轮值' })).status, 200);
+      } else {
+        assert.equal((await owner.request('/me')).status, 401);
+        assert.equal((await admin.write('PATCH', studentPath, { expected_version: status.expected_version + 1,
+          status: 'active', pilot_scope_verified: true, reason: '重新核对试点名单' })).status, 200);
+        await owner.signIn(me.username, ownerPassword);
+      }
+      assert.equal((await admin.write('PUT', target + '/roles', { expected_version: grant.data.version,
+        roles: original.roles, reason: '结束轮值' })).status, 200);
+    });
+
     await t.test('老师核验后重置普通负责人凭证，旧密码和全部会话作废', async () => {
       const second = browser(base), admin = browser(base);
       await second.signIn('0000000002', ownerPassword);

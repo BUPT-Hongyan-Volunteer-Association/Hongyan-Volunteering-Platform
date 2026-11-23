@@ -148,6 +148,8 @@ function goPage(next: number) {
               <span class="state-chip" :class="{ neutral: student.status !== 'active' }">
                 {{ student.status === 'active' ? '启用' : '停用' }}
               </span>
+              <RouterLink class="account-link" :to="{ path: '/manage/accounts/' + student.account_id, query: { students: route.fullPath } }"
+                :aria-label="'核对' + student.name + '的账号'">核对账号</RouterLink>
             </td>
             <td><RouterLink :to="{ path: '/manage/students/' + student.id + '/hours', query: { name: student.name } }">查看时长</RouterLink></td>
           </tr>
@@ -162,6 +164,7 @@ function goPage(next: number) {
 </template>
 
 <style scoped>
+.account-link { display: inline-block; margin-inline-start: 8px; white-space: nowrap; }
 .filters {
   display: flex;
   align-items: end;

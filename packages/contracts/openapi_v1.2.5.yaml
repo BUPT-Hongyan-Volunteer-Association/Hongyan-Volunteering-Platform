@@ -7908,6 +7908,9 @@ components:
           enum:
           - active
           - inactive
+        pilot_scope_verified:
+          type: boolean
+          description: 从停用恢复启用时，办理人须先核实学生仍属学院核定试点范围，并传 true。
         reason:
           type: string
           minLength: 1
@@ -11822,6 +11825,10 @@ components:
         student_id:
           type: string
           format: uuid
+        student_version:
+          type: integer
+          minimum: 1
+          description: 关联学生档案的当前版本，用于办理学生启停。
         status:
           type: string
           enum:

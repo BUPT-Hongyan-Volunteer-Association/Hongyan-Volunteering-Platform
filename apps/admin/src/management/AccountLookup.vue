@@ -34,7 +34,12 @@ function reset() {
   busy.value = false;
 }
 
-async function lookup() {
+const studentsReturn = computed(() => {
+  const path = route.query.students;
+  return typeof path === 'string' && /^\/manage\/students(?:\?|$)/.test(path) ? path : undefined;
+});
+
+async function lookup(notice = '') {
   reset();
   const username = number.value.trim();
   if (!detailId.value && (!username || (!technical.value && !/^\d{10}$/.test(username)))) {
@@ -57,11 +62,12 @@ async function lookup() {
       if (assigned.includes('tech_admin')) managedRole.value = 'tech_admin';
       else if (assigned.includes('reviewer')) managedRole.value = 'reviewer';
     }
-    if (!match) message.value = technical.value ? '没有找到匹配的登录账号。' : '没有找到可查看的账号，请核对学号。';
+    if (match) message.value = notice;
+    else message.value = technical.value ? '没有找到匹配的登录账号。' : '没有找到可查看的账号，请核对学号。';
   } catch (error) {
     if (serial !== current) return;
-    message.value = error instanceof ApiError && [403, 404].includes(error.status ?? 0)
-      ? '没有找到可查看的账号。' : '查询未完成，请重试。';
+    message.value = notice + (error instanceof ApiError && [403, 404].includes(error.status ?? 0)
+      ? '没有找到可查看的账号。' : '查询未完成，请重试。');
   } finally {
     if (serial === current) busy.value = false;
   }
@@ -72,6 +78,16 @@ watch([detailId, () => props.profile.account_id, technical], ([id]) => {
   number.value = '';
   if (id) void lookup();
 }, { immediate: true });
+
+function studentStatusSaved(id: string, status: 'active' | 'inactive') {
+  if (account.value?.account_id !== id) return;
+  if (id === props.profile.account_id && status === 'inactive') {
+    window.dispatchEvent(new Event('hongyan-session-expired'));
+    return;
+  }
+  const notice = status === 'active' ? '学生账号已恢复启用，原会话仍然失效。' : '学生账号已停用，所有旧会话已撤销。';
+  void lookup(notice);
+}
 
 function statusSaved(next: AccountSummary) {
   if (account.value?.account_id !== next.account_id || account.value.version > next.version) return;
@@ -103,9 +119,9 @@ function saved(roles: AccountRoles, notice: string) {
 
 <template>
   <section class="lookup">
-    <RouterLink v-if="detailId" class="back-link" to="/manage/accounts">返回账号查询</RouterLink>
+    <RouterLink v-if="detailId" class="back-link" :to="studentsReturn ?? '/manage/accounts'">{{ studentsReturn ? '返回学生档案' : '返回账号查询' }}</RouterLink>
     <div class="page-heading"><h1>账号与角色</h1></div>
-    <form v-if="!detailId" class="lookup-form" novalidate @submit.prevent="lookup">
+    <form v-if="!detailId" class="lookup-form" novalidate @submit.prevent="lookup()">
       <label for="student-lookup">{{ technical ? '登录账号' : '学生学号' }}</label>
       <p id="lookup-hint">{{ technical ? '可输入后台登录账号或十位学号。' : '按完整十位学号查找，同名学生以学号区分。' }}</p>
       <div class="entry">
@@ -117,7 +133,7 @@ function saved(roles: AccountRoles, notice: string) {
     <StaffAccountForm v-if="technical && !detailId" />
     <RouterLink v-if="!technical && !detailId" class="onboard" to="/manage/imports">导入学生名单建档</RouterLink>
     <p role="status">{{ message || (account ? '已找到可查看的账号' : '') }}</p>
-    <button v-if="detailId && message" @click="lookup">重新读取</button>
+    <button v-if="detailId && message" @click="lookup()">重新读取</button>
     <section v-if="account && roleState" class="identity-card" aria-label="账号核对结果">
       <header class="section-heading"><h2>{{ account.display_name }}</h2><span class="state-chip">{{ account.status === 'active' ? '启用' : '停用' }}</span></header>
       <dl>
@@ -130,8 +146,8 @@ function saved(roles: AccountRoles, notice: string) {
       <p v-if="account.student_id">具备负责人资格不等于已加入某个活动。</p>
       <CredentialResetForm v-if="!account.credential_pending" :key="'reset' + account.account_id + account.version"
         :account="account" :self="account.account_id === profile.account_id" @saved="credentialReset" @reload="lookup" />
-      <AccountStatusForm v-if="technical && !account.student_id" :key="account.account_id + account.version"
-        :account="account" :self="account.account_id === profile.account_id" @saved="statusSaved" @reload="lookup" />
+      <AccountStatusForm v-if="technical || account.student_id" :key="account.account_id + account.version"
+        :account="account" :self="account.account_id === profile.account_id" @saved="statusSaved" @student-saved="studentStatusSaved" @reload="lookup" />
       <label v-if="technical" class="role-choice">要办理的角色
         <select v-model="managedRole"><option value="organizer">负责人</option><option value="reviewer">老师审核员</option><option value="tech_admin">技术管理员</option></select>
       </label>
