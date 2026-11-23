@@ -518,6 +518,36 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await button(tech, '查询账号').click();
       await visible(tech.getByRole('heading', { name: '合成教师' }));
     });
+    await t.test('技术管理员停启独立账号，老师原窗口需重新登录', async () => {
+      const affected = await signIn(browser, admin, 'demo.dual', password, 390);
+      await tech.goto(admin + '/manage/accounts');
+      await tech.getByLabel('登录账号', { exact: true }).fill('demo.dual');
+      await button(tech, '查询账号').click();
+      await button(tech, '停用账号').click();
+      await visible(tech.getByText('停用账号 · 兼任审核员（demo.dual）'));
+      await tech.getByLabel('办理原因').fill('轮岗交接');
+      await button(tech, '确认停用').click();
+      await visible(tech.getByText('账号已停用，所有旧会话已撤销。'));
+      await affected.reload();
+      await visible(button(affected, '登录'));
+      await button(tech, '启用账号').click();
+      await tech.getByLabel('办理原因').fill('恢复履职');
+      await button(tech, '确认启用').click();
+      await visible(tech.getByText('账号已启用。'));
+      await affected.reload();
+      await visible(button(affected, '登录'));
+      await affected.getByLabel('账号', { exact: true }).fill('demo.dual');
+      await affected.getByLabel('当前密码').fill(password);
+      await button(affected, '登录').click();
+      await visible(button(affected, '退出登录'));
+      await tech.getByLabel('登录账号', { exact: true }).fill('demo.admin');
+      await button(tech, '查询账号').click();
+      await button(tech, '停用账号').click();
+      await tech.getByLabel('办理原因').fill('核对最后一个管理员');
+      await button(tech, '确认停用').click();
+      await visible(tech.getByRole('alert').filter({ hasText: '须保留至少一个可登录' }));
+      await affected.context().close();
+    });
     await t.test('老师按身份卡授权与收回，学生原会话保留学生入口', async () => {
       await teacher.goto(admin + '/manage/accounts');
       const input = teacher.getByLabel('学生学号');

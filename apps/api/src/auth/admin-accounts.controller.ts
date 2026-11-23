@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
-import type { RoleReplacement, StaffAccountInput } from '@hongyan/contracts/types';
+import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import type { AccountStatusPatch, RoleReplacement, StaffAccountInput } from '@hongyan/contracts/types';
 import { checkVersion, Workflow, type Tx } from '../activities/workflow.js';
 import { validate } from '../activities/validation.js';
 import { audit } from '../audit.js';
@@ -36,6 +36,18 @@ function summary(row: Row) {
     status: row.active ? 'active' : 'inactive', ...(row.student && { student_id: row.student.id }),
     ...(row.password_hash === null && { credential_pending: true }), roles: grants(row),
   };
+}
+
+// Take the same transaction lock before checking the post-change administrator set.
+async function requirePermanentAdmin(tx: Tx) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('account:permanent-tech-admin', 0))`;
+  const [result] = await tx.$queryRaw<{ available: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1 FROM account a JOIN role_grant g ON g.account_id = a.id
+      WHERE a.active AND a.password_hash ~ '^[^:]+:[0-9a-fA-F]{128}$'
+        AND g.role = 'tech_admin' AND g.expires_at IS NULL
+    ) AS available`;
+  if (!result.available) throw new BusinessError(409, 'invalid_state', '须保留至少一个可登录且角色长期有效的技术管理员');
 }
 
 @Controller('admin/accounts')
@@ -81,6 +93,33 @@ export class AdminAccountsController {
   @Header('Cache-Control', 'no-store')
   async detail(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string) {
     return envelope(summary(await this.read(req.actor, id)));
+  }
+
+  @Patch(':id')
+  setStatus(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    const checkAccess = async (tx: Tx) => {
+      const target = await tx.account.findUnique({ where: { id }, select: { student: { select: { id: true } } } });
+      if (!target) invisible();
+      if (target.student) invalid('account_id', '学生账号请在学生档案办理启停');
+    };
+    return this.workflow.run(req, { accountId: id, checkAccess }, 'tech', async (tx, _row, actor) => {
+      const input = validate<AccountStatusPatch>('account_status_patch', body);
+      const reason = input.reason.trim();
+      if (!reason) invalid('reason', '请填写启停原因');
+      const row = await tx.account.findUniqueOrThrow({ where: { id }, select: fields });
+      checkVersion(row.version, input.expected_version);
+      const active = input.status === 'active';
+      const next = active === row.active ? row : await tx.account.update({
+        where: { id }, data: { active, version: { increment: 1 } }, select: fields,
+      });
+      await requirePermanentAdmin(tx);
+      if (active === row.active) return summary(next);
+      if (!active) await tx.httpSession.deleteMany({ where: { account_id: id } });
+      await audit(tx, { actor_id: actor.account_id, action: 'set_account_status', resource_type: 'account',
+        resource_id: id, reason, before: { status: row.active ? 'active' : 'inactive', version: row.version },
+        after: { status: input.status, version: next.version } });
+      return summary(next);
+    });
   }
 
   @Get(':id/roles')

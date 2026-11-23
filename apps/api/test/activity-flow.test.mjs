@@ -700,6 +700,69 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal((await post(body, key)).status, 403);
 
     });
+    await t.test('后台账号停用撤销所有会话，重新启用须登录且保留角色历史', async () => {
+      const admin = browser(base), secondSession = browser(base);
+      await admin.signIn('demo.admin', adminPassword);
+      await secondSession.signIn('demo.teacher', staffPassword);
+      const originalAdminId = (await admin.request('/me')).data.account_id;
+      const teacherId = (await teacher.request('/me')).data.account_id;
+      const target = '/admin/accounts/' + teacherId;
+      const original = (await admin.request(target)).data;
+      const body = { expected_version: original.version, status: 'inactive', reason: '工作交接' };
+      const write = (data, key) => admin.write('PATCH', target, data, key);
+      assert.equal((await teacher.write('PATCH', target, body)).status, 403);
+      const studentId = (await student.request('/me')).data.account_id;
+      assert.equal((await admin.write('PATCH', '/admin/accounts/' + studentId, body)).status, 422);
+      assert.equal((await write({ ...body, reason: ' ' })).status, 422);
+      const roles = (await admin.request(target + '/roles')).data;
+      const key = randomUUID();
+      const off = await write(body, key);
+      assert.equal(off.status, 200);
+      assert.deepEqual(off.data, { ...original, version: original.version + 1, status: 'inactive' });
+      assert.deepEqual(await write(body, key), off);
+      assert.deepEqual((await write({ ...body, expected_version: off.data.version })).data, off.data);
+      assert.equal((await write(body)).code, 'version_conflict');
+      assert.equal((await teacher.request('/me')).status, 401);
+      assert.equal((await secondSession.request('/me')).status, 401);
+      await secondSession.request('/auth/csrf');
+      assert.equal((await secondSession.request('/auth/login', { method: 'POST', body: { username: 'demo.teacher', password: staffPassword } })).status, 401);
+      const on = await write({ expected_version: off.data.version, status: 'active', reason: '恢复履职' });
+      assert.deepEqual(on.data, { ...original, version: off.data.version + 1 });
+      assert.deepEqual((await admin.request(target + '/roles')).data, roles);
+      assert.equal((await teacher.request('/me')).status, 401);
+      await teacher.signIn('demo.teacher', staffPassword);
+      assert.equal((await teacher.request('/me')).data.account_id, teacherId);
+      const events = await db.auditEvent.findMany({ where: { resource_id: teacherId, action: 'set_account_status' }, orderBy: { created_at: 'asc' } });
+      assert.deepEqual(events.map(e => [e.reason, e.before.status, e.after.status]), [
+        ['工作交接', 'active', 'inactive'], ['恢复履职', 'inactive', 'active'],
+      ]);
+      assert.ok(events.every(e => e.actor_id === originalAdminId));
+    });
+
+    await t.test('并发停用两个永久管理员只成功一次，限期和待发凭证的账号不能兜底', async () => {
+      const permanent = browser(base), backup = browser(base);
+      await permanent.signIn('demo.admin', adminPassword);
+      await backup.signIn('demo.dual', staffPassword);
+      const ids = [(await permanent.request('/me')).data.account_id, (await backup.request('/me')).data.account_id];
+      const where = { account_id_role: { account_id: ids[1], role: 'tech_admin' } };
+      await db.roleGrant.update({ where, data: { expires_at: new Date(Date.now() + 86400000) } });
+      const body = { expected_version: 1, status: 'inactive', reason: '管理员交班' };
+      const paths = ids.map(id => '/admin/accounts/' + id);
+      assert.equal((await permanent.write('PATCH', paths[0], body)).code, 'invalid_state');
+      assert.equal((await permanent.request('/me')).status, 200);
+      await db.roleGrant.update({ where, data: { expires_at: null } });
+      const clients = [permanent, backup];
+      const results = await Promise.all(clients.map((client, i) => client.write('PATCH', paths[i], body)));
+      assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
+      const disabled = results.findIndex(r => r.status === 200), kept = 1 - disabled;
+      assert.equal((await clients[disabled].request('/me')).status, 401);
+      assert.equal((await clients[kept].request('/me')).status, 200);
+      assert.equal(await db.auditEvent.count({ where: { action: 'set_account_status', resource_id: { in: ids } } }), 1);
+      assert.equal((await clients[kept].write('PATCH', paths[disabled], {
+        status: 'active', expected_version: results[disabled].data.version, reason: '恢复履职',
+      })).status, 200);
+      await db.roleGrant.update({ where, data: { expires_at: new Date(0) } });
+    });
     await t.test('账号只读范围先于分页，角色和详情不泄露高权限资料', async () => {
       const expires = new Date('2099-12-31T15:59:00Z');
       const create = (username, roles) => db.account.create({ data: {

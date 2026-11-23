@@ -5,6 +5,7 @@ import { ApiError, getAccount, getAccountRoles, listAccounts, type AccountSummar
 import { localDateTime } from '@hongyan/ui/activityDisplay';
 import OrganizerGrantForm from './OrganizerGrantForm.vue';
 
+import AccountStatusForm from './AccountStatusForm.vue';
 import StaffAccountForm from './StaffAccountForm.vue';
 
 const props = defineProps<{ profile: Profile }>();
@@ -64,6 +65,14 @@ watch([detailId, () => props.profile.account_id, technical], ([id]) => {
   if (id) void lookup();
 }, { immediate: true });
 
+function statusSaved(next: AccountSummary) {
+  if (account.value?.account_id !== next.account_id || account.value.version > next.version) return;
+  account.value = next;
+  message.value = next.status === 'active' ? '账号已启用。' : '账号已停用，所有旧会话已撤销。';
+  if (next.account_id === props.profile.account_id && next.status === 'inactive')
+    window.dispatchEvent(new Event('hongyan-session-expired'));
+}
+
 function validity(grant: RoleGrant) {
   if (!grant.expires_at) return '长期有效';
   return (Date.parse(grant.expires_at) <= now.value ? '已到期 · ' : '有效至 ') + localDateTime(grant.expires_at) + '（北京时间）';
@@ -103,6 +112,8 @@ function saved(roles: AccountRoles, notice: string) {
           <span v-if="!roleState.roles.length">无角色</span></dd>
       </dl>
       <p v-if="account.student_id">具备负责人资格不等于已加入某个活动。</p>
+      <AccountStatusForm v-if="technical && !account.student_id" :key="account.account_id + account.version"
+        :account="account" :self="account.account_id === profile.account_id" @saved="statusSaved" @reload="lookup" />
       <OrganizerGrantForm v-if="account.student_id && roleState.roles.some(g => g.role === 'student')
         && !roleState.roles.some(g => g.role === 'reviewer' || g.role === 'tech_admin')"
         :key="account.account_id" :account="account" :state="roleState" :now="now"
