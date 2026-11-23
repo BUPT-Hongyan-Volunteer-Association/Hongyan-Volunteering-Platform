@@ -15,6 +15,7 @@ import { CsrfController } from './auth/csrf.controller.js';
 import { SessionService } from './auth/session.service.js';
 
 import { AccountController } from './auth/account.controller.js';
+import { AdminAccountsController } from './auth/admin-accounts.controller.js';
 import { SessionGuard, type SessionRequest } from './auth/session.guard.js';
 import { BusinessError } from './http.js';
 import { ReviewController } from './activities/review.controller.js';
@@ -84,6 +85,7 @@ class HttpErrorFilter implements ExceptionFilter {
   controllers: [
     CsrfController,
     AccountController,
+    AdminAccountsController,
     ManagedController,
     PublicController,
     DraftController,

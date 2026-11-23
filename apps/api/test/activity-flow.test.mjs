@@ -515,6 +515,38 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     await t.test('混合工作簿重复预览保持逐行结果和正式时长一致', () => checkHourPreview(db, fixture));
     await t.test('独立库混合工作簿：HTTP 上传、报告、权限回收和失败重试均不入账', () =>
       checkHourHttp(db, fixture, { owner, other, student, teacher }));
+    await t.test('账号只读范围先于分页，角色和详情不泄露高权限资料', async () => {
+      const expires = new Date('2099-12-31T15:59:00Z');
+      const create = (username, roles) => db.account.create({ data: {
+        username, display_name: '合成同名', password_hash: 'not-a-login', roles_version: 3,
+        student: { create: { student_no: username } },
+        roles: { create: roles.map(role => ({ role, ...(role === 'organizer' && { expires_at: expires }) })) },
+      } });
+      const hidden = await create('0999000001', ['student', 'tech_admin']);
+      const firstVisible = await create('0999000002', ['student', 'organizer']);
+      await create('0999000003', ['student']);
+      const path = '/admin/accounts';
+      const lookup = query => teacher.request(path + '?' + new URLSearchParams(query));
+      const exact = (await lookup({ q: firstVisible.username })).data;
+      assert.equal(exact.total, 1);
+      assert.deepEqual(exact.items.map(item => item.account_id), [firstVisible.id]);
+      const page = (await lookup({ q: '合成同名', page_size: 1 })).data;
+      assert.equal(page.total, 2);
+      assert.equal(page.items[0].username, firstVisible.username);
+      assert.equal((await lookup({ q: hidden.username })).data.total, 0);
+      assert.equal((await lookup({ q: '合成同名', role: 'organizer', status: 'active' })).data.total, 1);
+      assert.equal((await lookup({ role: 'other' })).status, 422);
+      assert.equal((await student.request(path)).status, 403);
+      for (const suffix of ['', '/roles']) {
+        assert.equal((await teacher.request(path + '/' + hidden.id + suffix)).status, 403);
+      }
+      const detail = (await teacher.request(path + '/' + firstVisible.id)).data;
+      assert.deepEqual(Object.keys(detail).sort(), ['account_id','display_name','roles','status','student_id','username','version']);
+      const grants = (await teacher.request(path + '/' + firstVisible.id + '/roles')).data;
+      assert.equal(grants.version, 3);
+      assert.equal(detail.version, 1);
+      assert.deepEqual(grants.roles, [{ role:'student' }, { role:'organizer', expires_at:expires.toISOString() }]);
+    });
   } finally {
     await app?.close();
   }

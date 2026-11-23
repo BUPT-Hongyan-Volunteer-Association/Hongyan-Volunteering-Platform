@@ -47,6 +47,8 @@ model Account {
   username             String           @unique
   display_name         String
   password_hash        String
+  version              Int              @default(1)
+  roles_version        Int              @default(1)
   must_change_password Boolean          @default(true)
   active               Boolean          @default(true)
   roles                RoleGrant[]

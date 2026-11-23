@@ -280,6 +280,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
           '审计记录',
         ]) {
           await nav.getByRole('link', { name: section, exact: true }).click();
+          if (section === '账号与角色') {
+            await visible(teacher.getByLabel('学生学号'));
+            await fits(teacher);
+            continue;
+          }
           if (section === '审计记录') {
             await visible(teacher.getByRole('table', { name: section }).getByText('活动交接'));
             await fits(teacher);
@@ -452,23 +457,43 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         } } } },
       } });
     }
-    await t.test('名单批量预览和账号示例不会发送业务写请求', async () => {
+    await t.test('名单批量预览和账号身份核对不会发送业务写请求', async () => {
       const writes = [];
       const collect = (r) => {
         if (r.url().includes('/api/v1/') && r.method() !== 'GET') writes.push(r.method());
       };
-      for (const p of [owner, tech]) p.on('request', collect);
+      for (const p of [owner, teacher, tech]) p.on('request', collect);
       await owner.goto(web + '/managed/' + first.id + '/roster');
       await owner.getByLabel('选择本页').check();
       await visible(owner.getByText(/已选 5 人/));
-      await teacher.goto(admin + '/manage/accounts/staff-002');
-      await visible(teacher.getByText('未找到该示例记录。'));
-      await tech.goto(admin + '/manage/accounts/staff-002');
-      await pickOption(tech, '操作', '停用独立后台账号');
-      await button(tech, '预览操作').click();
-      await visible(tech.getByText(/停用独立后台账号尚未提交/));
+      const staff = await db.account.findUniqueOrThrow({ where: { username: 'demo.admin' } });
+      const numbers = ['0190000001', '0190000002'];
+      for (const username of numbers) await db.account.create({ data: {
+        username, display_name: '合成同名', password_hash: 'fixture',
+        roles: { create: { role: 'student' } }, student: { create: { student_no: username } },
+      } });
+      await teacher.goto(admin + '/');
+      await link(teacher, '账号与角色').click();
+      const input = teacher.getByLabel('学生学号');
+      const card = teacher.getByRole('region', { name: '账号核对结果' });
+      for (const number of numbers) {
+        await input.fill(number);
+        assert.equal(await card.count(), 0);
+        await button(teacher, '查询账号').click();
+        await visible(card.getByText(number, {exact:true}));
+        await visible(card.getByRole('heading', {name:'合成同名'}));
+      }
+      await input.fill('0999999999');
+      await button(teacher, '查询账号').click();
+      await visible(teacher.getByText('没有找到可查看的账号，请核对学号。'));
+      assert.equal(await card.count(), 0);
+      await teacher.goto(admin + '/manage/accounts/' + staff.id);
+      await visible(teacher.getByText('没有找到可查看的账号。'));
+      await tech.goto(admin + '/manage/accounts/' + staff.id);
+      await visible(tech.getByRole('heading', {name: staff.display_name}));
+      await visible(tech.getByText('技术管理员', {exact:true}));
       assert.deepEqual(writes, []);
-      for (const p of [owner, tech]) p.off('request', collect);
+      for (const p of [owner, teacher, tech]) p.off('request', collect);
     });
 
     await t.test('编辑中恢复焦点和网络后保留输入，后台核验失败时暂停保存', async () => {
