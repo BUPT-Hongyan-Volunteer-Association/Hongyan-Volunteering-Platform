@@ -66,6 +66,7 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
   const ownerAccount = await db.account.findUniqueOrThrow({ where: { username: '0000000002' } });
   const aliceStudent = await db.student.findUniqueOrThrow({ where: { student_no: '0000000001' } });
   const teacherAccount = await db.account.findUniqueOrThrow({ where: { username: 'demo.teacher' } });
+  const bobStudent = await db.student.findUniqueOrThrow({ where: { student_no: '0000000004' } });
 
   await t.test('新实例启动只回收超时的导出任务', async () => {
     const running = await db.exportJob.create({
