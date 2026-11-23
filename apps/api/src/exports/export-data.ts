@@ -13,6 +13,8 @@ import {
 } from '../notices/receipts.js';
 import { exportWorkbook, type ExportSheet } from './workbook.js';
 
+export const exportMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
 const registrationLabels: Record<string, string> = {
   accepted: '已录取',
   submitted: '已提交，待审核',

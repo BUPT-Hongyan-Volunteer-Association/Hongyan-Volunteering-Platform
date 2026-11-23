@@ -1,11 +1,10 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { Database } from '../database.js';
-import { exportBuffer, exportContent, exportedScope } from './export-data.js';
+import { exportBuffer, exportContent, exportMime, exportedScope } from './export-data.js';
 
 const expiryMs = 24 * 60 * 60 * 1000;
 const pollMs = 2000;
 const cleanupMs = 10 * 60 * 1000;
-const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 @Injectable()
 export class ExportWorker implements OnApplicationBootstrap, OnModuleDestroy {
@@ -21,7 +20,7 @@ export class ExportWorker implements OnApplicationBootstrap, OnModuleDestroy {
     // 进程重启会丢失内存中的生成任务，把中断的 running 重新排队。
     await this.db.exportJob.updateMany({
       where: { status: 'running' },
-      data: { status: 'pending', version: { increment: 1 } },
+      data: { status: 'pending', version: { increment: 1 }, error_message: null },
     });
     this.timer = setInterval(() => this.wake(), pollMs);
     this.timer.unref();
@@ -70,7 +69,7 @@ export class ExportWorker implements OnApplicationBootstrap, OnModuleDestroy {
           data: {
             status: 'ready',
             file_name: content.fileName,
-            content_type: mime,
+            content_type: exportMime,
             size: content.buffer.length,
             contents: content.buffer,
             expires_at: new Date(Date.now() + expiryMs),

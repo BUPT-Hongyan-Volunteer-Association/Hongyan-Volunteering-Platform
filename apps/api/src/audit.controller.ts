@@ -45,17 +45,20 @@ export class AuditController {
           })
         : [];
       return {
-        items: rows.map((row) => ({
-          id: row.id,
-          actor_id: row.actor_id,
-          action: row.action,
-          resource_type: row.resource_type,
-          resource_id: row.resource_id,
-          ...(row.reason && { reason: row.reason }),
-          ...(text(row.before) !== undefined && { before: text(row.before) }),
-          ...(text(row.after) !== undefined && { after: text(row.after) }),
-          created_at: row.created_at.toISOString(),
-        })),
+        items: rows.map((row) => {
+          const before = text(row.before), after = text(row.after);
+          return {
+            id: row.id,
+            actor_id: row.actor_id,
+            action: row.action,
+            resource_type: row.resource_type,
+            resource_id: row.resource_id,
+            ...(row.reason && { reason: row.reason }),
+            ...(before !== undefined && { before }),
+            ...(after !== undefined && { after }),
+            created_at: row.created_at.toISOString(),
+          };
+        }),
         page,
         page_size,
         total,

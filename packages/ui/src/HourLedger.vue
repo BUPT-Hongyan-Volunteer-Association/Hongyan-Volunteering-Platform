@@ -20,31 +20,6 @@ const filters = computed(() => ({
   include_history: route.query.include_history === 'true',
 }));
 const exportInput = computed(() => ({ ...props.scope, ...filters.value }));
-const selected = ref(new Set<string>());
-const detailExportInput = computed(() => ({ ...props.scope, ...filters.value }));
-const summaryExportInput = computed(() => ({
-  type: 'activity_hours' as const,
-  activity_id: props.scope.type === 'activity_hours' ? props.scope.activity_id : '',
-  ...filters.value,
-  student_ids: [...selected.value],
-}));
-const pageStudents = computed(() => [...new Set((data.value?.items ?? []).map((row) => row.student_id))]);
-const pageChecked = computed(() => pageStudents.value.length > 0 && pageStudents.value.every((id) => selected.value.has(id)));
-const pageIndeterminate = computed(() => !pageChecked.value && pageStudents.value.some((id) => selected.value.has(id)));
-function togglePage(checked: boolean) {
-  const next = new Set(selected.value);
-  for (const id of pageStudents.value) {
-    if (checked) next.add(id);
-    else next.delete(id);
-  }
-  selected.value = next;
-}
-function toggleStudent(id: string, checked: boolean) {
-  const next = new Set(selected.value);
-  if (checked) next.add(id);
-  else next.delete(id);
-  selected.value = next;
-}
 const from = ref(''), to = ref(''), history = ref(false);
 watch(filters, (current) => {
   from.value = current.from_date ?? ''; to.value = current.to_date ?? ''; history.value = current.include_history;
@@ -75,6 +50,31 @@ const { data, error, loading, refresh, clear } = usePageRead(
     return (await listStudentHours({ path: { id: scope.student_id }, ...options })).data.data;
   }, () => emit('denied'),
 );
+const selected = ref(new Set<string>());
+const summaryExportInput = computed(() => ({
+  type: 'activity_hours' as const,
+  activity_id: props.scope.type === 'activity_hours' ? props.scope.activity_id : '',
+  from_date: filters.value.from_date,
+  to_date: filters.value.to_date,
+  student_ids: [...selected.value],
+}));
+const pageStudents = computed(() => [...new Set((data.value?.items ?? []).map((row) => row.student_id))]);
+const pageChecked = computed(() => pageStudents.value.length > 0 && pageStudents.value.every((id) => selected.value.has(id)));
+const pageIndeterminate = computed(() => !pageChecked.value && pageStudents.value.some((id) => selected.value.has(id)));
+function togglePage(checked: boolean) {
+  const next = new Set(selected.value);
+  for (const id of pageStudents.value) {
+    if (checked) next.add(id);
+    else next.delete(id);
+  }
+  selected.value = next;
+}
+function toggleStudent(id: string, checked: boolean) {
+  const next = new Set(selected.value);
+  if (checked) next.add(id);
+  else next.delete(id);
+  selected.value = next;
+}
 const statuses: Record<HourRecord['status'], string> = { current: '有效', superseded: '已更正', voided: '已撤销' };
 defineExpose({ refresh, clear });
 </script>
@@ -98,8 +98,8 @@ defineExpose({ refresh, clear });
       <template v-if="scope.type === 'activity_hours'">
         <span class="meta-line">已选 {{ selected.size }} 名学生</span>
         <ExportButton
-          :key="'detail-' + JSON.stringify(detailExportInput)"
-          :input="detailExportInput"
+          :key="'detail-' + JSON.stringify(exportInput)"
+          :input="exportInput"
           :disabled="loading || !data"
           create-label="导出全部明细"
           download-label="下载全部明细"

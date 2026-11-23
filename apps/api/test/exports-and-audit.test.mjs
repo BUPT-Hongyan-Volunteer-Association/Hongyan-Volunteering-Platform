@@ -9,7 +9,7 @@ import { audit } from '../dist/audit.js';
 import { readXlsxSheet } from '../dist/students/xlsx.js';
 import { browser } from './api-client.mjs';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
-import { ledgerActivity, ledgerDay, seedApprovedHours } from './hour-ledger-fixture.mjs';
+import { ledgerActivity, ledgerDay, ledgerWorkbook, seedApprovedHours } from './hour-ledger-fixture.mjs';
 
 function result(response, expected) {
   assert.equal(response.status, expected, JSON.stringify(response));
@@ -144,7 +144,8 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
   }, ownerAccount.id);
 
   let rosterExportId;
-  await t.test('跨页名单按筛选导出、逐行核对并限制发起人', async () => {
+  try {
+    await t.test('跨页名单按筛选导出、逐行核对并限制发起人', async () => {
     const job = await createExport(owner, { type: 'activity_roster', activity_id: rosterActivity.id, registration_status: 'accepted' });
     rosterExportId = job.id;
     const ready = await waitExport(owner, job.id);
@@ -227,6 +228,55 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     const adminRows = sheetRows(adminFile.body, '志愿时长');
     assert.deepEqual(adminRows[0], ['学生：体验学生（0000000001）']);
     assert.equal(adminRows.at(-1)[3], '3.0');
+  });
+
+  await t.test('真实送审批准并更正的账目导出与三端读数一致', async () => {
+    const realActivity = await ledgerActivity(db, ownerAccount.id, '真实更正导出活动');
+    const day = ledgerDay(5);
+    const student = await db.student.findUniqueOrThrow({
+      where: { id: aliceStudent.id }, include: { account: true },
+    });
+    async function upload(mode, hours) {
+      const form = new FormData();
+      form.set('mode', mode);
+      form.set('file', new Blob([await ledgerWorkbook(realActivity, [{ student, day, hours }])],
+        { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), '真实时长.xlsx');
+      const collection = '/organizer/activities/' + realActivity.id + '/hour-imports';
+      const uploaded = await owner.raw(collection, {
+        method: 'POST', body: form, headers: { 'Idempotency-Key': randomUUID() },
+      });
+      let body = await uploaded.json();
+      assert.equal(uploaded.status, 202, JSON.stringify(body));
+      let batch = body.data;
+      for (let attempt = 0; attempt < 100 && batch.status === 'validating'; attempt++) {
+        batch = result(await owner.request('/hour-imports/' + batch.id), 200);
+        await delay(30);
+      }
+      result(await owner.write('POST', '/hour-imports/' + batch.id + '/submit',
+        { expected_version: batch.version, source_hash: batch.source_hash }), 200);
+      const pending = result(await teacher.request('/hour-imports/' + batch.id), 200);
+      result(await teacher.write('POST', '/admin/hour-imports/' + batch.id + '/decision',
+        { expected_version: pending.version, decision: 'approved' }), 200);
+    }
+    await upload('new', '2.0');
+    await upload('correction', '3.0');
+    const query = '?from_date=' + day + '&to_date=' + day + '&include_history=true&page_size=100';
+    const activityPage = result(await owner.request('/organizer/activities/' + realActivity.id + '/hours' + query), 200);
+    const minePage = result(await alice.request('/me/hours' + query), 200);
+    const adminPage = result(await teacher.request('/admin/students/' + aliceStudent.id + '/hours' + query), 200);
+    for (const page of [activityPage, minePage, adminPage]) {
+      assert.equal(page.total_hours, '3.0');
+      assert.equal(page.items.length, 2);
+      assert.deepEqual(new Set(page.items.map((row) => row.status)), new Set(['current', 'superseded']));
+    }
+    const job = await createExport(owner, {
+      type: 'activity_hours', activity_id: realActivity.id,
+      from_date: day, to_date: day, include_history: true,
+    });
+    const file = await download(owner, (await waitExport(owner, job.id)).id);
+    const rows = sheetRows(file.body, '志愿时长');
+    assert.equal(rows.at(-1)[5], '3.0');
+    assert.equal(rows.at(-1)[0], '合计（仅当前有效记录）');
   });
 
   await t.test('活动时长可跨页选择学生导出汇总，每人一行且只计 current', async () => {
@@ -319,6 +369,8 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     assert.deepEqual(JSON.parse(redacted.before), { password: '[已脱敏]', token: '[已脱敏]' });
     assert.deepEqual(JSON.parse(redacted.after), { contents: '[已脱敏]', normal: 'ok' });
   });
-  await app.close();
-  await db.$disconnect();
+  } finally {
+    await app.close();
+    await db.$disconnect();
+  }
 });

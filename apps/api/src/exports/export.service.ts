@@ -9,11 +9,11 @@ import { Workflow, json, wrongState, type Tx } from '../activities/workflow.js';
 import {
   authorizeStoredScope,
   exportedScope,
+  exportMime,
   resolveExportScope,
 } from './export-data.js';
 import { ExportWorker } from './export.worker.js';
 
-const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const snapshot = { isolationLevel: 'RepeatableRead' } as const;
 
 interface JobView {
@@ -51,6 +51,7 @@ export class ExportService {
 
   async create(req: SessionRequest, body: unknown) {
     let created: string | undefined;
+    // 导出不属于活动事务，target 传 null；复用 Workflow 的会话复核、幂等键和命令回执。
     const response = await this.workflow.run(req, null, 'export', async (tx, _row, actor) => {
       const input = validate<ExportInput>('export_input', body);
       const scope = await resolveExportScope(tx, actor, input);
@@ -99,10 +100,9 @@ export class ExportService {
       if (current.status === 'expired') {
         throw new BusinessError(409, 'invalid_state', '文件已过期，请重新导出');
       }
-      if (current.status !== 'ready' || !current.contents) {
-        if (current.status === 'ready') throw new BusinessError(409, 'invalid_state', '文件已过期，请重新导出');
-        return wrongState();
-      }
+      if (current.status !== 'ready') return wrongState();
+      if (!current.contents)
+        throw new BusinessError(409, 'invalid_state', '文件已过期，请重新导出');
       await audit(tx, {
         actor_id: req.actor.account_id,
         action: 'download',
@@ -120,7 +120,7 @@ export class ExportService {
     return {
       buffer,
       fileName: file.file_name ?? '导出文件.xlsx',
-      contentType: file.content_type ?? mime,
+      contentType: file.content_type ?? exportMime,
     };
   }
 
@@ -131,5 +131,4 @@ export class ExportService {
       return tx.exportJob.update({ where: { id: job.id }, data: { status: 'expired' } });
     return tx.exportJob.findUniqueOrThrow({ where: { id: job.id } });
   }
-
 }
