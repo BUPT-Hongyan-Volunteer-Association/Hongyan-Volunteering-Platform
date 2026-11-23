@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onScopeDispose, ref } from 'vue';
-import { createCommand, publishNotice, type NoticeInput } from '@hongyan/contracts';
+import { ApiError, createCommand, publishNotice, type NoticeInput } from '@hongyan/contracts';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { message, noAccess } from '@hongyan/ui/usePageRead';
 import AttendanceRoster from '../attendance/AttendanceRoster.vue';
@@ -9,6 +9,7 @@ const props = defineProps<{ activityId: string; writesPaused?: boolean }>();
 const emit = defineEmits<{ published: [id: string]; cancel: []; denied: [] }>();
 const title = ref(''), body = ref(''), requiresAck = ref(true);
 const mode = ref<NoticeInput['recipient_mode']>('accepted'), students = ref<string[]>([]);
+const roster = ref<InstanceType<typeof AttendanceRoster>>();
 const sending = ref(false), error = ref('');
 const command = createCommand();
 let active = true;
@@ -33,6 +34,14 @@ async function submit() {
   } catch (reason) {
     if (!active) return;
     error.value = message(reason);
+    if (reason instanceof ApiError && input.recipient_student_ids) {
+      const invalidRows = new Set(reason.body?.details?.filter(d => d.code === 'ineligible_recipient').map(d => d.row));
+      if (invalidRows.size) {
+        students.value = input.recipient_student_ids.filter((_, index) => !invalidRows.has(index + 1));
+        error.value += '。已从选择中移除，请核对后再发布。';
+        void roster.value?.refresh();
+      }
+    }
     if (noAccess(reason)) emit('denied');
   } finally { sending.value = false; }
 }
@@ -52,7 +61,7 @@ async function submit() {
       </label>
       <fieldset v-if="mode === 'selected'">
         <legend>选择接收人</legend>
-        <AttendanceRoster v-model="students" :activity-id="activityId" for-notice @denied="$emit('denied')" />
+        <AttendanceRoster ref="roster" v-model="students" :activity-id="activityId" for-notice @denied="$emit('denied')" />
       </fieldset>
       <label class="ack-option"><input type="checkbox" v-model="requiresAck" />需要学生确认</label>
       <div class="page-actions">

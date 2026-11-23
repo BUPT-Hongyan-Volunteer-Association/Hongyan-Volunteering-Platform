@@ -441,6 +441,9 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
     });
 
     await t.test('发布活动通知，收件箱去重提醒与筛选切换', async () => {
+      await helper.clock.install();
+      await helper.goto(web + '/notices');
+      await visible(link(helper, '待确认 0'));
       await owner.goto(web + '/managed/' + first.id + '/notices');
       await link(owner, '发布通知').click();
       await owner.getByLabel('通知标题').fill('请带志愿者证件');
@@ -450,23 +453,25 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await button(owner, '发布').click();
       await visible(owner.getByText('接收 1 人 · 待跟进 1 人'));
 
-      await helper.goto(web);
       const badge = helper.locator('.notice-badge');
+      await helper.clock.fastForward(60_000);
       await visible(badge.getByText('1', { exact: true }));
-      await helper.getByRole('navigation', { name: '学生导航' }).locator('a[href="/notices"]').click();
       const notice = link(helper, '请带志愿者证件');
       await visible(notice);
-      const slow = await holdResponse(helper, url => url.pathname.endsWith('/me/notices') && url.searchParams.has('unread_only'));
       await link(helper, '未读 1').click();
+      await helper.locator('[aria-busy="false"]').waitFor();
+      // 全部另含已确认的地点变更；待确认应只显示本次发布的提醒。
+      const slow = await holdResponse(helper, url => url.pathname.endsWith('/me/notices') &&
+        url.searchParams.get('page_size') === '10' && !url.searchParams.has('unread_only') &&
+        !url.searchParams.has('unacknowledged_only'));
+      await link(helper, '全部 2').click();
       await slow.received;
-      const retained = helper.locator('[inert] a').filter({ hasText: '请带志愿者证件' });
-      assert.ok(await retained.isVisible());
-      assert.ok(await retained.evaluate(el => el.closest('[inert]').inert));
+      assert.ok(await helper.locator('[inert] a').filter({ hasText: '请带志愿者证件' }).isVisible());
       await link(helper, '待确认 1').click();
       await helper.locator('[aria-busy="false"]').waitFor();
       await slow.release();
-      await visible(notice);
-      assert.equal(await link(helper, '待确认 1').getAttribute('aria-current'), 'true');
+      await settleRender(helper);
+      assert.deepEqual(await helper.locator('.summary-list .summary-name a').allTextContents(), ['请带志愿者证件']);
 
       for (const width of [1440, 390]) {
         await helper.setViewportSize({ width, height: 900 });
@@ -547,7 +552,19 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         expected.push(await choice.locator('small').innerText());
       }
       assert.notEqual(expected[0], expected[1]);
-      await visible(picker.getByText('已选 2 人'));
+      const staleChoice = picker.locator('.choices label').nth(2);
+      await staleChoice.getByRole('checkbox').check();
+      const student_no = await staleChoice.locator('small').innerText();
+      const stale = await db.registration.findFirstOrThrow({ where: { activity_id: first.id, student: { student_no } } });
+      await db.registration.update({ where: { id: stale.id }, data: { status: 'withdrawn' } });
+      try {
+        await button(owner, '发布').click();
+        await visible(owner.getByRole('alert').filter({ hasText: student_no }));
+        await visible(picker.getByText('已选 2 人'));
+        assert.ok(await staleChoice.getByRole('checkbox').isDisabled());
+      } finally {
+        await db.registration.update({ where: { id: stale.id }, data: { status: stale.status } });
+      }
       await button(owner, '发布').click();
       await visible(owner.getByText('接收 2 人 · 待跟进 2 人'));
       for (const number of expected)

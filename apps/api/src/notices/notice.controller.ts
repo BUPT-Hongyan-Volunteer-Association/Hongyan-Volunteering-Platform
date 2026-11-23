@@ -18,7 +18,7 @@ import type {
 } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import { Database } from '../database.js';
-import { denied, envelope, invalid, invisible } from '../http.js';
+import { BusinessError, denied, envelope, invalid, invisible } from '../http.js';
 import { managedScope, pagination, staff } from '../activities/read.js';
 import { validate } from '../activities/validation.js';
 import { Workflow, checkVersion, wrongState } from '../activities/workflow.js';
@@ -166,9 +166,8 @@ export class NoticeController {
       const input = validate<NoticeInput>('notice_input', body);
       const title = input.title.trim(), content = input.body.trim();
       if (!title || !content) invalid(!title ? 'title' : 'body', '请填写通知标题和正文');
-      if (input.notice_kind !== 'other' || input.supersedes_id)
-        invalid('notice_kind', '此入口只发布独立的普通活动通知');
-      const selected = [...new Set(input.recipient_student_ids)];
+      const requested = (input.recipient_student_ids ?? []).map(id => id.toLowerCase());
+      const selected = [...new Set(requested)];
       const named = input.recipient_mode === 'selected';
       if (named !== (selected.length > 0)) invalid('recipient_student_ids', '请核对接收范围与指定人员');
       const recipients = await tx.registration.findMany({
@@ -179,8 +178,21 @@ export class NoticeController {
         },
         select: { student_id: true },
       });
-      if (named && recipients.length !== selected.length)
-        invalid('recipient_student_ids', '部分所选人员已不在有效报名名单，请重新选择');
+      if (named && recipients.length !== selected.length) {
+        const eligible = new Set(recipients.map(row => row.student_id));
+        const removed = selected.filter(id => !eligible.has(id));
+        const registrations = await tx.registration.findMany({
+          where: { activity_id, student_id: { in: removed } },
+          select: { student_id: true, student: { select: { student_no: true } } },
+        });
+        const numbers = new Map(registrations.map(row => [row.student_id, row.student.student_no]));
+        const details = requested.flatMap((id, i) => eligible.has(id) ? [] : [{
+          field: 'recipient_student_ids', row: i + 1, code: 'ineligible_recipient',
+          message: numbers.get(id) ?? ('所选名单第 ' + (i + 1) + ' 人'),
+        }]);
+        throw new BusinessError(422, 'validation_error', '以下人员已不在有效报名名单：' +
+          details.map(detail => detail.message).join('、'), details);
+      }
       if (!recipients.length) invalid('recipient_mode', '当前范围没有接收人，请调整范围');
       const previous = await tx.notice.aggregate({
         where: { activity_id, notice_kind: 'other' }, _max: { information_version: true },

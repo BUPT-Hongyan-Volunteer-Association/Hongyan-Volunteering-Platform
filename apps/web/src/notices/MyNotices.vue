@@ -166,8 +166,15 @@ const focus = () => {
   void refreshList(false);
   if (item.value) void refreshDetail(false);
 };
-onMounted(() => window.addEventListener('focus', focus));
-onUnmounted(() => window.removeEventListener('focus', focus));
+const reloadInbox = () => void refreshList(false);
+onMounted(() => {
+  window.addEventListener('focus', focus);
+  window.addEventListener('hongyan-inbox-changed', reloadInbox);
+});
+onUnmounted(() => {
+  window.removeEventListener('focus', focus);
+  window.removeEventListener('hongyan-inbox-changed', reloadInbox);
+});
 </script>
 
 <template>

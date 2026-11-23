@@ -2380,7 +2380,7 @@ paths:
     post:
       operationId: publish_notice
       summary: 发送活动站内通知
-      description: 接收人由当前合法名单冻结快照，selected必须属于本活动。gathering首次发布成为该活动当前集合信息，后续发布须supersedes_id指向当前源通知并原子递增information_version，避免两个并发最新版。其他重要变更也形成新通知并关联旧通知。不得把私密入群信息发给未录取人员。新增录取或恢复批准时，以当前gathering内容生成仅新录取者接收的补发通知，source_notice_id指向源通知，information_version保持一致，不修改历史接收人。事件、学生及信息版本唯一，防止重复补发。已被新信息替代的通知is_current=false，不计待确认。已退出人员不列入现场集合催办，历史回执保留。
+      description: 发布独立的普通活动通知（other），发布时设置是否需要确认。按当前活动的有效报名名单冻结接收人快照。accepted 只含已录取人员，all_applicants 包含已提交、候补和已录取人员，selected 须指定其中的学生。所选人员失效时返回 422，details 中的 ineligible_recipient 按请求数组顺序提供从 1 起算的 row。集合通知发布、版本替代和补发属于规划功能。
       tags:
       - 通知
       x-requirement: FR03
@@ -2440,6 +2440,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/notice_input'
+            example:
+              title: 集合地点提醒
+              body: 请在图书馆大厅集合。
+              notice_kind: other
+              recipient_mode: accepted
+              requires_ack: true
     get:
       operationId: list_activity_notices
       summary: 查询活动已发送通知
@@ -8910,10 +8916,9 @@ components:
           items:
             type: string
             format: uuid
-        supersedes_id:
+        notice_kind:
           type: string
-          format: uuid
-        notice_kind: *id004
+          enum: [other]
       additionalProperties: false
       required:
       - title

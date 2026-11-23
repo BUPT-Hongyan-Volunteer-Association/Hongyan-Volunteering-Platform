@@ -3,11 +3,11 @@ import { onMounted, onUnmounted, ref } from 'vue';
 import { listMyNotices } from '@hongyan/contracts';
 import { noAccess } from '@hongyan/ui/usePageRead';
 
-const count = ref(0);
+const count = ref<number>();
 let request: AbortController | undefined;
 let timer: number | undefined;
 
-async function refresh() {
+async function refresh(event?: Event) {
   if (document.hidden) return;
   request?.abort();
   const current = new AbortController();
@@ -17,7 +17,12 @@ async function refresh() {
       query: { page_size: 1, with_counts: true }, cache: 'no-store',
       signal: current.signal, throwOnError: true,
     });
-    if (!current.signal.aborted) count.value = data.data.inbox_counts!.attention;
+    if (current.signal.aborted) return;
+    const next = data.data.inbox_counts!.attention;
+    const changed = count.value !== undefined && next !== count.value;
+    count.value = next;
+    // 收件箱已在焦点和本人写入时刷新，仅广播后台发现的变化。
+    if (changed && !event) window.dispatchEvent(new Event('hongyan-inbox-changed'));
   } catch (error) {
     if (!current.signal.aborted && noAccess(error)) count.value = 0;
   }
@@ -46,7 +51,7 @@ onUnmounted(() => {
 });
 </script>
 <template>
-  <span v-if="count > 0" class="notice-badge">
+  <span v-if="count" class="notice-badge">
     <span aria-hidden="true">{{ count > 99 ? '99+' : count }}</span>
     <span class="sr-only" id="notice-attention-description">有 {{ count }} 条未读或待确认通知</span>
   </span>

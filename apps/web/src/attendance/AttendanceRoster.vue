@@ -17,6 +17,7 @@ const { data: result, error, refresh } = usePageRead(query, async (signal) =>
     query: { scope: 'managed', page: query.value.page, page_size: 8, q: query.value.q || undefined },
     signal, cache: 'no-store', throwOnError: true,
   })).data.data, () => emit('denied'));
+defineExpose({ refresh });
 const items = computed(() => result.value?.items ?? []);
 const eligible = computed(() => items.value.filter((row) =>
   !props.forNotice || ['submitted', 'waitlisted', 'accepted'].includes(row.status)));
@@ -74,7 +75,7 @@ function toggle(ids: string[], event: Event) {
       选择本页
     </label>
     <label v-for="row in items" :key="row.student_id">
-      <input type="checkbox" :disabled="!eligible.includes(row)" :checked="selected.has(row.student_id)" @change="toggle([row.student_id], $event)" />
+      <input type="checkbox" :disabled="!eligible.includes(row) && !selected.has(row.student_id)" :checked="selected.has(row.student_id)" @change="toggle([row.student_id], $event)" />
       <span>{{ row.student_name }} <small>{{ row.student_no }}</small></span>
     </label>
   </div>

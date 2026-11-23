@@ -122,6 +122,8 @@ test('站内通知、确认回执与事件队列', async (t) => {
     const key = randomUUID();
     const send = (fields, token) => owner.write('POST', path, { ...content, ...fields }, token);
     assert.equal((await ownerB.write('POST', path, content)).status, 404);
+    assert.equal((await send({ notice_kind: 'gathering' })).status, 422);
+    assert.equal((await send({ supersedes_id: randomUUID() })).status, 422);
     const [first, replay] = await Promise.all([send({}, key), send({}, key)]);
     assert.equal(first.status, 201);
     assert.equal(first.data.id, replay.data.id);
