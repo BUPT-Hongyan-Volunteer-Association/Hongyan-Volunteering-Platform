@@ -20,10 +20,44 @@ const filters = computed(() => ({
   include_history: route.query.include_history === 'true',
 }));
 const exportInput = computed(() => ({ ...props.scope, ...filters.value }));
+const selected = ref(new Set<string>());
+const detailExportInput = computed(() => ({ ...props.scope, ...filters.value }));
+const summaryExportInput = computed(() => ({
+  type: 'activity_hours' as const,
+  activity_id: props.scope.type === 'activity_hours' ? props.scope.activity_id : '',
+  ...filters.value,
+  student_ids: [...selected.value],
+}));
+const pageStudents = computed(() => [...new Set((data.value?.items ?? []).map((row) => row.student_id))]);
+const pageChecked = computed(() => pageStudents.value.length > 0 && pageStudents.value.every((id) => selected.value.has(id)));
+const pageIndeterminate = computed(() => !pageChecked.value && pageStudents.value.some((id) => selected.value.has(id)));
+function togglePage(checked: boolean) {
+  const next = new Set(selected.value);
+  for (const id of pageStudents.value) {
+    if (checked) next.add(id);
+    else next.delete(id);
+  }
+  selected.value = next;
+}
+function toggleStudent(id: string, checked: boolean) {
+  const next = new Set(selected.value);
+  if (checked) next.add(id);
+  else next.delete(id);
+  selected.value = next;
+}
 const from = ref(''), to = ref(''), history = ref(false);
 watch(filters, (current) => {
   from.value = current.from_date ?? ''; to.value = current.to_date ?? ''; history.value = current.include_history;
 }, { immediate: true });
+watch(
+  [
+    () => filters.value.from_date,
+    () => filters.value.to_date,
+    () => filters.value.include_history,
+    () => props.scope.type === 'activity_hours' ? props.scope.activity_id : '',
+  ],
+  () => selected.value.clear(),
+);
 function applyFilters() {
   return router.replace({ query: { ...route.query, from_date: from.value || undefined, to_date: to.value || undefined,
     include_history: history.value ? 'true' : undefined, hour_page: undefined } });
@@ -61,19 +95,56 @@ defineExpose({ refresh, clear });
         <p>筛选范围内累计 <strong>{{ data.total_hours }} 小时</strong></p>
         <span class="meta-line">共 {{ data.total }} 条记录</span>
       </template>
-      <ExportButton :key="JSON.stringify(exportInput)" :input="exportInput" :disabled="loading || !data" @recheck="refresh(false)" />
+      <template v-if="scope.type === 'activity_hours'">
+        <span class="meta-line">已选 {{ selected.size }} 名学生</span>
+        <ExportButton
+          :key="'detail-' + JSON.stringify(detailExportInput)"
+          :input="detailExportInput"
+          :disabled="loading || !data"
+          create-label="导出全部明细"
+          download-label="下载全部明细"
+          @recheck="refresh(false)"
+        />
+        <ExportButton
+          :key="'summary-' + JSON.stringify(summaryExportInput)"
+          :input="summaryExportInput"
+          :disabled="loading || !data || !selected.size"
+          create-label="导出所选学生汇总"
+          download-label="下载所选学生汇总"
+          @recheck="refresh(false)"
+        />
+      </template>
+      <ExportButton v-else :key="JSON.stringify(exportInput)" :input="exportInput" :disabled="loading || !data" @recheck="refresh(false)" />
     </div>
     <template v-if="data">
       <p v-if="!data.items.length">当前条件下没有时长记录。</p>
       <div v-else class="scroll-table ledger-table">
         <table aria-label="时长明细">
           <thead><tr>
+            <th v-if="scope.type === 'activity_hours'" class="select-cell">
+              <input
+                v-if="pageStudents.length"
+                type="checkbox"
+                aria-label="选择本页学生"
+                :checked="pageChecked"
+                :indeterminate="pageIndeterminate"
+                @change="togglePage(($event.target as HTMLInputElement).checked)"
+              />
+            </th>
             <th v-if="scope.type === 'activity_hours'">学生</th>
             <th scope="col">活动</th><th scope="col">服务日期</th><th scope="col">时长</th>
             <th scope="col">状态</th><th scope="col">账务来源</th>
             <th v-if="$slots.actions" scope="col">操作</th>
           </tr></thead>
           <tbody><tr v-for="row in data.items" :key="row.id" :class="{ selected: route.query.record === row.id }">
+            <td v-if="scope.type === 'activity_hours'" class="select-cell">
+              <input
+                type="checkbox"
+                :aria-label="'选择学生 ' + row.student_no"
+                :checked="selected.has(row.student_id)"
+                @change="toggleStudent(row.student_id, ($event.target as HTMLInputElement).checked)"
+              />
+            </td>
             <td v-if="scope.type === 'activity_hours'" data-label="学生">{{ row.student_name }}<small>{{ row.student_no }}</small></td>
             <th scope="row">{{ row.activity_title ?? row.activity_code }}<small v-if="row.activity_title">{{ row.activity_code }}</small></th>
             <td data-label="服务日期">{{ row.service_date }}</td>
@@ -115,6 +186,8 @@ defineExpose({ refresh, clear });
 .ledger-summary p { margin: 0; }
 .ledger-summary strong { color: var(--brand); font-size: 20px; font-variant-numeric: tabular-nums; }
 .ledger-summary :deep(.page-actions) { margin: 0; }
+.ledger-summary > :deep(.page-actions) { display: contents; }
+.select-cell { width: 2.5rem; }
 .ledger-table th, .ledger-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
 .ledger-table small { display: block; color: var(--muted); }
 .ledger-source { display: grid; gap: 4px; min-width: 10rem; max-width: 24rem; font-size: 13px; }

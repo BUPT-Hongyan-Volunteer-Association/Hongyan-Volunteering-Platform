@@ -229,6 +229,40 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     assert.equal(adminRows.at(-1)[3], '3.0');
   });
 
+  await t.test('活动时长可跨页选择学生导出汇总，每人一行且只计 current', async () => {
+    const extra = synthetic[0];
+    await seedApprovedHours(db, {
+      student_id: extra.student.id, activity_id: hoursActivity.id, service_date: new Date(ledgerDay(3)),
+      hours: '1.5', version: 1, status: 'current', origin_schedule_revision: 1,
+      misconduct_reported: 'none', misconduct_version: 0,
+    }, ownerAccount.id);
+    const selected = [aliceStudent.id, extra.student.id];
+    const job = await createExport(owner, {
+      type: 'activity_hours', activity_id: hoursActivity.id,
+      from_date: ledgerDay(3), to_date: ledgerDay(3), student_ids: selected,
+    });
+    const ready = await waitExport(owner, job.id);
+    assert.equal(ready.status, 'ready');
+    const file = await download(owner, job.id);
+    const rows = sheetRows(file.body, '学生时长汇总');
+    assert.deepEqual(rows[0], ['姓名', '学号', '合计时长（小时）']);
+    assert.equal(rows.length, 3);
+    const byNo = new Map(rows.slice(1).map((row) => [row[1], row]));
+    assert.deepEqual(byNo.get('0000000001').slice(0, 2), ['体验学生', '0000000001']);
+    assert.equal(byNo.get('0000000001')[2], '3.0');
+    assert.equal(byNo.get(extra.student.student_no)[2], '1.5');
+    assert.equal(rows.slice(1).some((row) => row[1] === synthetic[1].student.student_no), false);
+
+    const outside = await owner.write('POST', '/exports', {
+      type: 'activity_hours', activity_id: hoursActivity.id, student_ids: [synthetic[1].student.id],
+    }, randomUUID());
+    assert.equal(outside.status, 422);
+    const wrongType = await owner.write('POST', '/exports', {
+      type: 'my_hours', student_ids: [aliceStudent.id],
+    }, randomUUID());
+    assert.equal(wrongType.status, 422);
+  });
+
   await t.test('失权、换账号、过期均不能下载，学生不能取他人时长', async () => {
     assert.equal((await alice.write('POST', '/exports',
       { type: 'admin_student_hours', student_id: bobStudent.id }, randomUUID())).status, 403);

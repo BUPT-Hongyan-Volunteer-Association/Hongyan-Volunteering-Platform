@@ -5,7 +5,7 @@ import type { ExportJob } from '../generated/prisma/client.js';
 import { managedScope, workspaceScope } from '../activities/read.js';
 import type { Tx } from '../activities/workflow.js';
 import { invalid, invisible } from '../http.js';
-import { authorizeHourLedger, readHourLedgerWithScope } from '../hours/read-ledger.js';
+import { approvedOrigin, authorizeHourLedger, readHourLedgerWithScope } from '../hours/read-ledger.js';
 import {
   followUpEmpty,
   receiptWhere,
@@ -92,12 +92,23 @@ export async function resolveExportScope(tx: Tx, actor: Actor, input: ExportInpu
   if (input.type === 'activity_hours') {
     const activity_id = input.activity_id ?? invalid('activity_id', '请选择活动');
     await authorizeHourLedger(tx, actor, { type: 'activity_hours', activity_id });
+    const student_ids = input.student_ids;
+    if (student_ids) {
+      const found = await tx.hourRecord.findMany({
+        where: { activity_id, student_id: { in: student_ids }, ...approvedOrigin },
+        select: { student_id: true },
+        distinct: ['student_id'],
+      });
+      if (found.length !== student_ids.length)
+        invalid('student_ids', '所选学生不在该活动时长范围内');
+    }
     return compact({
       type: input.type,
       activity_id,
       from_date: input.from_date,
       to_date: input.to_date,
       include_history: input.include_history ?? false,
+      student_ids,
     });
   }
   if (input.type === 'my_hours') {
@@ -235,7 +246,45 @@ async function receiptContent(tx: Tx, scope: StoredScope): Promise<ExportContent
   };
 }
 
+async function selectedSummaryContent(tx: Tx, scope: StoredScope): Promise<ExportContent> {
+  const activity = await tx.activity.findUnique({
+    where: { id: scope.activity_id! }, select: { activity_code: true },
+  });
+  if (!activity) return invisible();
+  const ids = scope.student_ids!;
+  const students = await tx.student.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, student_no: true, account: { select: { display_name: true } } },
+  });
+  if (students.length !== ids.length) return invisible();
+  const ledger = await readHourLedgerWithScope(tx, { activity_id: scope.activity_id! }, {
+    from_date: scope.from_date,
+    to_date: scope.to_date,
+    include_history: false,
+  });
+  const sums = new Map<string, number>();
+  for (const row of ledger.items)
+    if (ids.includes(row.student_id))
+      sums.set(row.student_id, (sums.get(row.student_id) ?? 0) + Number(row.credited_hours));
+  return {
+    fileName: '活动时长汇总_' + fileNamePart(activity.activity_code) + '_' + workbookDate() + '.xlsx',
+    sheet: {
+      name: '学生时长汇总',
+      headers: ['姓名', '学号', '合计时长（小时）'],
+      widths: [20, 18, 18],
+      rows: students
+        .sort((left, right) => left.student_no.localeCompare(right.student_no))
+        .map((student) => [
+          student.account.display_name,
+          student.student_no,
+          (sums.get(student.id) ?? 0).toFixed(1),
+        ]),
+    },
+  };
+}
+
 async function hoursContent(tx: Tx, scope: StoredScope): Promise<ExportContent> {
+  if (scope.student_ids?.length) return selectedSummaryContent(tx, scope);
   const single = scope.type === 'my_hours' || scope.type === 'admin_student_hours';
   const student_id = scope.student_id!;
   const activity_id = scope.activity_id!;

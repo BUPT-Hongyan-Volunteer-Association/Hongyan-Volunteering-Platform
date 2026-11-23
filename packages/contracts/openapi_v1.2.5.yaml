@@ -10170,6 +10170,14 @@ components:
         student_id:
           type: string
           format: uuid
+        student_ids:
+          type: array
+          description: 仅 activity_hours 汇总导出使用；非空学生 ID 列表，须属于该活动时长范围。未传时导出全部明细。
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
         registration_status:
           type: string
           enum:
@@ -10228,6 +10236,8 @@ components:
             - include_history
           - required:
             - follow_up_only
+          - required:
+            - student_ids
         required:
         - activity_id
       - properties:
@@ -10251,6 +10261,8 @@ components:
             - q
           - required:
             - include_history
+          - required:
+            - student_ids
         required:
         - notice_id
       - properties:
@@ -10295,6 +10307,8 @@ components:
             - q
           - required:
             - follow_up_only
+          - required:
+            - student_ids
       - properties:
           type:
             type: string
@@ -10314,6 +10328,8 @@ components:
             - q
           - required:
             - follow_up_only
+          - required:
+            - student_ids
         required:
         - student_id
     export_job:
