@@ -10,6 +10,11 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   const button = (name) => page.getByRole('button', { name, exact: true });
   const chip = (text) =>
     page.locator('.page-heading .state-chip').filter({ hasText: text }).first();
+  const upload = async file => {
+    // A committed batch can already be visible while its final reread still holds the picker busy.
+    await page.getByRole('button', { name: '选择或拖入学生建档模板' }).filter({ hasText: '拖拽文件到此处' }).waitFor();
+    await page.getByLabel('名单文件', { exact: true }).setInputFiles(file);
+  };
   const profile = ['0000001201', '页面导入学生', '本科生', '2026', '0000001301'];
   const invalid = workbook([
     { number: 2, values: profile },
@@ -29,7 +34,7 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   await page.getByRole('button', { name: '选择或拖入学生建档模板' }).waitFor();
 
   // 相同资料的第二行在 G 列多填一项：预览必须保留该行错误并阻止确认
-  await page.getByLabel('名单文件', { exact: true }).setInputFiles({
+  await upload({
     name: '含错误名单.xlsx',
     buffer: invalid,
     mimeType,
@@ -60,7 +65,7 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   assert.equal(await retryPage.count(), 0);
 
   // 修正文件后重新上传，待确认批次可确认
-  await page.getByLabel('名单文件', { exact: true }).setInputFiles({
+  await upload({
     name: '修正名单.xlsx',
     buffer: fixed,
     mimeType,
@@ -74,7 +79,7 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   // 切换批次：旧批次详情响应较慢时不得覆盖新批次，确认必须作用于当前批次
   const uploadReady = async (name, studentNo) => {
     const before = new URL(page.url()).pathname;
-    await page.getByLabel('名单文件', { exact: true }).setInputFiles({
+    await upload({
       name,
       buffer: workbook([{ number: 2, values: [studentNo, '切换学生' + studentNo.slice(-2), '', '2026', ''] }]),
       mimeType,
@@ -117,7 +122,7 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   // 确认冲突：校验后另一老师先建档，当前批次确认返回 409 并保留原表行号
   const conflictNo = '0000001204';
   const beforeConflict = new URL(page.url()).pathname;
-  await page.getByLabel('名单文件', { exact: true }).setInputFiles({
+  await upload({
     name: '资料冲突.xlsx',
     buffer: workbook([{ number: 2, values: [conflictNo, '页面冲突甲', '', '2026', ''] }]),
     mimeType,
