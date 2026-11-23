@@ -4,6 +4,7 @@ import { exportWorkbook } from '../workbook.js';
 export function errorWorkbook(errors: FieldError[]) {
   return exportWorkbook({
     name: '校验错误',
+    worksheet: 'errors',
     headers: ['原表行号', '字段', '错误原因'],
     widths: [20, 20, 64],
     rows: errors.map((error) => [

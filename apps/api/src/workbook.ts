@@ -43,6 +43,8 @@ function rowXml(row: number, cells: ExportCell[]) {
 
 export interface ExportSheet {
   name: string;
+  /** 内部工作表部件名，默认 export；兼容既有错误报告的 errors.xml。 */
+  worksheet?: string;
   notes?: ExportCell[];
   headers: ExportCell[];
   rows: ExportCell[][];
@@ -67,6 +69,7 @@ export function exportWorkbook(sheet: ExportSheet) {
     cells[sheet.total.valueIndex] = sheet.total.value;
     rows.push(rowXml(++row, cells));
   }
+  const worksheet = sheet.worksheet ?? 'export';
   const widths = sheet.widths ?? sheet.headers.map(() => 18);
   const cols = '<cols>' + widths.map((width, index) =>
     '<col min="' + (index + 1) + '" max="' + (index + 1) + '" width="' + width + '" customWidth="1"/>').join('') + '</cols>';
@@ -74,15 +77,15 @@ export function exportWorkbook(sheet: ExportSheet) {
     '[Content_Types].xml':
       '<Types xmlns="' + contentTypes + '"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
       '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
-      '<Override PartName="/xl/worksheets/export.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
+      '<Override PartName="/xl/worksheets/' + worksheet + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
     '_rels/.rels':
       '<Relationships xmlns="' + relNs + '"><Relationship Id="book" Type="' + docNs + '/officeDocument" Target="xl/workbook.xml"/></Relationships>',
     'xl/workbook.xml':
       '<workbook xmlns="' + sheetNs + '" xmlns:r="' + docNs + '"><sheets><sheet name="' +
       escapeText(sheet.name) + '" sheetId="1" r:id="sheet"/></sheets></workbook>',
     'xl/_rels/workbook.xml.rels':
-      '<Relationships xmlns="' + relNs + '"><Relationship Id="sheet" Type="' + docNs + '/worksheet" Target="worksheets/export.xml"/></Relationships>',
-    'xl/worksheets/export.xml':
+      '<Relationships xmlns="' + relNs + '"><Relationship Id="sheet" Type="' + docNs + '/worksheet" Target="worksheets/' + worksheet + '.xml"/></Relationships>',
+    ['xl/worksheets/' + worksheet + '.xml']:
       '<worksheet xmlns="' + sheetNs + '">' + cols + '<sheetData>' + rows.join('') + '</sheetData></worksheet>',
   };
   return zipSync(Object.fromEntries(Object.entries(files).map(([name, xml]) => [name, strToU8(xml)])));
