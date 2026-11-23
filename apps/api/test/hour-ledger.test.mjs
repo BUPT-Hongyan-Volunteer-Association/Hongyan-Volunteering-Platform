@@ -208,7 +208,7 @@ test('独立 PostgreSQL 时长账务、警告、并发与更正结案', { timeou
       const bNotices = result(await bob.request('/me/notices?notice_kind=hours_result'), 200);
       assert.ok(aNotices.items.some((notice) => notice.body.includes('已撤销')));
       assert.ok(bNotices.items.some((notice) => notice.body.includes('已补记')));
-      assert.doesNotMatch(JSON.stringify(aNotices), /已补记|乙负责人/);
+      assert.doesNotMatch(JSON.stringify(aNotices), /已补记|同学乙/);
       assert.doesNotMatch(JSON.stringify(bNotices), /已撤销|体验学生/);
       const missedDay = ledgerDay(3);
       const missed = result(await bob.write('POST', '/me/appeals', { ...claim, service_date: missedDay }), 201);

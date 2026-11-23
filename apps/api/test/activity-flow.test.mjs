@@ -525,7 +525,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       const expected_version = (await owner.request(team)).data.version;
       const body = { account_id, expected_version, reason:'协助现场签到' };
       assert.equal((await find(owner, '003')).status, 422);
-      assert.deepEqual((await find(owner, number)).data.items, [{ account_id, student_no:number, display_name:'乙负责人' }]);
+      assert.deepEqual((await find(owner, number)).data.items, [{ account_id, student_no:number, display_name:'同学乙' }]);
       assert.deepEqual((await find(owner, '0000000001')).data.items, []);
       assert.equal((await find(teacher, number)).status, 200);
       assert.equal((await find(other, number)).status, 404);

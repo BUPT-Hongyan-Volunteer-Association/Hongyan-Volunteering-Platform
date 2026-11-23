@@ -33,7 +33,7 @@ function initialAccounts(env) {
   const staff = env.DEMO_STAFF_PASSWORD;
   if (!staff) throw Error('请设置建种时使用的 DEMO_STAFF_PASSWORD 后重新启动。');
   const accounts = {};
-  for (const [i, label] of ['体验学生', '甲负责人', '乙负责人', '活动协作者'].entries())
+  for (const [i, label] of ['体验学生', '同学甲', '同学乙', '同学丙'].entries())
     accounts[String(i + 1).padStart(10, '0')] = {
       label,
       admin: false,

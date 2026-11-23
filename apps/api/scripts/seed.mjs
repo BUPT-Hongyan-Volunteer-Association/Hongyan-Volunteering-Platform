@@ -10,9 +10,9 @@ if (adminPassword && (adminPassword.length < 12 || adminPassword === staffPasswo
 const db = new Database();
 const people = [
   ['0000000001', '体验学生', ['student']],
-  ['0000000002', '甲负责人', ['student', 'organizer']],
-  ['0000000003', '乙负责人', ['student', 'organizer']],
-  ['0000000004', '活动协作者', ['student', 'organizer']],
+  ['0000000002', '同学甲', ['student', 'organizer']],
+  ['0000000003', '同学乙', ['student', 'organizer']],
+  ['0000000004', '同学丙', ['student', 'organizer']],
   ['demo.teacher', '独立审核员', ['reviewer']],
   ['demo.dual', '兼任审核员', ['reviewer', 'organizer']],
   ...(adminPassword ? [['demo.admin', '合成技术管理员', ['tech_admin']]] : []),

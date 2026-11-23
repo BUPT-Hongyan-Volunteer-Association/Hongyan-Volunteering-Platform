@@ -924,7 +924,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         ['校区', '所有校区', '沙河', 'campus', '沙河'],
         ['活动状态', '所有状态', '已发布', 'status', 'published'],
         ['展示版本', '工作版本', '获批版本', 'revision', 'published'],
-        ['负责人', '所有负责人', '甲负责人', 'owner', '甲负责人'],
+        ['负责人', '所有负责人', '同学甲', 'owner', '同学甲'],
       ]) {
         const { trigger, list } = await openOptions(teacher, label);
         await assertAnchor(trigger, list);
@@ -1559,7 +1559,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await number.fill('0000000003');
       await button(owner, '查找负责人').click();
       const card = owner.getByRole('region', {name:'候选人核对'});
-      await visible(card.getByText('乙负责人 · 0000000003'));
+      await visible(card.getByText('同学乙 · 0000000003'));
       await visible(card.getByText(/仅获得本活动的协作权限/));
       await number.fill('0000000001');
       assert.equal(await card.count(), 0);
@@ -1567,7 +1567,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await button(owner, '查找负责人').click();
       await owner.getByLabel('添加原因').fill('活动引导');
       await button(owner, '确认添加协作者').click();
-      await visible(owner.getByText('乙负责人已加入本活动，身份为协作者。'));
+      await visible(owner.getByText('同学乙已加入本活动，身份为协作者。'));
       await number.fill('0000000003');
       await button(owner, '查找负责人').click();
       await visible(owner.getByText('已是本活动协作者，无需重复添加。'));
@@ -1576,7 +1576,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       assert.equal(await joined.getByText('添加协作者', {exact:true}).count(), 0);
       await fits(joined);
       await owner.getByText('交接主负责人', { exact: true }).click();
-      await owner.getByLabel('接任协作者').selectOption({ label: '乙负责人 · 0000000003' });
+      await owner.getByLabel('接任协作者').selectOption({ label: '同学乙 · 0000000003' });
       await visible(owner.getByText(/你将保留协作者身份/));
       await owner.getByLabel('交接原因').fill('现场换班');
       await button(owner, '确认交接').click();
@@ -1586,17 +1586,17 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       assert.equal(await owner.getByRole('button', { name: /移除协作者/ }).count(), 0);
       await link(owner, '报名名单').click();
       await visible(owner.locator('.status-filters'));
-      const remove = button(joined, '移除协作者 甲负责人');
+      const remove = button(joined, '移除协作者 同学甲');
       await remove.click();
       const dialog = joined.getByRole('dialog', { name: '移除协作者' });
-      await visible(dialog.getByText(/校园服务甲.*甲负责人.*0000000002/));
+      await visible(dialog.getByText(/校园服务甲.*同学甲.*0000000002/));
       assert.equal(await button(joined, '确认移除').isDisabled(), true);
       await button(joined, '取消').click();
       await remove.click();
       await joined.getByLabel('移除原因').fill('现场工作已交接');
       await fits(joined);
       await button(joined, '确认移除').click();
-      await visible(joined.getByText('已从本活动移除甲负责人。'));
+      await visible(joined.getByText('已从本活动移除同学甲。'));
       assert.equal(await remove.count(), 0);
       await owner.reload();
       await visible(owner.getByRole('alert').filter({ hasText: '记录不存在或不可见' }));
@@ -1604,7 +1604,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await owner.goto(web + '/managed/' + first.id + '/attendance');
       await visible(owner.getByRole('alert').filter({ hasText: '记录不存在或不可见' }));
       await owner.goto(web + '/mine');
-      await visible(owner.getByRole('heading', { name: '甲负责人' }));
+      await visible(owner.getByRole('heading', { name: '同学甲' }));
       await link(teacher, '账号与角色').click();
       await teacher.getByLabel('学生学号').fill('0000000003');
       await button(teacher, '查询账号').click();
@@ -1619,19 +1619,24 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await visible(teacher.getByText('当前没有负责人角色'));
       await teacher.getByLabel('接任人学号').fill('0000000002');
       await button(teacher, '核对接任人').click();
-      await visible(teacher.getByText('甲负责人 · 0000000002', { exact: true }));
+      await visible(teacher.getByText('同学甲 · 0000000002', { exact: true }));
       await teacher.getByLabel('添加原因').fill('补充接任协作者');
       await button(teacher, '确认添加协作者').click();
-      await visible(teacher.getByText('甲负责人已加入活动，请核对交接信息并填写交接原因。'));
+      await visible(teacher.getByText('同学甲已加入活动，请核对交接信息并填写交接原因。'));
       assert.equal(await teacher.getByLabel('交接原因').inputValue(), '');
       await teacher.getByLabel('交接原因').fill('老师核对后办理');
       await button(teacher, '确认重新指定').click();
-      await visible(teacher.getByText('甲负责人已接任主负责人。'));
-      await visible(teacher.getByRole('heading', { name: '主负责人 · 甲负责人' }));
+      await visible(teacher.getByText('同学甲已接任主负责人。'));
+      await visible(teacher.getByRole('heading', { name: '当前主负责人：同学甲' }));
+      const team = teacher.getByRole('table', { name: '活动成员' });
+      for (const [name, role] of [['同学甲', '主负责人'], ['同学乙', '协作者']]) {
+        const row = team.getByRole('row').filter({ has: teacher.getByRole('rowheader', { name, exact: true }) });
+        await visible(row.getByText(role, { exact: true }));
+      }
       await owner.goto(web + '/managed/' + first.id);
       await visible(owner.getByText('交接主负责人', { exact: true }));
       await joined.goto(web + '/mine');
-      await visible(joined.getByRole('heading', { name: '乙负责人' }));
+      await visible(joined.getByRole('heading', { name: '同学乙' }));
       assert.equal(await joined.getByRole('link', { name: '活动管理', exact: true }).count(), 0);
 
 
@@ -1654,9 +1659,9 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         await teacher.setViewportSize({ width: 390, height: 844 });
         await teacher.getByLabel('学号或姓名').fill('0000000002');
         await button(teacher, '查询').click();
-        await link(teacher, '核对甲负责人的账号').click();
+        await link(teacher, '核对同学甲的账号').click();
         await button(teacher, '停用账号').click();
-        await visible(teacher.getByText('停用账号 · 甲负责人（0000000002）'));
+        await visible(teacher.getByText('停用账号 · 同学甲（0000000002）'));
         await teacher.getByLabel('办理原因').fill('学生暂离试点');
         await fits(teacher);
         await button(teacher, '确认停用').click();
@@ -1675,7 +1680,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
         await visible(button(second, '登录'));
         await loginAgain(owner);
         await link(teacher, '返回学生档案').click();
-        await visible(link(teacher, '核对甲负责人的账号'));
+        await visible(link(teacher, '核对同学甲的账号'));
         assert.equal(await teacher.getByLabel('学号或姓名').inputValue(), '0000000002');
       } finally {
         await teacher.setViewportSize({ width: 1440, height: 900 });
@@ -1688,7 +1693,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await teacher.getByLabel('学生学号').fill('0000000002');
       await button(teacher, '查询账号').click();
       await button(teacher, '重置登录凭证').click();
-      await visible(teacher.getByText('重置登录凭证 · 甲负责人（0000000002）'));
+      await visible(teacher.getByText('重置登录凭证 · 同学甲（0000000002）'));
       const confirmed = teacher.getByLabel('我已人工核验申请人本人，并核对上述账号');
       await teacher.getByLabel('重置原因').fill('本人申请重置');
       assert.equal(await button(teacher, '确认重置').isDisabled(), true);
