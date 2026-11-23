@@ -1457,6 +1457,34 @@ test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, as
       await checkLedgerPages({ db, web, admin, owner, teacher, student, secondStudent: helper,
         worker: api.get(NoticeWorker), fits, pickOption, capture, holdResponse, settleRender });
     });
+    await t.test('主负责人核对并添加协作者，新成员原会话可读且不能管理团队', async () => {
+      const joined = await signIn(browser, web, '0000000003', password, 390);
+      await joined.goto(web + '/managed/' + first.id);
+      await visible(joined.getByRole('alert'));
+      await owner.goto(web + '/managed');
+      await link(owner, '校园服务甲').click();
+      await owner.getByText('添加协作者', {exact:true}).click();
+      const number = owner.getByLabel('协作者学号');
+      await number.fill('0000000003');
+      await button(owner, '查找负责人').click();
+      const card = owner.getByRole('region', {name:'候选人核对'});
+      await visible(card.getByText('乙负责人 · 0000000003'));
+      await visible(card.getByText(/仅获得本活动的协作权限/));
+      await number.fill('0000000001');
+      assert.equal(await card.count(), 0);
+      await number.fill('0000000003');
+      await button(owner, '查找负责人').click();
+      await owner.getByLabel('添加原因').fill('活动引导');
+      await button(owner, '确认添加协作者').click();
+      await visible(owner.getByText('乙负责人已加入本活动，身份为协作者。'));
+      await number.fill('0000000003');
+      await button(owner, '查找负责人').click();
+      await visible(owner.getByText('已是本活动协作者，无需重复添加。'));
+      await joined.reload();
+      await visible(joined.getByText(/你是本活动的协作者/));
+      assert.equal(await joined.getByText('添加协作者', {exact:true}).count(), 0);
+      await fits(joined);
+    });
   } finally {
     try {
       await browser?.close();

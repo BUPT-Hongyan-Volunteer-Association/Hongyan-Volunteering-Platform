@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import UiSelect from '@hongyan/ui/UiSelect.vue';
+import AddCollaborator from './AddCollaborator.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import { serviceTime } from '@hongyan/ui/activityDisplay';
@@ -9,7 +9,7 @@ import {
   getActivityMembers,
   getManagedActivity,
   type ManagedActivityDetail,
-  type ActivityMember,
+  type ActivityMemberList,
   type Profile,
 } from '@hongyan/contracts';
 
@@ -35,7 +35,6 @@ watch(
     if (more.value) more.value.open = false;
   },
 );
-const memberMessage = ref('');
 const sections = [
   ['notices', '通知与回执'],
   ['attendance', '现场人员记录'],
@@ -48,7 +47,11 @@ const sections = [
 ];
 const deniedRefresh = ['activity-attendance', 'hour-batches', 'hour-batch', 'activity-hours',
   'activity-hour-appeals', 'activity-hour-corrections', 'activity-hour-incidents'];
-const members = ref<ActivityMember[]>([]);
+const team = ref<ActivityMemberList>({ items: [], version: 0 });
+const members = computed(() => team.value.items);
+function applyTeam(id: string, next: ActivityMemberList) {
+  if (id === route.params.id && next.version >= team.value.version) team.value = next;
+}
 const error = ref('');
 const verifying = ref(false);
 const sourceQuery = computed(() => ({ page: route.query.page }));
@@ -59,26 +62,25 @@ async function load(clear = true) {
   verifying.value = true;
   if (clear) {
     detail.value = undefined;
-    members.value = [];
-    memberMessage.value = '';
+    team.value = { items: [], version: 0 };
   }
   error.value = '';
   try {
     const path = { id: String(route.params.id) };
-    const team = (await getActivityMembers({ path, throwOnError: true })).data.data.items;
-    if (!team.some((m) => m.account_id === props.profile.account_id)) {
+    const next = (await getActivityMembers({ path, throwOnError: true })).data.data;
+    if (!next.items.some((m) => m.account_id === props.profile.account_id)) {
       if (turn !== generation) return;
-      members.value = [];
+      team.value = { items: [], version: 0 };
       error.value = '当前账号不是该活动的管理成员。';
       return;
     }
     const latest = (await getManagedActivity({ path, throwOnError: true })).data.data;
     if (turn !== generation) return;
     showDetail(latest);
-    members.value = team;
+    applyTeam(path.id, next);
   } catch (e) {
     if (turn !== generation) return;
-    if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) members.value = [];
+    if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) team.value = { items: [], version: 0 };
     error.value = e instanceof Error ? e.message : '活动读取失败';
   } finally {
     if (turn === generation) verifying.value = false;
@@ -166,24 +168,9 @@ onUnmounted(() => {
           }}</span>
         </li>
       </ul>
-      <details v-if="self.member_role === 'owner'">
-        <summary>管理成员（预览）</summary>
-        <form
-          class="preview-form"
-          @submit.prevent="memberMessage = '示例操作尚待接入，活动成员未变更。'"
-        >
-          <label
-            >操作<UiSelect
-              label="操作"
-              :options="
-                members.length > 1 ? ['添加协作者', '移除协作者', '转移主负责人'] : ['添加协作者']
-              "
-          /></label>
-          <label>成员学号<input required pattern="[0-9]{10}" maxlength="10" /></label
-          ><label>原因<input required /></label><button>预览成员变更</button>
-        </form>
-        <p v-if="memberMessage" role="status">{{ memberMessage }}</p>
-      </details>
+      <AddCollaborator v-if="self.member_role === 'owner'" :key="activity.id" :activity="activity"
+        :team="team" :paused="verifying || !!error" @saved="applyTeam" @refresh="refresh" />
+      <p v-else>你是本活动的协作者。成员变更由主负责人或授权后台办理。</p>
     </section>
   </template>
 </template>

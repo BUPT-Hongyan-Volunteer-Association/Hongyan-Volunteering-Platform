@@ -14,6 +14,7 @@ import {
   workingRevision,
   workspaceScope,
   staff,
+  teamManagerScope,
   type LoadedActivity,
 } from './read.js';
 
@@ -145,7 +146,7 @@ export class Workflow {
     req: SessionRequest,
     target: Target,
     // 'self' 用于本人资源操作（如通知已读/确认），不做活动范围校验。
-    access: 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self',
+    access: 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 'team',
     execute: (tx: Tx, row: LoadedActivity | null, actor: Actor, reauthorize: Reauthorize) => Promise<unknown>,
     scope?: string,
     commandInput: unknown = req.body ?? {},
@@ -204,6 +205,9 @@ export class Workflow {
         if (access === 'self' && studentId(actor) !== account.student?.id) invisible();
         if (access === 'create' && !actor.roles.includes('organizer')) denied();
         if (access === 'review' && !staff(actor)) denied();
+        if (access === 'team' && (!row || !await tx.activity.count({
+          where: { id: row.id, ...teamManagerScope(actor) },
+        }))) invisible();
         if (ids && access === 'manage' && await tx.activity.count({
           where: { id: { in: ids }, ...managedScope(actor) },
         }) !== ids.length) invisible();

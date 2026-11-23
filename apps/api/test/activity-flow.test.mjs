@@ -515,6 +515,44 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     await t.test('混合工作簿重复预览保持逐行结果和正式时长一致', () => checkHourPreview(db, fixture));
     await t.test('独立库混合工作簿：HTTP 上传、报告、权限回收和失败重试均不入账', () =>
       checkHourHttp(db, fixture, { owner, other, student, teacher }));
+    await t.test('精确查找有效负责人并加入本活动，重复请求只写一次', async () => {
+      const team = '/organizer/activities/' + sample.id + '/members';
+      const find = (actor, number) => actor.request(team.replace('/members', '/member-candidates?student_no=') + number);
+      const number = '0000000003';
+      const account_id = (await other.request('/me')).data.account_id;
+      const expected_version = (await owner.request(team)).data.version;
+      const body = { account_id, expected_version, reason:'协助现场签到' };
+      assert.equal((await find(owner, '003')).status, 422);
+      assert.deepEqual((await find(owner, number)).data.items, [{ account_id, student_no:number, display_name:'乙负责人' }]);
+      assert.deepEqual((await find(owner, '0000000001')).data.items, []);
+      assert.equal((await find(teacher, number)).status, 200);
+      assert.equal((await find(other, number)).status, 404);
+      assert.equal((await other.request(team)).status, 404);
+      const grant = {account_id_role:{account_id, role:'organizer'}};
+      await db.roleGrant.update({where:grant,data:{expires_at:new Date(0)}});
+      assert.deepEqual((await find(owner, number)).data.items, []);
+      assert.equal((await owner.write('POST',team,body)).status, 422);
+      await db.roleGrant.update({where:grant,data:{expires_at:null}});
+      const key = randomUUID();
+      const attempts = await Promise.all([owner.write('POST', team, body, key), owner.write('POST', team, body, key)]);
+      assert.deepEqual(attempts[0], attempts[1]);
+      assert.equal(attempts[0].status, 200);
+      const added = attempts[0].data;
+      assert.equal(added.version, expected_version + 1);
+      assert.deepEqual(added.items.filter(member => member.account_id === account_id).map(member => member.member_role), ['collaborator']);
+      assert.equal((await owner.write('POST',team,body)).code, 'version_conflict');
+      assert.deepEqual((await owner.write('POST',team,{...body,expected_version:added.version})).data, added);
+      assert.equal((await other.request(team.replace('/members','/registrations'))).status, 200);
+      assert.equal((await other.request(path + '/registrations')).status, 404);
+      assert.equal((await find(other, number)).status, 404);
+      assert.equal((await other.write('POST',team,body)).status, 404);
+      const events = await db.auditEvent.findMany({where:{resource_id:sample.id, action:'add_activity_member'}});
+      assert.equal(events.length, 1);
+      assert.equal(events[0].reason, body.reason);
+      assert.equal(events[0].actor_id, (await owner.request('/me')).data.account_id);
+      assert.equal(events[0].before.members.length + 1, events[0].after.members.length);
+      assert.deepEqual(Object.keys(events[0].after.members[0]).sort(), ['account_id','member_role']);
+    });
     await t.test('账号只读范围先于分页，角色和详情不泄露高权限资料', async () => {
       const expires = new Date('2099-12-31T15:59:00Z');
       const create = (username, roles) => db.account.create({ data: {
