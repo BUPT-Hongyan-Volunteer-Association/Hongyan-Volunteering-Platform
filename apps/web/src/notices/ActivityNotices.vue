@@ -123,11 +123,12 @@ async function reloadReceipts() {
       @published="(id) => router.replace({ path: listPath + '/' + id, query: { page: route.query.page } })"
       @cancel="router.replace({ path: listPath, query: listQuery })" @denied="emit('denied')" />
     <p v-else-if="error" role="alert">{{ error }} <button @click="refresh()">重新读取</button></p>
-    <p v-else-if="!listing" role="status">正在读取通知…</p>
 
-    <RecordWorkspace v-else :selected="!!item">
+    <p v-else-if="!listing && item" class="notice-loading" role="status">正在读取通知…</p>
+    <RecordWorkspace v-else :selected="!!item" :aria-busy="!listing">
       <template #list>
-        <div v-if="listing.page.items.length" class="entry-list notice-queue">
+        <p v-if="!listing" class="notice-loading" role="status">正在读取通知…</p>
+        <div v-else-if="listing.page.items.length" class="entry-list notice-queue">
           <RouterLink
             v-for="row in listing.page.items"
             :key="row.id"
@@ -146,7 +147,7 @@ async function reloadReceipts() {
         </div>
         <p v-else>本活动还没有发出过通知。</p>
         <Pager
-          v-if="page > 1 || listing.page.total > listing.page.page_size"
+          v-if="listing && (page > 1 || listing.page.total > listing.page.page_size)"
           :page="page"
           :size="listing.page.page_size"
           :total="listing.page.total"
@@ -251,6 +252,13 @@ async function reloadReceipts() {
 </template>
 
 <style scoped>
+.notice-loading {
+  animation: reveal-loading 180ms step-end;
+}
+@keyframes reveal-loading {
+  from { visibility: hidden; }
+  to { visibility: visible; }
+}
 .receipt-scroll {
   overflow-x: auto;
 }
