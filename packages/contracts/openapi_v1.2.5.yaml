@@ -5592,7 +5592,9 @@ paths:
     post:
       operationId: transfer_activity_owner
       summary: 转移活动主负责人
-      description: 仅该活动当前owner或reviewer、tech_admin执行。协作成员不能增删成员或转移主负责人。新增成员及转移目标必须有有效organizer角色。操作需expected_version并记录原因、前后成员与操作者，下一请求立即使用新权限。目标必须是当前活动的另一名有效collaborator。事务内将目标设为owner，原owner改为collaborator并保留。始终恰有一个owner。
+      description: |
+        仅该活动当前owner或reviewer、tech_admin执行。协作成员不能增删成员或转移主负责人。新增成员及转移目标必须有有效organizer角色。操作需expected_version并记录原因、前后成员与操作者，下一请求立即使用新权限。目标必须是当前活动的另一名有效collaborator。事务内将目标设为owner，原owner改为collaborator并保留。始终恰有一个owner。
+        结果未知时使用原幂等键及原请求体重试。服务端先核验当前权限，再读取回执。原主负责人交接后仅有协作者权限时，重试返回 404，不会再次交接或写入审计。客户端须重新读取活动成员，以当前主负责人核对结果；单凭 404 无法判断交接是否成功。
       tags:
       - 活动
       x-requirement: FR06

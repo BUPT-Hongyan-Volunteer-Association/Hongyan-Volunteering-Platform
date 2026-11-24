@@ -1548,6 +1548,47 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       await checkLedgerPages({ db, web, admin, owner, teacher, student, secondStudent: helper,
         worker: api.get(NoticeWorker), fits, pickOption, capture, holdResponse, settleRender });
     });
+    await t.test('交接响应丢失后以原键重试，两个旧窗口分别看到实际接任人', async () => {
+      const stale = await owner.context().newPage();
+      stale.setDefaultTimeout(8000);
+      const endpoint = '/organizer/activities/' + first.id + '/transfer-owner';
+      async function prepare(page, name) {
+        await page.goto(web + '/managed/' + first.id);
+        await page.getByText('交接主负责人', { exact: true }).click();
+        const select = page.getByLabel('接任协作者');
+        await select.selectOption(await select.getByRole('option', { name }).getAttribute('value'));
+        await page.getByLabel('交接原因').fill('现场换班');
+      }
+      try {
+        await prepare(stale, '兼任审核员');
+        await prepare(owner, '同学丙');
+        let firstKey;
+        await owner.route('**' + endpoint, async route => {
+          firstKey = await route.request().headerValue('idempotency-key');
+          assert.equal((await route.fetch()).status(), 200);
+          await route.abort('failed');
+        }, { times: 1 });
+        await button(owner, '确认交接').click();
+        await visible(owner.getByRole('alert').filter({ hasText: '交接结果未确认' }));
+        const replay = owner.waitForResponse(response => response.url().endsWith(endpoint));
+        await button(owner, '重试交接').click();
+        const response = await replay;
+        assert.equal(response.status(), 404);
+        assert.ok(firstKey);
+        assert.equal(await response.request().headerValue('idempotency-key'), firstKey);
+        await visible(owner.getByRole('status').filter({ hasText: '主负责人已交接给同学丙。' }));
+        assert.equal(await owner.getByLabel('接任协作者').count(), 0);
+
+        await button(stale, '确认交接').click();
+        await visible(stale.getByRole('status').filter({ hasText: '已核对活动成员，当前主负责人是同学丙。' }));
+
+        await prepare(helper, '同学甲');
+        await button(helper, '确认交接').click();
+        await visible(helper.getByRole('status').filter({ hasText: '主负责人已交接给同学甲。' }));
+      } finally {
+        await stale.close();
+      }
+    });
     await t.test('主负责人添加协作者并交接，移除原负责人后旧会话失去活动权限', async () => {
       async function addAfterQualificationRestored(page, studentNo, errorMessage) {
         const reason = page.getByLabel('添加原因');
@@ -1605,6 +1646,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       await visible(owner.getByText(/你将保留协作者身份/));
       await owner.getByLabel('交接原因').fill('现场换班');
       await button(owner, '确认交接').click();
+      await visible(owner.getByRole('status').filter({ hasText: '主负责人已交接给同学乙。' }));
       await visible(owner.getByText(/你是本活动的协作者/));
       await joined.reload();
       await visible(joined.getByText('交接主负责人', { exact: true }));

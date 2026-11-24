@@ -562,7 +562,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       const target = (await other.request('/me')).data.account_id;
       const oldOwner = (await owner.request('/me')).data.account_id;
       const body = { expected_version: before.version, target_account_id: target, reason: '现场交接' };
-      const post = (user, data) => user.write('POST', base + '/transfer-owner', data);
+      const post = (user, data, key) => user.write('POST', base + '/transfer-owner', data, key);
       assert.equal((await post(other, body)).status, 404);
       assert.equal((await post(owner, { ...body, target_account_id: oldOwner })).status, 422);
       assert.equal((await post(owner, { ...body, expected_version: before.version - 1 })).status, 409);
@@ -570,8 +570,13 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       await db.roleGrant.update({ where, data: { expires_at: new Date(0) } });
       assert.equal((await post(owner, body)).status, 422);
       await db.roleGrant.update({ where, data: { expires_at: null } });
-      const attempts = await Promise.all([post(owner, body), post(owner, body)]);
+      const keys = [randomUUID(), randomUUID()];
+      const attempts = await Promise.all(keys.map(key => post(owner, body, key)));
       assert.deepEqual(attempts.map(r => r.status).sort(), [200, 404]);
+      const replay = await post(owner, body, keys[attempts.findIndex(r => r.status === 200)]);
+      assert.equal(replay.status, 404);
+      assert.equal(replay.code, 'not_found');
+      assert.equal(replay.data, undefined);
       const after = (await members()).data;
       assert.equal(after.version, before.version + 1);
       assert.deepEqual(after.items.filter(m => m.member_role === 'owner').map(m => m.account_id), [target]);

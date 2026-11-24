@@ -58,11 +58,20 @@ const error = ref('');
 const verifying = ref(false);
 const sourceQuery = computed(() => ({ page: route.query.page }));
 const self = computed(() => members.value.find((m) => m.account_id === props.profile.account_id));
+const transferTarget = ref('');
+const transferMessage = computed(() => {
+  if (!transferTarget.value || self.value?.member_role !== 'collaborator') return '';
+  const owner = members.value.find(member => member.member_role === 'owner');
+  if (!owner) return '';
+  return owner.account_id === transferTarget.value ? '主负责人已交接给' + owner.display_name + '。'
+    : '已核对活动成员，当前主负责人是' + owner.display_name + '。';
+});
 let generation = 0;
 async function load(clear = true) {
   const turn = ++generation;
   verifying.value = true;
   if (clear) {
+    transferTarget.value = '';
     detail.value = undefined;
     team.value = { items: [], version: 0 };
   }
@@ -162,12 +171,13 @@ onUnmounted(() => {
     </RouterView>
     <section v-else class="reading-area">
       <h2>活动成员</h2>
+      <p v-if="transferMessage" class="notice" role="status">{{ transferMessage }}</p>
       <ActivityMemberListView :key="activity.id + self.member_role" :activity="activity" :team="team"
         :can-manage="self.member_role === 'owner'" :paused="verifying || !!error" @saved="applyTeam" @refresh="refresh" />
       <AddCollaborator v-if="self.member_role === 'owner'" :key="activity.id" :activity="activity"
         :team="team" :paused="verifying || !!error" @saved="applyTeam" @refresh="refresh" />
       <TransferOwner v-if="self.member_role === 'owner'" :key="activity.id + team.version" :activity="activity"
-        :team="team" :paused="verifying || !!error" @saved="applyTeam" @refresh="refresh" />
+        :team="team" :paused="verifying || !!error" @target="transferTarget = $event" @saved="applyTeam" @refresh="refresh" />
       <p v-else>你是本活动的协作者。成员变更由主负责人或授权后台办理。</p>
     </section>
   </template>
