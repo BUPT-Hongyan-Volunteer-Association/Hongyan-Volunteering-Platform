@@ -5,6 +5,9 @@
   display: grid;
   grid-template-columns: var(--rail-width) minmax(0, 1fr);
 }
+.app-shell > .workspace {
+  min-width: 0;
+}
 .app-shell.no-rail {
   grid-template-columns: minmax(0, 1fr);
 }
