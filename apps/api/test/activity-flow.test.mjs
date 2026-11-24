@@ -10,6 +10,37 @@ import { checkHourHttp } from './hour-http-fixture.mjs';
 
 import { browser } from './api-client.mjs';
 
+async function raceAdminChanges(base, changes) {
+  async function snapshot({ client, path }) {
+    const [account, grants] = await Promise.all([client.request(path), client.request(path + '/roles')]);
+    assert.equal(account.status, 200);
+    assert.equal(grants.status, 200);
+    return { ...account.data, roles_version: grants.data.version };
+  }
+
+  const before = await Promise.all(changes.map(snapshot));
+  for (const account of before) {
+    assert.equal(account.status, 'active');
+    assert.ok(!account.credential_pending);
+    assert.deepEqual(account.roles.find(grant => grant.role === 'tech_admin'), { role: 'tech_admin' });
+  }
+  const results = await Promise.all(changes.map(change => change.write()));
+  assert.deepEqual(results.map(result => result.status).sort(), [200, 409]);
+  const kept = results.findIndex(result => result.status === 409);
+  assert.equal(results[kept].code, 'invalid_state');
+
+  // Read through the original session before trying the same credentials in a fresh session.
+  const account = await snapshot(changes[kept]);
+  assert.deepEqual(account, before[kept]);
+  const fresh = browser(base);
+  await fresh.signIn(account.username, changes[kept].password);
+  const me = await fresh.request('/me');
+  assert.equal(me.status, 200);
+  assert.equal(me.data.account_id, account.account_id);
+  assert.ok(me.data.roles.includes('tech_admin'));
+  return results;
+}
+
 // Hold the target account until both HTTP writes are queued, in the requested order.
 async function queuedAccountWrites(db, accountId, writes) {
   const pending = [];
@@ -935,11 +966,12 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal((await permanent.request('/me')).status, 200);
       await db.roleGrant.update({ where, data: { expires_at: null } });
       const clients = [permanent, backup];
-      const results = await Promise.all(clients.map((client, i) => client.write('PATCH', paths[i], body)));
-      assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
+      const results = await raceAdminChanges(base, clients.map((client, i) => ({
+        client, path: paths[i], password: i === 0 ? adminPassword : staffPassword,
+        write: () => client.write('PATCH', paths[i], body),
+      })));
       const disabled = results.findIndex(r => r.status === 200), kept = 1 - disabled;
       assert.equal((await clients[disabled].request('/me')).status, 401);
-      assert.equal((await clients[kept].request('/me')).status, 200);
       assert.equal(await db.auditEvent.count({ where: { action: 'set_account_status', resource_id: { in: ids } } }), 1);
       assert.equal((await clients[kept].write('PATCH', paths[disabled], {
         status: 'active', expected_version: results[disabled].data.version, reason: '恢复履职',
@@ -1097,27 +1129,23 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
         assert.equal(granted.status, 200);
         const primaryVersion = (await state(primary)).version;
         const accountVersion = (await admin.request(backup)).data.version;
-        const results = await Promise.all([
-          set(admin, primary, primaryVersion, requestedRoles),
-          backupAction === 'revoke' ? set(teacher, backup, granted.data.version, backupRoles)
-            : teacher.write('PATCH', backup, { expected_version: accountVersion, status: 'inactive', reason: '值班交接' }),
+        const results = await raceAdminChanges(base, [
+          { client: admin, path: primary, password: adminPassword,
+            write: () => set(admin, primary, primaryVersion, requestedRoles) },
+          { client: teacher, path: backup, password: staffPassword,
+            write: () => backupAction === 'revoke' ? set(teacher, backup, granted.data.version, backupRoles)
+              : teacher.write('PATCH', backup, { expected_version: accountVersion, status: 'inactive', reason: '值班交接' }) },
         ]);
-        assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
-        assert.equal(results.find(r => r.status === 409).code, 'invalid_state');
         const primaryWon = results[0].status === 200;
         const remaining = primaryWon ? teacher : admin;
-        assert.equal((await remaining.request('/me')).status, 200);
         const primaryState = await state(primary, remaining);
         assert.deepEqual(primaryState.roles, primaryWon ? requestedRoles : primaryRoles);
         const backupState = await state(backup, remaining);
         assert.deepEqual(backupState.roles, !primaryWon && backupAction === 'revoke' ? backupRoles : granted.data.roles);
         const backupAccount = (await remaining.request(backup)).data;
         assert.equal(backupAccount.status, !primaryWon && backupAction === 'disable' ? 'inactive' : 'active');
-        if (primaryWon) {
-          assert.equal(backupState.version, granted.data.version);
-          assert.equal(backupAccount.version, accountVersion);
+        if (primaryWon)
           assert.equal((await set(remaining, primary, primaryVersion + 1, primaryRoles)).status, 200);
-        } else assert.equal(primaryState.version, primaryVersion);
         if (!primaryWon && backupAction === 'disable') {
           assert.equal((await admin.write('PATCH', backup, {
             expected_version: accountVersion + 1, status: 'active', reason: '恢复履职',
@@ -1189,27 +1217,25 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     await t.test('学生档案停用与另一管理员改限期并发，仅能失去一名长期管理员', async () => {
       const admin = browser(base);
       await admin.signIn('demo.admin', adminPassword);
-      const primaryPath = '/admin/accounts/' + (await admin.request('/me')).data.account_id + '/roles';
+      const primaryPath = '/admin/accounts/' + (await admin.request('/me')).data.account_id;
       const me = (await owner.request('/me')).data;
       const target = '/admin/accounts/' + me.account_id;
       const studentPath = '/admin/students/' + me.student.id;
-      const primary = (await admin.request(primaryPath)).data;
+      const primary = (await admin.request(primaryPath + '/roles')).data;
       const original = (await admin.request(target + '/roles')).data;
       const grant = await admin.write('PUT', target + '/roles', { expected_version: original.version,
         roles: [...original.roles, {role: 'tech_admin'}], reason: '管理员轮值' });
       assert.equal(grant.status, 200);
       const status = { expected_version: (await admin.request(target)).data.student_version, status: 'inactive', reason: '结束轮值' };
       const expires_at = new Date(Date.now() + 86400000).toISOString();
-      const results = await Promise.all([
-        admin.write('PUT', primaryPath, { expected_version: primary.version, reason: '临时值班',
-          roles: primary.roles.map(g => g.role === 'tech_admin' ? { ...g, expires_at } : g) }),
-        owner.write('PATCH', studentPath, status),
+      const results = await raceAdminChanges(base, [
+        { client: admin, path: primaryPath, password: adminPassword,
+          write: () => admin.write('PUT', primaryPath + '/roles', { expected_version: primary.version, reason: '临时值班',
+            roles: primary.roles.map(g => g.role === 'tech_admin' ? { ...g, expires_at } : g) }) },
+        { client: owner, path: target, password: ownerPassword, write: () => owner.write('PATCH', studentPath, status) },
       ]);
-      assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
-      assert.equal(results.find(r => r.status === 409).code, 'invalid_state');
       if (results[0].status === 200) {
-        assert.equal((await owner.request('/me')).status, 200);
-        assert.equal((await admin.write('PUT', primaryPath, { expected_version: primary.version + 1, roles: primary.roles, reason: '恢复轮值' })).status, 200);
+        assert.equal((await admin.write('PUT', primaryPath + '/roles', { expected_version: primary.version + 1, roles: primary.roles, reason: '恢复轮值' })).status, 200);
       } else {
         assert.equal((await owner.request('/me')).status, 401);
         assert.equal((await admin.write('PATCH', studentPath, { expected_version: status.expected_version + 1,
@@ -1270,11 +1296,12 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal((await primary.request('/me')).status, 200);
       await db.roleGrant.update({ where: { account_id_role: { account_id: otherId, role: 'tech_admin' } }, data: { expires_at: null } });
       const change = { status: 'inactive', expected_version: (await backup.request(otherPath)).data.version, reason: '管理员轮岗' };
-      const results = await Promise.all([primary.write('POST', path + '/password-reset', body), backup.write('PATCH', otherPath, change)]);
-      assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
-      const clients = [primary, backup];
-      for (const [i, result] of results.entries())
-        assert.equal((await clients[i].request('/me')).status, result.status === 200 ? 401 : 200);
+      const results = await raceAdminChanges(base, [
+        { client: primary, path, password: adminPassword, write: () => primary.write('POST', path + '/password-reset', body) },
+        { client: backup, path: otherPath, password: staffPassword, write: () => backup.write('PATCH', otherPath, change) },
+      ]);
+      const changed = results[0].status === 200 ? primary : backup;
+      assert.equal((await changed.request('/me')).status, 401);
     });
   } finally {
     await app?.close();
