@@ -285,6 +285,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
             continue;
           }
           const empty = {
+            退出与恢复: '暂无符合条件的退出申请。',
             漏记反馈: '当前没有反馈。',
             错账修复组: '当前没有修复组。',
             时长台账: '当前条件下没有时长记录。',
@@ -649,7 +650,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
         await visible(owner.getByRole('cell', { name: number, exact: true }));
     });
 
-    await t.test('名单批量预览和账号示例不会发送业务写请求', async () => {
+    await t.test('名单勾选和账号示例不会发送业务写请求', async () => {
       const writes = [];
       const collect = (r) => {
         if (r.url().includes('/api/v1/') && r.method() !== 'GET') writes.push(r.method());
@@ -805,6 +806,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await link(helper, '校园服务乙').click();
       await link(helper, '报名名单').click();
       await visible(helper.getByText(/已选 0 人/));
+      await visible(helper.getByText('离开上次名单时已清空选择。'));
       await link(helper, '编辑与送审').click();
       await visible(helper.getByLabel('活动标题', { exact: true }));
       await db.activityMember.delete({
@@ -844,8 +846,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
         await button(owner, '查看名单测试2').click();
         await visible(owner.getByRole('heading', { name: '名单测试2的报名记录' }));
         await button(owner, '收起记录').click();
-        for (const label of ['录取所选（待接入）', '设为候补（待接入）'])
-          assert.ok(await button(owner, label).isDisabled());
+        for (const label of ['录取所选', '所选设为候补'])
+          assert.ok(await button(owner, label).isEnabled());
         assert.ok(await button(owner, /^导出所选名单（2）$/).isEnabled());
         await button(owner, '已录取 18').click();
         await visible(owner.getByText('已选 0 人', { exact: true }));
@@ -879,6 +881,21 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await visible(owner.getByText('已选 0 人', { exact: true }));
       assert.equal(await button(owner, '下载所选名单').count(), 0);
       await fits(owner);
+    });
+
+    await t.test('跨页决定逐行定位旧版本并保留其余选择', async () => {
+      await owner.goto(web + '/managed/' + first.id + '/roster');
+      await owner.getByLabel('选择名单测试1', { exact: true }).check();
+      await button(owner, '下一页').click();
+      await owner.getByLabel('选择名单测试6', { exact: true }).check();
+      await db.registration.updateMany({ where: { activity_id: first.id, student: { account: { display_name: '名单测试1' } } }, data: { version: { increment: 1 } } });
+      await button(owner, '所选设为候补').click();
+      await visible(owner.getByLabel('冲突记录').getByText(/名单测试1/));
+      await visible(owner.getByText('已选 2 人', { exact: true }));
+      await button(owner, '刷新名单复核').click();
+      await button(owner, '移出选择').click();
+      await button(owner, '所选设为候补').click();
+      await visible(owner.getByText('已将1 人设为候补。', { exact: true }));
     });
 
     await t.test('活动发现保留搜索、校区、服务日期和报名阶段', async () => {
@@ -1462,6 +1479,32 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
         await db.registrationDecisionEvent.count({ where: { registration_id: row.id } }),
         1,
       );
+    });
+
+    await t.test('学生和负责人办理退出与恢复，保留原报名', async () => {
+      await link(student, '办理与进度').click();
+      const detail = student.url();
+      await student.getByLabel('申请原因').fill('时间冲突');
+      await button(student, '申请退出整项活动').click();
+      await visible(button(student, '撤回退出申请'));
+      await link(owner, '退出与恢复').click();
+      await button(owner, '处理申请').click();
+      await button(owner, '批准退出').click();
+      await visible(owner.getByText('退出申请已批准。', { exact: true }));
+      await student.reload();
+      await visible(student.locator('.summary-list').getByText('已退出'));
+      await student.getByLabel('申请原因').fill('时间已协调');
+      await button(student, '申请恢复报名').click();
+      await visible(button(student, '撤回恢复申请'));
+      await button(owner, '恢复申请').click();
+      await button(owner, '处理申请').click();
+      await button(owner, '批准恢复').click();
+      await visible(owner.getByText('恢复申请已批准。', { exact: true }));
+      await student.reload();
+      await visible(student.locator('.summary-list').getByText('已录取'));
+      assert.equal(student.url(), detail);
+      await helper.goto(detail);
+      await visible(helper.getByText('未找到该报名记录。'));
     });
 
     await t.test('会话到期后在原表单重试，兼任负责人保留管理入口', async () => {

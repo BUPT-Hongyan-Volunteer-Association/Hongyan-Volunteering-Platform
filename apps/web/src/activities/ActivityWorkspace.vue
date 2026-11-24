@@ -121,7 +121,7 @@ onUnmounted(() => {
         :is="Component"
         v-on="deniedRefresh.includes(String(route.name)) ? { denied: refresh } : {}"
         v-bind="
-          ['organizer-section', 'activity-hour-incidents'].includes(String(route.name))
+          route.name === 'activity-hour-incidents'
             ? {}
             : route.name === 'activity-edit'
               ? { writesPaused: verifying || !!error, snapshot: detail, onLoaded: showDetail }

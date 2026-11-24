@@ -207,6 +207,7 @@ model Registration {
 }
 
 model ExitRequest {
+  kind            String       @default("exit")
   id              String       @id @default(uuid()) @db.Uuid
   registration_id String       @db.Uuid
   registration    Registration @relation(fields: [registration_id], references: [id])
@@ -355,13 +356,13 @@ model Notice {
   activity            Activity        @relation(fields: [activity_id], references: [id], onDelete: Cascade)
   receipts            NoticeReceipt[]
 
-  // 同一活动的同一类通知版本号唯一，兜住并发投递写坏版本链的情况。
-  @@unique([activity_id, notice_kind, information_version])
+  // 源版本唯一索引由迁移维护，独立补发沿用源版本。
   @@index([activity_id, notice_kind, is_current])
   @@map("notice")
 }
 
 model NoticeReceipt {
+  follow_up_closed Boolean @default(false)
   notice_id       String    @db.Uuid
   student_id      String    @db.Uuid
   read_at         DateTime? @db.Timestamptz(3)

@@ -14,6 +14,7 @@ type DecisionPayload = {
   status: string;
   decision_reason?: string | null;
   actor_id?: string;
+  kind?: string;
 };
 
 type Publication = {
@@ -153,9 +154,26 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
     published: number,
     now: Date,
   ) {
+    if (event.event_type === 'gathering_supplement') {
+      const payload = event.payload as { source_notice_id: string; student_id: string; registration_version: number };
+      const source = await tx.notice.findFirst({ where: {
+        id: payload.source_notice_id, activity_id, notice_kind: 'gathering', is_current: true, source_notice_id: null,
+      } });
+      const registration = await tx.registration.findFirst({ where: {
+        id: event.resource_id, activity_id, student_id: payload.student_id, status: 'accepted', version: payload.registration_version,
+      } });
+      if (!source || !registration) return 'superseded';
+      await tx.notice.create({ data: {
+        activity_id, title: source.title, body: source.body, notice_kind: 'gathering',
+        requires_ack: source.requires_ack, information_version: source.information_version,
+        source_notice_id: source.id, source_event_id: event.id, published_at: now, published_by: source.published_by,
+        receipts: { create: { student_id: payload.student_id } },
+      } });
+      return 'delivered';
+    }
     const change = event.event_type === 'activity_changed';
     const hour = hourNoticeKind(event.event_type);
-    if (!change && !hour && event.event_type !== 'registration_decided')
+    if (!change && !hour && !['registration_decided', 'request_decided'].includes(event.event_type))
       throw new DeliveryError('未知的通知事件类型');
     const notice_kind = hour ?? (change ? 'change' : 'result');
     const previous = await tx.notice.findFirst({
@@ -300,6 +318,15 @@ async function resultPublication(
     select: { content: true },
   });
   const { title } = revision.content as unknown as ActivityInput;
+  if (event.event_type === 'request_decided') {
+    const kind = payload.kind === 'exit' ? '退出' : '恢复';
+    const statuses: Record<string, string> = { approved: '已批准', rejected: '已驳回', cancelled: '因活动取消或结束已取消' };
+    return {
+      title: title + kind + '申请结果', body: kind + '申请' + statuses[payload.status] +
+        (payload.decision_reason ? '。说明：' + payload.decision_reason : '。'),
+      recipients: [payload.student_id], published_by: payload.actor_id ?? null, source_revision: published,
+    };
+  }
   return {
     title: `${title}报名结果`,
     body: resultBody(title, payload.status, payload.decision_reason ?? null),

@@ -86,6 +86,7 @@ export class NoticeController {
       },
     };
     const followUp: Prisma.NoticeReceiptWhereInput = {
+      follow_up_closed: false,
       acknowledged_at: null,
       notice: {
         is_current: true,
@@ -150,7 +151,7 @@ export class NoticeController {
       if (!receipt) invisible();
       if (acknowledge ? receipt.acknowledged_at : receipt.read_at)
         return noticeView(receipt.notice, receipt);
-      if (acknowledge && (!receipt.notice.is_current || !receipt.notice.requires_ack)) wrongState();
+      if (acknowledge && (receipt.follow_up_closed || !receipt.notice.is_current || !receipt.notice.requires_ack)) wrongState();
       const now = new Date();
       const updated = await tx.noticeReceipt.update({
         where,

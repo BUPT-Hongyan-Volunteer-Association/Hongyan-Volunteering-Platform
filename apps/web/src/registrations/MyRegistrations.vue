@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { listMyRegistrations, type Registration, type RegistrationPage } from '@hongyan/contracts';
 import RecordSummaryList from '@hongyan/ui/RecordSummaryList.vue';
+import RequestQueue from './RequestQueue.vue';
 import Pager from '@hongyan/ui/Pager.vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
@@ -28,6 +29,8 @@ const rows = computed(() =>
     date: row.submitted_at,
     dateLabel: localDateTime(row.submitted_at),
     summary: [
+      row.pending_exit_request_id && '退出申请待处理',
+      row.pending_restoration_request_id && '恢复申请待处理',
       row.statement && '申请说明 · ' + row.statement,
       row.decision_reason && '处理说明 · ' + row.decision_reason,
     ]
@@ -36,6 +39,7 @@ const rows = computed(() =>
   })),
 );
 const error = ref('');
+const feedback = ref('');
 let serial = 0;
 async function load() {
   const turn = ++serial;
@@ -60,7 +64,7 @@ async function load() {
 function filter(value: string) {
   void router.push({ path: '/registrations', query: { status: value || undefined } });
 }
-watch(() => route.fullPath, load, { immediate: true });
+watch(() => route.fullPath, () => { feedback.value = ''; void load(); }, { immediate: true });
 onMounted(() => window.addEventListener('focus', load));
 onUnmounted(() => {
   serial++;
@@ -83,11 +87,13 @@ onUnmounted(() => {
         @update:model-value="filter"
       />
     </header>
+    <p v-if="feedback" role="status">{{ feedback }}</p>
     <p v-if="error" role="alert">{{ error }} <button @click="load">重新读取</button></p>
     <p v-else-if="!result" role="status">正在读取报名记录…</p>
     <template v-else>
       <RecordSummaryList v-if="rows.length" :records="rows">
         <template #action="{ row }">
+          <RouterLink v-if="!item" :to="{ path: '/registrations/' + row.id, query: route.query }">办理与进度</RouterLink>
           <RouterLink
             :to="{
               path: '/activities/' + row.activityId,
@@ -98,6 +104,8 @@ onUnmounted(() => {
         </template>
       </RecordSummaryList>
       <p v-else>{{ item ? '未找到该报名记录。' : '暂无符合条件的报名记录。' }}</p>
+      <RequestQueue v-if="item && result.items[0]" :registration="result.items[0]" :activity-id="result.items[0].activity_id"
+        @changed="msg => { feedback = msg; load(); }" />
       <Pager
         v-if="!item"
         :page="page"
