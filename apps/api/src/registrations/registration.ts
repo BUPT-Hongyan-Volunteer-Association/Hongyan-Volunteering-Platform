@@ -8,7 +8,7 @@ import type {
   RegistrationInput,
 } from '@hongyan/contracts/types';
 import type { Prisma, Registration } from '../generated/prisma/client.js';
-import { slots } from '../activities/schedule.js';
+import { occurrences } from '../activities/schedule.js';
 import { publishedRevision, type LoadedActivity } from '../activities/read.js';
 import { wrongState, type Tx } from '../activities/workflow.js';
 import { BusinessError, invalid, invisible } from '../http.js';
@@ -151,8 +151,12 @@ export async function apply(
 
 export function canRecruit(content: ActivityPublicationContent | undefined, exit = false, now = new Date()) {
   const schedule = content?.schedule;
-  const boundary = schedule?.schedule_type === 'date_range' && !exit ? 'ends_at' : 'starts_at';
-  return slots(schedule).some((slot) => Date.parse(slot[boundary]) > now.getTime());
+  if (!schedule) return false;
+  const boundary = schedule.schedule_type === 'date_range' && !exit ? 'ends_at' : 'starts_at';
+  for (const { slot } of occurrences(schedule)) {
+    if (Date.parse(slot[boundary]) > now.getTime()) return true;
+  }
+  return false;
 }
 
 export async function occupiedSeats(tx: Tx, activity_id: string) {

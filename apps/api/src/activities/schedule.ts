@@ -19,7 +19,7 @@ export function serviceDayMilliseconds(times: readonly ScheduleSlot[], serviceDa
   }, 0);
 }
 
-function* occurrences(
+export function* occurrences(
   schedule: ActivitySchedule,
 ): Generator<{ slot: ScheduleSlot; field: string }> {
   if (schedule.schedule_type === 'date_range') {

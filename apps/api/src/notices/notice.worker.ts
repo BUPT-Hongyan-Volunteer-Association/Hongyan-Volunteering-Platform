@@ -179,8 +179,9 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
       throw new DeliveryError('未知的通知事件类型');
     const notice_kind = hour ?? (change ? 'change' : 'result');
     const previous = await tx.notice.findFirst({
-      where: { activity_id, notice_kind },
+      where: { activity_id, notice_kind, source_notice_id: null },
       orderBy: { information_version: 'desc' },
+      select: { id: true, is_current: true, information_version: true, source_revision: true, base_revision: true },
     });
     const publication = hour ? await hourPublication(tx, event, published) : change
       ? await changePublication(tx, event, activity_id, published, previous)
@@ -239,7 +240,7 @@ async function changePublication(
   event: NotificationEvent,
   activity_id: string,
   published: number,
-  previous: Notice | null,
+  previous: Pick<Notice, 'id' | 'is_current' | 'source_revision' | 'base_revision'> | null,
 ): Promise<Publication | null> {
   const revision = event.source_revision;
   if (revision === null) throw new DeliveryError('变更通知缺少审核来源');

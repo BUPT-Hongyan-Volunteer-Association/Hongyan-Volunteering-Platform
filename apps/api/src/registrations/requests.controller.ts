@@ -22,13 +22,16 @@ import {
 
 type Kind = 'exit' | 'restoration';
 type Filters = Record<string, string>;
-function view(q: ExitRequest, r: Pick<Registration, 'activity_id' | 'student_id'>) {
+function view(q: ExitRequest, r: Pick<Registration, 'activity_id' | 'student_id'> & {
+  student?: { student_no: string; account: { display_name: string } };
+}) {
   return {
     id: q.id,
     version: q.version,
     registration_id: q.registration_id,
     activity_id: r.activity_id,
     student_id: r.student_id,
+    ...(r.student && { student_no: r.student.student_no, student_name: r.student.account.display_name }),
     reason: q.reason,
     status: q.status,
     created_at: q.created_at.toISOString(),
@@ -123,31 +126,16 @@ export class RecruitmentRequests {
         )
           invisible();
         const total = await tx.exitRequest.count({ where });
+        const ids = { activity_id: true, student_id: true } as const;
+        const rosterIdentity = {
+          ...ids, student: { select: { student_no: true, account: { select: { display_name: true } } } },
+        } as const;
         const rows = await tx.exitRequest.findMany({
-          where,
-          skip,
-          take: page_size,
+          where, skip, take: page_size,
           orderBy: [{ created_at: 'desc' }, { id: 'asc' }],
-          include: {
-            registration: {
-              include: {
-                student: { select: { student_no: true, account: { select: { display_name: true } } } },
-              },
-            },
-          },
+          include: { registration: { select: scope ? rosterIdentity : ids } },
         });
-        return envelope({
-          page,
-          page_size,
-          total,
-          items: rows.map((row) => ({
-            ...view(row, row.registration),
-            ...(scope && {
-              student_no: row.registration.student.student_no,
-              student_name: row.registration.student.account.display_name,
-            }),
-          })),
-        });
+        return envelope({ page, page_size, total, items: rows.map(row => view(row, row.registration)) });
       },
       { isolationLevel: 'RepeatableRead' },
     );

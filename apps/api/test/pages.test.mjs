@@ -889,13 +889,18 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await button(owner, '下一页').click();
       await owner.getByLabel('选择名单测试6', { exact: true }).check();
       await db.registration.updateMany({ where: { activity_id: first.id, student: { account: { display_name: '名单测试1' } } }, data: { version: { increment: 1 } } });
-      async function submitWhileTurningPage(direction, visibleName) {
+      async function submitWhileTurningPage(direction, visibleName, selectAdditional = false) {
         const held = await holdResponse(owner, '**/registration-decisions?*');
         await button(owner, '所选设为候补').click();
         try {
           await held.received;
           await button(owner, direction).click();
-          await visible(owner.getByLabel('选择' + visibleName, { exact: true }));
+          const visibleRow = owner.getByLabel('选择' + visibleName, { exact: true });
+          await visible(visibleRow);
+          if (selectAdditional) {
+            await visibleRow.check();
+            await owner.getByLabel('所选人员的处理说明（选填）').fill('下一批说明');
+          }
         } finally {
           await held.release();
         }
@@ -905,9 +910,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await visible(owner.getByText('已选 2 人', { exact: true }));
       await button(owner, '刷新名单复核').click();
       await button(owner, '移出选择').click();
-      await submitWhileTurningPage('下一页', '名单测试7');
+      await submitWhileTurningPage('下一页', '名单测试7', true);
       await visible(owner.getByText('已将1 人设为候补。', { exact: true }));
-      await visible(owner.getByText('已选 0 人', { exact: true }));
+      await visible(owner.getByText('已选 1 人', { exact: true }));
+      assert.ok(await owner.getByLabel('选择名单测试7', { exact: true }).isChecked());
+      assert.equal(await owner.getByLabel('所选人员的处理说明（选填）').inputValue(), '下一批说明');
     });
 
     await t.test('批量和个人说明分别投递，已录取人员仍可导出', async () => {
@@ -1573,11 +1580,20 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await visible(button(student, '撤回退出申请'));
       await visible(student.getByText('退出申请已提交。', { exact: true }));
       await owner.setViewportSize({ width: 1440, height: 900 });
+      const queueReads = [];
+      const countReads = req => {
+        const url = new URL(req.url());
+        if (req.method() === 'GET' && url.pathname.endsWith('/exit-requests'))
+          queueReads.push(url.searchParams.has('request_id') ? 'detail' : 'list');
+      };
+      owner.on('request', countReads);
       await link(owner, '退出与恢复').click();
       const entry = owner.getByRole('link', { name: /^处理申请 · 体验学生/ });
       await entry.click();
       await visible(button(owner, '批准退出'));
       await visible(entry);
+      owner.off('request', countReads);
+      assert.deepEqual(queueReads, ['list', 'detail']);
       const exitUrl = owner.url();
       await owner.reload();
       await visible(button(owner, '批准退出'));

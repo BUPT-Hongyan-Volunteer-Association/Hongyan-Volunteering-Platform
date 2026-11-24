@@ -196,7 +196,7 @@ export class NoticeController {
       }
       if (!recipients.length) invalid('recipient_mode', '当前范围没有接收人，请调整范围');
       const previous = await tx.notice.aggregate({
-        where: { activity_id, notice_kind: 'other' }, _max: { information_version: true },
+        where: { activity_id, notice_kind: 'other', source_notice_id: null }, _max: { information_version: true },
       });
       const notice = await tx.notice.create({
         data: {

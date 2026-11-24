@@ -148,8 +148,9 @@ async function decide(decision: Decision, single?: Registration) {
     const who = single ? single.student_name : rows.length + ' 人';
     notice.value = decision === 'waitlisted' ? '已将' + who + '设为候补。'
       : decision === 'accepted' ? '已录取' + who + '。' : who + '已标为未录取。';
-    for (const r of rows) selected.value.delete(r.id);
-    if (!single) batchReason.value = '';
+    const remaining = new Set(selected.value);
+    for (const r of rows) remaining.delete(r.id);
+    selected.value = remaining;
     await load();
   } catch (e) {
     if (!mounted || activityId !== route.params.id) return;
