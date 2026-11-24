@@ -25,6 +25,7 @@ import { DraftController } from './activities/draft.controller.js';
 import { Workflow } from './activities/workflow.js';
 import { Database } from './database.js';
 import { PublicController } from './activities/public.controller.js';
+import { RecruitmentRequests } from './registrations/requests.controller.js';
 import { RegistrationController } from './registrations/registration.controller.js';
 import { AttendanceController } from './attendance/attendance.controller.js';
 import { AdminTeamController, ManagedController } from './activities/managed.controller.js';
@@ -37,8 +38,13 @@ import { HourCorrectionsController } from './hours/corrections.controller.js';
 import { HourIncidentsController } from './hours/incidents.controller.js';
 import { HourAppealsController } from './hours/appeals.controller.js';
 import { StudentController } from './students/student.controller.js';
+import { ExportController } from './exports/export.controller.js';
+import { ExportService } from './exports/export.service.js';
+import { ExportWorker } from './exports/export.worker.js';
+import { AuditController } from './audit.controller.js';
 import { StudentImportService } from './students/import.service.js';
 import { StaffGuard } from './students/staff.guard.js';
+import { TimelineController } from './timeline/timeline.controller.js';
 
 @Catch()
 class HttpErrorFilter implements ExceptionFilter {
@@ -91,9 +97,11 @@ class HttpErrorFilter implements ExceptionFilter {
     AdminTeamController,
     PublicController,
     DraftController,
+    TimelineController,
     GroupImageController,
     ReviewController,
     RegistrationController,
+    RecruitmentRequests,
     AttendanceController,
     NoticeController,
     HourBatchesController,
@@ -102,6 +110,8 @@ class HttpErrorFilter implements ExceptionFilter {
     HourIncidentsController,
     HourAppealsController,
     StudentController,
+    ExportController,
+    AuditController,
   ],
   providers: [
     Database,
@@ -112,6 +122,8 @@ class HttpErrorFilter implements ExceptionFilter {
     HourUploadScope,
     HourValidationWorker,
     StudentImportService,
+    ExportService,
+    ExportWorker,
     NoticeWorker,
   ],
 })

@@ -8,6 +8,7 @@ const props = defineProps<{ writesPaused?: boolean }>();
 const emit = defineEmits<{ denied: [] }>();
 const route = useRoute(), router = useRouter();
 const id = String(route.params.id), base = '/managed/' + id;
+const scope = { type: 'activity_hours', activity_id: id } as const;
 const ledger = ref<InstanceType<typeof HourLedger>>();
 const record = ref<HourRecord>(), reason = ref(''), sending = ref(false), error = ref('');
 const command = createCommand();
@@ -41,12 +42,12 @@ async function submit() {
 }
 </script>
 <template>
-  <HourLedger ref="ledger" :scope="{ type: 'activity_hours', activity_id: id }" title="时长台账"
+  <HourLedger class="activity-ledger" ref="ledger" :scope="scope" title="时长台账"
     :batch-base="base + '/batches'" :group-base="base + '/corrections'" @denied="denied">
     <template #links>
-      <div class="page-actions">
-        <RouterLink :to="base + '/batches'">时长批次</RouterLink>
-        <RouterLink :to="base + '/corrections'">错账修复组</RouterLink>
+      <div class="page-actions ledger-tools">
+        <RouterLink class="button" :to="{ path: base + '/appeals', query: { page: route.query.page } }">漏记反馈</RouterLink>
+        <RouterLink class="button" :to="{ path: base + '/corrections', query: { page: route.query.page } }">错账修复组</RouterLink>
       </div>
     </template>
     <template #actions="{ row }">
@@ -68,6 +69,15 @@ async function submit() {
   </form>
 </template>
 <style scoped>
+.ledger-tools { margin-top: 16px; gap: 12px; }
+.activity-ledger :deep(.hour-filters) { margin-block: 28px 24px; gap: 16px 20px; }
+.activity-ledger :deep(.hour-filters > div) { display: grid; gap: 6px; }
+.activity-ledger :deep(.ledger-summary) { padding: 16px 20px; gap: 12px 20px; margin-bottom: 24px; }
+.activity-ledger :deep(.ledger-summary > :last-child) { margin-inline-start: auto; }
+@media (max-width: 700px) {
+  .activity-ledger :deep(.hour-filters) { margin-block: 24px 20px; gap: 12px; }
+  .activity-ledger :deep(.ledger-summary > :last-child) { margin-inline-start: 0; }
+}
 .void-form { margin-block: 16px; padding: 12px; border: 1px solid var(--line); }
 .void-form label { display: grid; gap: 6px; }
 </style>

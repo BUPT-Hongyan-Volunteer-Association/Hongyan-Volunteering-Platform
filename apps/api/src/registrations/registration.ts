@@ -1,16 +1,54 @@
+import { canChangeRegistration } from '@hongyan/contracts/activity';
+import { audit } from '../audit.js';
+import { randomUUID } from 'node:crypto';
 import type {
   ActivityPublicationContent,
   Registration as View,
-  RegistrationDecision,
+  BulkRegistrationDecision,
   RegistrationInput,
 } from '@hongyan/contracts/types';
-import type { Registration } from '../generated/prisma/client.js';
-import { slots } from '../activities/schedule.js';
+import type { Prisma, Registration } from '../generated/prisma/client.js';
+import { occurrences } from '../activities/schedule.js';
 import { publishedRevision, type LoadedActivity } from '../activities/read.js';
-import { checkVersion, wrongState, type Tx } from '../activities/workflow.js';
+import { wrongState, type Tx } from '../activities/workflow.js';
 import { BusinessError, invalid, invisible } from '../http.js';
 
-function approvedContent(activity: LoadedActivity) {
+export const rosterOrderBy = [
+  { submitted_at: 'asc' },
+  { id: 'asc' },
+] satisfies Prisma.RegistrationOrderByWithRelationInput[];
+
+/** 名单页面和导出共用的搜索条件；状态过滤由调用方决定是否叠加。 */
+export function rosterSearchWhere(filters: {
+  activity_id: string;
+  q?: string;
+  registration_ids?: string[];
+}): Prisma.RegistrationWhereInput {
+  const search = filters.q?.trim();
+  return {
+    activity_id: filters.activity_id,
+    ...(filters.registration_ids && { id: { in: filters.registration_ids } }),
+    ...(search && {
+      student: {
+        OR: [{ student_no: { contains: search } }, { account: { display_name: { contains: search } } }],
+      },
+    }),
+  };
+}
+
+export function rosterWhere(filters: {
+  activity_id: string;
+  q?: string;
+  registration_ids?: string[];
+  status?: string;
+}): Prisma.RegistrationWhereInput {
+  return {
+    ...rosterSearchWhere(filters),
+    ...(filters.status && { status: filters.status }),
+  };
+}
+
+export function approvedContent(activity: LoadedActivity) {
   const revision = publishedRevision(activity);
   return revision?.content as unknown as ActivityPublicationContent | undefined;
 }
@@ -41,22 +79,34 @@ function history(row: Registration, changed_at: Date | null, actor_id: string | 
   };
 }
 
-async function recordChange(
-  tx: Tx,
-  previous: Registration | null,
-  current: Registration,
-  time: Date,
-  actor: string,
+export async function recordChanges(
+  tx: Tx, previous: Registration[], current: Registration[], time: Date, actor: string,
 ) {
-  // An imported or seeded relation may predate version history. Preserve the facts it actually has.
-  if (previous)
-    await tx.registrationHistory.createMany({
-      data: [
-        history(previous, previous.status === 'submitted' ? previous.submitted_at : null, null),
-      ],
-      skipDuplicates: true,
-    });
-  await tx.registrationHistory.create({ data: history(current, time, actor) });
+  // 旧报名可能尚无版本历史，保留已有事实，再写本次变化。
+  if (previous.length) await tx.registrationHistory.createMany({
+    data: previous.map(r => history(r, r.status === 'submitted' ? r.submitted_at : null, null)),
+    skipDuplicates: true,
+  });
+  // 决定与投递共用活动锁。保留已发送通知和回执，关闭旧报名版本的确认。
+  const previousIds = previous.filter(r => ['accepted', 'waitlisted', 'rejected'].includes(r.status)).map(r => r.id);
+  if (previousIds.length) await tx.$executeRaw`
+    UPDATE notice n SET is_current = false, version = n.version + 1, updated_at = CURRENT_TIMESTAMP
+    FROM notification_event e WHERE n.source_event_id = e.id AND n.is_current
+      AND e.event_type = 'registration_decided' AND e.resource_id = ANY(${previousIds}::uuid[])`;
+  await tx.registrationHistory.createMany({ data: current.map(r => history(r, time, actor)) });
+}
+
+export function canWithdraw(activityStatus: string, registrationStatus: string) {
+  return activityStatus === 'published' && ['submitted', 'waitlisted'].includes(registrationStatus);
+}
+
+export function canDecide(activityStatus: string, approved: ActivityPublicationContent | undefined) {
+  return activityStatus === 'published' && canRecruit(approved);
+}
+
+export function canRequest(kind: 'exit' | 'restoration', activityStatus: string, status: string, approved: ActivityPublicationContent | undefined) {
+  if (kind === 'restoration') return status === 'exited' && canDecide(activityStatus, approved);
+  return status === 'accepted' && activityStatus === 'published' && canRecruit(approved, true);
 }
 
 export async function apply(
@@ -73,17 +123,14 @@ export async function apply(
   const opens = Date.parse(approved.registration_opens_at);
   const closes = Date.parse(approved.registration_closes_at);
   if (!(opens < closes)) wrongState();
-  if (received.getTime() < opens)
-    throw new BusinessError(409, 'registration_not_open', '尚未到报名开放时间');
-  if (received.getTime() >= closes)
-    throw new BusinessError(409, 'registration_closed', '报名已截止');
+  if (received.getTime() < opens) throw new BusinessError(409, 'registration_not_open', '尚未到报名开放时间');
+  if (received.getTime() >= closes) throw new BusinessError(409, 'registration_closed', '报名已截止');
   const relation = { activity_id: activity.id, student_id };
   const previous = await tx.registration.findUnique({
     where: { activity_id_student_id: relation },
   });
   if (previous && previous.status !== 'withdrawn') {
-    if (['submitted', 'waitlisted', 'accepted'].includes(previous.status))
-      return registrationView(previous);
+    if (['submitted', 'waitlisted', 'accepted'].includes(previous.status)) return registrationView(previous);
     wrongState();
   }
   const data = {
@@ -98,73 +145,135 @@ export async function apply(
         data: { ...data, version: { increment: 1 } },
       })
     : await tx.registration.create({ data: { ...relation, ...data } });
-  await recordChange(tx, previous, current, received, actor);
+  await recordChanges(tx, previous ? [previous] : [], [current], received, actor);
   return registrationView(current);
 }
 
-export async function admit(
+export function canRecruit(content: ActivityPublicationContent | undefined, exit = false, now = new Date()) {
+  const schedule = content?.schedule;
+  if (!schedule) return false;
+  const boundary = schedule.schedule_type === 'date_range' && !exit ? 'ends_at' : 'starts_at';
+  for (const { slot } of occurrences(schedule)) {
+    if (Date.parse(slot[boundary]) > now.getTime()) return true;
+  }
+  return false;
+}
+
+export async function occupiedSeats(tx: Tx, activity_id: string) {
+  return tx.registration.count({ where: { activity_id, status: 'accepted' } });
+}
+
+export async function enabledStudents(tx: Tx, ids: string[]) {
+  const rows = await tx.$queryRaw<{ id: string; active: boolean }[]>`
+    SELECT s.id, a.active FROM student s JOIN account a ON a.id = s.account_id
+    WHERE s.id = ANY(${ids}::uuid[]) ORDER BY s.id FOR SHARE OF a, s`;
+  return new Set(rows.filter((r) => r.active).map((r) => r.id));
+}
+
+export async function queueGathering(tx: Tx, activity_id: string, rows: Registration[]) {
+  const source = await tx.notice.findFirst({
+    where: { activity_id, notice_kind: 'gathering', source_notice_id: null, is_current: true },
+    orderBy: { information_version: 'desc' },
+  });
+  if (!source) return;
+  await tx.notificationEvent.createMany({
+    data: rows.map((r) => ({
+      event_type: 'gathering_supplement',
+      event_key: `gathering:${r.id}:${r.version}:${source.id}`,
+      activity_id,
+      resource_id: r.id,
+      payload: { student_id: r.student_id, registration_version: r.version, source_notice_id: source.id },
+    })),
+  });
+}
+
+export async function decideBatch(
   tx: Tx,
   activity: LoadedActivity,
-  id: string,
   actor: string,
-  input: RegistrationDecision,
+  input: BulkRegistrationDecision,
 ) {
-  if (input.decision !== 'accepted') invalid('decision', '本批仅开放单人录取');
-  const previous = await tx.registration.findUnique({ where: { id, activity_id: activity.id } });
-  if (!previous) invisible();
-  checkVersion(previous.version, input.expected_version);
-  if (
-    !['submitted', 'waitlisted', 'rejected'].includes(previous.status) ||
-    activity.status !== 'published'
-  )
-    wrongState();
-  // Account activation and the admission must have an unambiguous order.
-  const [student] = await tx.$queryRaw<{ active: boolean }[]>`SELECT a.active FROM account a
-    JOIN student s ON s.account_id = a.id WHERE s.id = ${previous.student_id}::uuid FOR SHARE OF a, s`;
-  if (!student?.active) throw new BusinessError(409, 'invalid_state', '学生已停用，无法录取');
-  const approved = approvedContent(activity);
-  const now = new Date();
-  if (approved?.schedule?.schedule_type === 'date_range') {
-    if (!slots(approved.schedule).some(s => now.getTime() < Date.parse(s.ends_at)))
-      throw new BusinessError(409, 'invalid_state', '活动已结束，无法录取');
-  } else if (!approved || !slots(approved.schedule).some((s) => Date.parse(s.starts_at) > now.getTime()))
-    throw new BusinessError(409, 'invalid_state', '所有获批时段均已开始，无法录取');
-  const occupied = await tx.registration.count({
-    where: { activity_id: activity.id, status: 'accepted' },
+  const ids = input.items.map((item) => item.registration_id.toLowerCase());
+  if (new Set(ids).size !== ids.length) invalid('items', '同一批次不能重复选择报名');
+  const rows = await tx.registration.findMany({ where: { activity_id: activity.id, id: { in: ids } } });
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const enabled = await enabledStudents(
+    tx,
+    rows.map((r) => r.student_id),
+  );
+  const now = new Date(),
+    approved = approvedContent(activity);
+  const available = canDecide(activity.status, approved);
+  const failures = ids.flatMap((resource_id, i) => {
+    const row = byId.get(resource_id);
+    let code = 'invalid_state',
+      message = '';
+    if (!row) message = '该报名不属于当前活动或已不存在';
+    else if (row.version !== input.items[i].expected_version) {
+      code = 'version_conflict';
+      message = '版本已更新，请刷新后复核';
+    } else if (!enabled.has(row.student_id)) message = '学生已停用';
+    else if (!available) message = '活动已结束或没有可办理的获批时段';
+    else if (!canChangeRegistration(row.status, input.decision))
+      message = '当前报名状态不能作此决定';
+    return message ? [{ field: 'items', row: i + 1, resource_id, code, message }] : [];
   });
-  if (!(occupied < approved.capacity))
-    throw new BusinessError(409, 'capacity_conflict', '剩余名额已被其他录取操作占用，请刷新名单。');
-  const current = await tx.registration.update({
-    where: { id },
-    data: { status: 'accepted', version: { increment: 1 }, decision_reason: input.reason ?? null },
+  if (failures.length) throw new BusinessError(409, failures[0].code, failures[0].message, failures);
+  const occupied = await occupiedSeats(tx, activity.id);
+  const accepting = input.decision === 'accepted';
+  if (accepting && occupied + rows.length > approved!.capacity) {
+    const message = `剩余 ${Math.max(0, approved!.capacity - occupied)} 个名额，所选 ${rows.length} 人均未录取。`;
+    throw new BusinessError(
+      409,
+      'capacity_conflict',
+      message,
+      ids.map((resource_id, i) => ({
+        field: 'items',
+        row: i + 1,
+        resource_id,
+        code: 'capacity_conflict',
+        message,
+      })),
+    );
+  }
+  const changed = await tx.registration.updateManyAndReturn({
+    where: { id: { in: ids } },
+    data: { status: input.decision, version: { increment: 1 }, decision_reason: input.reason ?? null },
   });
-  await recordChange(tx, previous, current, now, actor);
-  const decision = await tx.registrationDecisionEvent.create({
-    data: {
+  await recordChanges(tx, rows, changed, now, actor);
+  const events = changed.map((r) => ({
+    event_id: randomUUID(),
+    activity_id: activity.id,
+    registration_id: r.id,
+    student_id: r.student_id,
+    registration_version: r.version,
+    status: r.status,
+  }));
+  await tx.registrationDecisionEvent.createMany({ data: events });
+  await tx.notificationEvent.createMany({
+    data: events.map((e) => ({
+      id: e.event_id,
+      event_type: 'registration_decided',
+      event_key: 'registration_decision:' + e.event_id,
       activity_id: activity.id,
-      registration_id: id,
-      student_id: current.student_id,
-      registration_version: current.version,
-      status: current.status,
-    },
+      resource_id: e.registration_id,
+      payload: { ...e, actor_id: actor, decision_reason: input.reason ?? null },
+    })),
   });
-  await tx.notificationEvent.create({
-    data: {
-      id: decision.event_id,
-      event_type: decision.event_type,
-      event_key: `registration_decision:${decision.event_id}`,
-      activity_id: decision.activity_id,
-      resource_id: decision.registration_id,
-      payload: {
-        event_id: decision.event_id,
-        registration_id: decision.registration_id,
-        student_id: decision.student_id,
-        registration_version: decision.registration_version,
-        status: decision.status,
-        decision_reason: current.decision_reason,
-        actor_id: actor,
-      },
-    },
+  await audit(tx, {
+    actor_id: actor,
+    action: 'decide_registrations',
+    resource_type: 'activity',
+    resource_id: activity.id,
+    reason: input.reason,
+    before: rows.map((r) => ({ id: r.id, version: r.version, status: r.status })),
+    after: changed.map((r) => ({ id: r.id, version: r.version, status: r.status })),
   });
-  return registrationView(current);
+  if (accepting) await queueGathering(tx, activity.id, changed);
+  const result = new Map(changed.map((r) => [r.id, registrationView(r)]));
+  return {
+    items: ids.map((id) => result.get(id)!),
+    affected_count: rows.length,
+    accepted_count: occupied + (accepting ? rows.length : 0),
+  };
 }

@@ -197,6 +197,7 @@ model Registration {
   version         Int                   @default(1)
   statement       String?
   decision_reason String?
+  exit_requests   ExitRequest[]
   history         RegistrationHistory[]
   submitted_at    DateTime              @default(now()) @db.Timestamptz(3)
   student         Student               @relation(fields: [student_id], references: [id])
@@ -205,6 +206,22 @@ model Registration {
   @@unique([activity_id, student_id])
   @@index([student_id])
   @@map("registration")
+}
+
+model ExitRequest {
+  kind            String       @default("exit")
+  id              String       @id @default(uuid()) @db.Uuid
+  registration_id String       @db.Uuid
+  registration    Registration @relation(fields: [registration_id], references: [id])
+  reason          String
+  status          String       @default("pending")
+  decision_reason String?
+  version         Int          @default(1)
+  created_at      DateTime     @default(now()) @db.Timestamptz(3)
+  updated_at      DateTime     @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@index([registration_id])
+  @@map("exit_request")
 }
 
 model RegistrationHistory {
@@ -341,13 +358,13 @@ model Notice {
   activity            Activity        @relation(fields: [activity_id], references: [id], onDelete: Cascade)
   receipts            NoticeReceipt[]
 
-  // 同一活动的同一类通知版本号唯一，兜住并发投递写坏版本链的情况。
-  @@unique([activity_id, notice_kind, information_version])
+  // 源版本唯一索引由迁移维护，独立补发沿用源版本。
   @@index([activity_id, notice_kind, is_current])
   @@map("notice")
 }
 
 model NoticeReceipt {
+  follow_up_closed Boolean @default(false)
   notice_id       String    @db.Uuid
   student_id      String    @db.Uuid
   read_at         DateTime? @db.Timestamptz(3)
@@ -538,6 +555,27 @@ model AuditEvent {
   @@index([resource_id, created_at])
   @@index([created_at])
   @@map("audit_event")
+}
+
+model ExportJob {
+  id            String    @id @default(uuid()) @db.Uuid
+  actor_id      String    @db.Uuid
+  type          String
+  scope         Json
+  status        String    @default("pending")
+  version       Int       @default(1)
+  file_name     String?
+  content_type  String?
+  size          Int?
+  contents      Bytes?
+  error_message String?
+  expires_at    DateTime? @db.Timestamptz(3)
+  created_at    DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at    DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@index([actor_id, created_at])
+  @@index([status, expires_at])
+  @@map("export_job")
 }
 
 model HourCorrectionGroup {

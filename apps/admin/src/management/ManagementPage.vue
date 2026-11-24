@@ -32,9 +32,7 @@ watch(
   <PreviewRecords
     :title="section.title"
     :records="section.records"
-    :table-heading="key === 'audit' ? '审计事项' : undefined"
-    :status-heading="key === 'audit' ? '状态' : undefined"
-    :show-id="key !== 'audit'"
+    :show-id="true"
     :base="'/manage/' + key"
     :selected="String(route.params.item || '')"
   >

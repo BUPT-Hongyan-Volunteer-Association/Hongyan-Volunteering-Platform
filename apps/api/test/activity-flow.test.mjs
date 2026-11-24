@@ -89,6 +89,37 @@ test('收回负责人资格与添加协作者、交接主负责人并发', async
     const sample = await db.activity.findUniqueOrThrow({
       where: { activity_code: 'P2026-0001' }, include: { revisions: true },
     });
+    await t.test('后台审计可按操作者和对象读回限期授权与协作者变更', async () => {
+      const reason = '临时协助活动';
+      const expires_at = new Date(Date.now() + 86400000).toISOString();
+      const before = (await teacher.request(roles)).data;
+      const grant = await teacher.write('PUT', roles, {
+        expected_version: before.version, roles: [{ role: 'student' }, { role: 'organizer', expires_at }], reason,
+      });
+      assert.equal(grant.status, 200);
+      const members = '/organizer/activities/' + sample.id + '/members';
+      const team = (await owner.request(members)).data;
+      const added = await owner.write('POST', members, { account_id: targetId, expected_version: team.version, reason });
+      assert.equal(added.status, 200);
+
+      async function readEvent(actorId, resourceId, action) {
+        const query = new URLSearchParams({ actor_id: actorId, resource_id: resourceId });
+        const page = await teacher.request('/admin/audit-events?' + query);
+        assert.equal(page.status, 200);
+        const matches = page.data.items.filter(event => event.action === action && event.reason === reason);
+        assert.equal(matches.length, 1);
+        return matches[0];
+      }
+      const account = await readEvent((await teacher.request('/me')).data.account_id, targetId, 'set_account_roles');
+      assert.deepEqual(JSON.parse(account.before).roles, before.roles);
+      assert.deepEqual(JSON.parse(account.after).roles, grant.data.roles);
+      assert.equal(JSON.parse(account.after).roles.find(grant => grant.role === 'organizer').expires_at, expires_at);
+      const member = await readEvent(ownerId, sample.id, 'add_activity_member');
+      assert.equal(JSON.parse(member.before).version, team.version);
+      assert.equal(JSON.parse(member.after).version, added.data.version);
+      assert.deepEqual(JSON.parse(member.after).members.find(m => m.account_id === targetId),
+        { account_id: targetId, member_role: 'collaborator' });
+    });
     for (const transfer of [false, true]) {
       for (const revokeFirst of [true, false]) {
         const name = (transfer ? '交接' : '添加') + (revokeFirst ? '：先收回资格' : '：先写入团队');

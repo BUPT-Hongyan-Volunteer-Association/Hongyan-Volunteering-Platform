@@ -10,8 +10,9 @@ import {
   Req,
 } from '@nestjs/common';
 import type {
-  ActivityInput,
   RegistrationDecision,
+  ActivityPublicationContent,
+  BulkRegistrationDecision,
   RegistrationInput,
   RosterStatusCounts,
 } from '@hongyan/contracts/types';
@@ -21,7 +22,7 @@ import { validate } from '../activities/validation.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import { envelope, invalid, invisible } from '../http.js';
-import { admit, apply, registrationView } from './registration.js';
+import { canRequest, canWithdraw, canDecide, decideBatch, apply, registrationView, rosterOrderBy, rosterSearchWhere, rosterWhere } from './registration.js';
 
 const zeroCounts: RosterStatusCounts = {
   submitted: 0,
@@ -79,7 +80,7 @@ export class RegistrationController {
                 orderBy: [{ submitted_at: 'desc' }, { id: 'asc' }],
                 skip,
                 take: page_size,
-                include: { activity: { select: { published_revision: true } } },
+                include: { activity: { select: { published_revision: true, status: true } }, exit_requests: { where: { status: 'pending' }, select: { id: true, kind: true } } },
               })
             : [];
         const versions = rows.flatMap((r) =>
@@ -87,14 +88,14 @@ export class RegistrationController {
             ? []
             : [{ activity_id: r.activity_id, revision: r.activity.published_revision }],
         );
-        const titles = new Map(
+        const approvals = new Map(
           (versions.length
             ? await tx.activityRevision.findMany({
                 where: { OR: versions, revision_state: 'approved' },
                 select: { activity_id: true, content: true },
               })
             : []
-          ).map((r) => [r.activity_id, (r.content as unknown as ActivityInput).title]),
+          ).map((r) => [r.activity_id, r.content as unknown as ActivityPublicationContent]),
         );
         return envelope({
           page,
@@ -102,7 +103,11 @@ export class RegistrationController {
           total,
           items: rows.map((r) => ({
             ...registrationView(r),
-            activity_title: titles.get(r.activity_id),
+            activity_title: approvals.get(r.activity_id)?.title,
+            can_withdraw: canWithdraw(r.activity.status, r.status),
+            can_request_exit: !r.exit_requests.length && canRequest('exit', r.activity.status, r.status, approvals.get(r.activity_id)),
+            can_request_restoration: !r.exit_requests.length && canRequest('restoration', r.activity.status, r.status, approvals.get(r.activity_id)),
+            ...(r.exit_requests[0] && { [r.exit_requests[0].kind === 'exit' ? 'pending_exit_request_id' : 'pending_restoration_request_id']: r.exit_requests[0].id }),
           })),
         });
       },
@@ -120,24 +125,14 @@ export class RegistrationController {
       async (tx) => {
         const activity = await tx.activity.findFirst({
           where: { id, ...scope },
-          select: { published_revision: true },
+          select: { published_revision: true, status: true },
         });
         if (!activity) invisible();
         const { page, page_size, skip } = pagination(q);
         const status = statusFilter(q.status);
         if (q.q !== undefined && typeof q.q !== 'string') invalid('q', '请输入姓名或学号');
         const search = q.q?.trim();
-        const matching = {
-          activity_id: id,
-          ...(search && {
-            student: {
-              OR: [
-                { student_no: { contains: search } },
-                { account: { display_name: { contains: search } } },
-              ],
-            },
-          }),
-        };
+        const matching = rosterSearchWhere({ activity_id: id, q: search });
         const counts = { ...zeroCounts };
         const grouped = await tx.registration.groupBy({
           by: ['status'],
@@ -158,16 +153,17 @@ export class RegistrationController {
                 },
                 select: { content: true },
               });
+        const content = approved?.content as unknown as ActivityPublicationContent | undefined;
         const accepted_count = search
           ? await tx.registration.count({ where: { activity_id: id, status: 'accepted' } })
           : counts.accepted;
         const rows =
           skip < total
             ? await tx.registration.findMany({
-                where: { ...matching, status },
+                where: rosterWhere({ activity_id: id, q: search, status }),
                 skip,
                 take: page_size,
-                orderBy: [{ submitted_at: 'asc' }, { id: 'asc' }],
+                orderBy: rosterOrderBy,
                 include: {
                   student: {
                     select: { student_no: true, account: { select: { display_name: true } } },
@@ -181,7 +177,8 @@ export class RegistrationController {
           total,
           status_counts: counts,
           accepted_count,
-          capacity: approved ? (approved.content as unknown as ActivityInput).capacity : 0,
+          capacity: content?.capacity ?? 0,
+          can_decide: canDecide(activity.status, content),
           items: rows.map((r) => ({
             ...registrationView(r),
             student_name: r.student.account.display_name,
@@ -205,15 +202,21 @@ export class RegistrationController {
       req,
       { registrationId: id },
       'workspace',
-      (tx, activity) =>
-        admit(
-          tx,
-          activity!,
-          id,
-          req.actor.account_id,
-          validate<RegistrationDecision>('registration_decision', body),
-        ),
+      async (tx, activity) => {
+        const { expected_version, ...decision } = validate<RegistrationDecision>('registration_decision', body);
+        const result = await decideBatch(tx, activity!, req.actor.account_id, {
+          ...decision, items: [{ registration_id: id, expected_version }],
+        });
+        return result.items[0];
+      },
       scope,
     );
+  }
+
+  @Post('organizer/activities/:id/registration-decisions') @HttpCode(200)
+  bulk(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string,
+       @Body() body: unknown, @Query('scope') scope?: string) {
+    return this.workflow.run(req, { activityId: id }, 'workspace', (tx, activity, actor) =>
+      decideBatch(tx, activity!, actor.account_id, validate<BulkRegistrationDecision>('bulk_registration_decision', body)), scope);
   }
 }

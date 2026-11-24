@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import PublicActivities from './activities/PublicActivities.vue';
 import ManagedActivities from './activities/ManagedActivities.vue';
 import ActivityEditor from './activities/ActivityEditor.vue';
-import OrganizerSection from './activities/OrganizerSection.vue';
+import RequestWorkspace from './registrations/RequestWorkspace.vue';
 import AttendanceRecords from './attendance/AttendanceRecords.vue';
 import HourBatches from './hours/HourBatches.vue';
 import HourBatchDetail from './hours/HourBatchDetail.vue';
@@ -29,18 +29,20 @@ export const router = createRouter({
         {
           path: ':area(requests)/:item?',
           name: 'organizer-section',
-          component: OrganizerSection,
+          component: RequestWorkspace,
+          props: route => ({ activityId: String(route.params.id), requestId: route.params.item || undefined }),
+          meta: { area: 'roster' },
         },
         { path: 'edit', name: 'activity-edit', component: ActivityEditor },
         { path: 'notices/:item?', name: 'activity-notices', component: ActivityNotices, meta: { area: 'notices' } },
-        { path: 'roster', name: 'roster', component: Roster },
+        { path: 'roster', name: 'roster', component: Roster, meta: { area: 'roster' } },
         { path: 'attendance', name: 'activity-attendance', component: AttendanceRecords, meta: { area: 'attendance' } },
         { path: 'batches', name: 'hour-batches', component: HourBatches, meta: { area: 'batches' } },
         { path: 'batches/:item', name: 'hour-batch', component: HourBatchDetail, meta: { area: 'batches' } },
         { path: 'hours', name: 'activity-hours', component: () => import('./hours/ActivityHours.vue'), meta: { area: 'hours' } },
-        { path: 'corrections/:item?', name: 'activity-hour-corrections', component: () => import('@hongyan/ui/HourCorrectionGroups.vue'), meta: { area: 'corrections' } },
-        { path: 'appeals/:item?', name: 'activity-hour-appeals', component: () => import('@hongyan/ui/HourAppeals.vue'), props: { mode: 'organizer' }, meta: { area: 'appeals' } },
-        { path: 'incidents', name: 'activity-hour-incidents', component: () => import('@hongyan/ui/HourIncidents.vue'), props: { mode: 'organizer' }, meta: { area: 'incidents' } },
+        { path: 'corrections/:item?', name: 'activity-hour-corrections', component: () => import('@hongyan/ui/HourCorrectionGroups.vue'), meta: { area: 'hours' } },
+        { path: 'appeals/:item?', name: 'activity-hour-appeals', component: () => import('@hongyan/ui/HourAppeals.vue'), props: { mode: 'organizer' }, meta: { area: 'hours' } },
+        { path: 'incidents', name: 'activity-hour-incidents', component: () => import('@hongyan/ui/HourIncidents.vue'), props: { mode: 'organizer' }, meta: { area: 'attendance' } },
       ],
     },
     {

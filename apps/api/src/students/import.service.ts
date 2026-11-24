@@ -18,6 +18,7 @@ import {
   type ExistingStudent,
   type FieldIssue,
 } from './import.js';
+import { studentWhere } from './query.js';
 import { Workflow, checkVersion } from '../activities/workflow.js';
 
 export interface UploadedStudentFile {
@@ -444,14 +445,7 @@ export class StudentImportService implements OnApplicationBootstrap {
     const q = query.q?.trim();
     const cohort = query.cohort?.trim();
     const grade = query.grade?.trim();
-    const where: Prisma.StudentWhereInput = {
-      ...(cohort && { cohort }),
-      ...(grade && { grade }),
-      ...(status && { account: { active: status === 'active' } }),
-      ...(q && {
-        OR: [{ student_no: { contains: q } }, { account: { display_name: { contains: q } } }],
-      }),
-    };
+    const where = studentWhere({ q, cohort, grade, status });
     return this.db.$transaction(
       async (tx) => {
         const total = await tx.student.count({ where });

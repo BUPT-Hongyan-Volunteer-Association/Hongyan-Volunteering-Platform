@@ -148,10 +148,6 @@ const visible = computed(() =>
 .record-queue > a > .ui-icon {
   width: 14px;
 }
-.record-queue a[aria-current] {
-  background: var(--brand-tint);
-  box-shadow: inset 3px 0 var(--brand);
-}
 .records-page :deep(details) {
   margin-top: 20px;
 }

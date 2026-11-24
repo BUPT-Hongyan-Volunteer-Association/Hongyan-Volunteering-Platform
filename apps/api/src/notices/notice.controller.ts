@@ -11,18 +11,21 @@ import {
 } from '@nestjs/common';
 import type {
   NoticePage,
+  NoticeInput,
   NotificationEventPage,
   ReasonAction,
   ReceiptPage,
 } from '@hongyan/contracts/types';
+import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
 import type { Prisma } from '../generated/prisma/client.js';
 import { Database } from '../database.js';
-import { denied, envelope, invalid, invisible } from '../http.js';
+import { BusinessError, denied, envelope, invalid, invisible } from '../http.js';
 import { managedScope, pagination, staff } from '../activities/read.js';
 import { validate } from '../activities/validation.js';
 import { Workflow, checkVersion, wrongState } from '../activities/workflow.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { eventView, noticeView, receiptView } from './notice.js';
+import { attendanceKinds, followUpEmpty, receiptStatus, receiptWhere } from './receipts.js';
 
 const noticeKinds = [
   'result',
@@ -33,8 +36,6 @@ const noticeKinds = [
   'appeal_result',
   'other',
 ];
-const attendanceKinds = ['change', 'gathering'];
-const activeStatuses = ['submitted', 'waitlisted', 'accepted'];
 const snapshot = { isolationLevel: 'RepeatableRead' } as const;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Filters = Record<string, string>;
@@ -85,13 +86,14 @@ export class NoticeController {
       },
     };
     const followUp: Prisma.NoticeReceiptWhereInput = {
+      follow_up_closed: false,
       acknowledged_at: null,
       notice: {
         is_current: true,
         requires_ack: true,
         OR: [
           { notice_kind: { notIn: attendanceKinds } },
-          { activity: { registrations: { some: { student_id, status: { in: activeStatuses } } } } },
+          { activity: { registrations: { some: { student_id, status: { in: activeRegistrationStatuses } } } } },
         ],
       },
     };
@@ -106,6 +108,7 @@ export class NoticeController {
       });
       const counts = withCounts
         ? {
+            attention: await tx.noticeReceipt.count({ where: { ...scope, OR: [{ read_at: null }, followUp] } }),
             all: await tx.noticeReceipt.count({ where: scope }),
             unread: await tx.noticeReceipt.count({ where: { ...scope, read_at: null } }),
             pending: await tx.noticeReceipt.count({ where: { ...scope, AND: followUp } }),
@@ -148,13 +151,61 @@ export class NoticeController {
       if (!receipt) invisible();
       if (acknowledge ? receipt.acknowledged_at : receipt.read_at)
         return noticeView(receipt.notice, receipt);
-      if (acknowledge && (!receipt.notice.is_current || !receipt.notice.requires_ack)) wrongState();
+      if (acknowledge && (receipt.follow_up_closed || !receipt.notice.is_current || !receipt.notice.requires_ack)) wrongState();
       const now = new Date();
       const updated = await tx.noticeReceipt.update({
         where,
         data: { read_at: receipt.read_at ?? now, ...(acknowledge && { acknowledged_at: now }) },
       });
       return noticeView(receipt.notice, updated);
+    });
+  }
+
+  @Post('organizer/activities/:id/notices')
+  publish(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) activity_id: string, @Body() body: unknown) {
+    return this.workflow.run(req, { activityId: activity_id }, 'manage', async (tx, _, actor) => {
+      const input = validate<NoticeInput>('notice_input', body);
+      const title = input.title.trim(), content = input.body.trim();
+      if (!title || !content) invalid(!title ? 'title' : 'body', '请填写通知标题和正文');
+      const requested = (input.recipient_student_ids ?? []).map(id => id.toLowerCase());
+      const selected = [...new Set(requested)];
+      const named = input.recipient_mode === 'selected';
+      if (named !== (selected.length > 0)) invalid('recipient_student_ids', '请核对接收范围与指定人员');
+      const recipients = await tx.registration.findMany({
+        where: {
+          activity_id,
+          status: input.recipient_mode === 'accepted' ? 'accepted' : { in: activeRegistrationStatuses },
+          ...(named && { student_id: { in: selected } }),
+        },
+        select: { student_id: true },
+      });
+      if (named && recipients.length !== selected.length) {
+        const eligible = new Set(recipients.map(row => row.student_id));
+        const removed = selected.filter(id => !eligible.has(id));
+        const registrations = await tx.registration.findMany({
+          where: { activity_id, student_id: { in: removed } },
+          select: { student_id: true, student: { select: { student_no: true } } },
+        });
+        const numbers = new Map(registrations.map(row => [row.student_id, row.student.student_no]));
+        const details = requested.flatMap((id, i) => eligible.has(id) ? [] : [{
+          field: 'recipient_student_ids', row: i + 1, code: 'ineligible_recipient',
+          message: numbers.get(id) ?? ('所选名单第 ' + (i + 1) + ' 人'),
+        }]);
+        throw new BusinessError(422, 'validation_error', '以下人员已不在有效报名名单：' +
+          details.map(detail => detail.message).join('、'), details);
+      }
+      if (!recipients.length) invalid('recipient_mode', '当前范围没有接收人，请调整范围');
+      const previous = await tx.notice.aggregate({
+        where: { activity_id, notice_kind: 'other', source_notice_id: null }, _max: { information_version: true },
+      });
+      const notice = await tx.notice.create({
+        data: {
+          activity_id, title, body: content, notice_kind: 'other', requires_ack: input.requires_ack,
+          published_by: actor.account_id, information_version: (previous._max.information_version ?? 0) + 1,
+          receipts: { createMany: { data: recipients } },
+        },
+      });
+      return { ...noticeView(notice), recipient_count: recipients.length };
     });
   }
 
@@ -194,29 +245,13 @@ export class NoticeController {
   ) {
     const scope = managedScope(req.actor);
     const { page, page_size, skip } = pagination(q);
-    const follow = flag(q, 'follow_up_only');
-    if (q.status && !['unread', 'read', 'acknowledged'].includes(q.status))
-      invalid('status', '回执状态无效');
+    const filters = { status: receiptStatus(q.status), follow_up_only: flag(q, 'follow_up_only') };
     return this.db.$transaction(async (tx) => {
       const notice = await tx.notice.findFirst({ where: { id, activity: scope } });
       if (!notice) invisible();
-      if (follow && (!notice.is_current || !notice.requires_ack || q.status === 'acknowledged'))
+      if (followUpEmpty(notice, filters))
         return envelope<ReceiptPage>({ items: [], total: 0, page, page_size });
-      const where: Prisma.NoticeReceiptWhereInput = {
-        notice_id: id,
-        ...(q.status === 'unread' && { read_at: null }),
-        ...(q.status === 'read' && { read_at: { not: null }, acknowledged_at: null }),
-        ...(q.status === 'acknowledged' && { acknowledged_at: { not: null } }),
-        ...(follow && { acknowledged_at: null }),
-        ...(follow &&
-          attendanceKinds.includes(notice.notice_kind) && {
-            student: {
-              registrations: {
-                some: { activity_id: notice.activity_id, status: { in: activeStatuses } },
-              },
-            },
-          }),
-      };
+      const where = receiptWhere(notice, filters);
       const rows = await tx.noticeReceipt.findMany({
         where,
         include: {

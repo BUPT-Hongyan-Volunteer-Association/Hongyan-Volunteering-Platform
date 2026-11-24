@@ -105,6 +105,7 @@ export function noticeView(row: NoticeRow, receipt?: NoticeReceipt | null): Noti
     notice_kind: row.notice_kind as Notice['notice_kind'],
     information_version: row.information_version,
     is_current: row.is_current,
+    ...(receipt?.follow_up_closed && { follow_up_closed: true }),
     ...(row.supersedes_id ? { supersedes_id: row.supersedes_id } : {}),
     ...(row.source_notice_id ? { source_notice_id: row.source_notice_id } : {}),
     ...(row.published_by ? { published_by: row.published_by } : {}),

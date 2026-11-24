@@ -4,7 +4,7 @@ info:
   version: 1.2.5
   description: 2026-11-18 PRD v1.3.4配套规格，尚未实现。沿用/api/v1，本次校订后按本文件重新生成客户端。确认学生初始密码为学号后六位，首次登录强制改密。学号和班级均为十位数字，建档不含在校状态。时长以录入单为准，整数部分最多三位、最多一位小数。本轮聚焦平台搭建与功能实现，暂不考虑部署维护。业务字段、枚举及错误码使用snake_case，自动限制固定off。
     沿用：时长模板末列是否有违纪情况，时长与违规核实合并审批。规则未确定时正常审核时长，处罚固定未启用。按表头识别七列与兼容六列，不仅依赖文件名或版本号。
-  x-document-revision: 2026-11-21-r6
+  x-document-revision: 2026-11-24-r8
 servers:
 - url: /api/v1
   description: 同源相对路径，不指向已部署服务
@@ -1381,7 +1381,7 @@ paths:
       summary: 查询活动日程时间轴
       description: 按活动分页，page_size默认20最大100，total为活动数。按角色和统一筛选选活动，完整返回查询窗口内该活动全部segments，不截断同活动分段。from/to必填，窗口最多31日且from <
         to。按activity_code、activity_id稳定排序。public默认published，可显式查看曾公开的completed/cancelled。mine为本人accepted及退出待处理活动，默认不过滤生命周期状态。public/mine仅获批版本，不返回管理字段。managed为有效角色且当前成员，all为授权后台，默认不按生命周期或审核状态过滤。managed/all默认working，依次选待审版本、可编辑草稿、获批版本，均不存在时回退最近终态快照且仅供查看。published只选获批版本，没有获批版本则不返回该活动。所有内容字段与segments取所选版本，revision_state和schedule_revision明确所选版本。review_status按当前工作版本筛选，has_pending_review及current_review_id独立于展示版本。is_ongoing始终按完整获批安排计算，取消活动不计计划重叠。列表与日程共用权限、筛选、窗口及排序语义，禁止前端仅筛当前页。color_index为活动ID标准小写UUID字符串的UTF-8字节FNV-1a
-        32位无符号散列模6。segments保留真实起止，前端按窗口裁剪。无人员名单或异常。 managed在兼任后台时仍限本人有效管理的活动，与管理列表的显式scope相同。每页返回统一的state_evaluated_at，空页也返回此值。
+        32位无符号散列模6。segments保留真实起止，统一输出含秒与+08:00时区的date-time，前端按窗口裁剪。无人员名单或异常。 managed在兼任后台时仍限本人有效管理的活动，与管理列表的显式scope相同。每页返回统一的state_evaluated_at，空页也返回此值。
       tags:
       - 日程
       x-requirement: FR07
@@ -1511,6 +1511,11 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '200':
           description: 成功
+          headers:
+            X-Timeline-Range:
+              description: 当前查询全部匹配活动的有序日程摘要。相同查询的各页可据此核对是否能合并。
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -1747,7 +1752,7 @@ paths:
     post:
       operationId: withdraw_registration
       summary: 录取前撤回报名
-      description: 仅本人submitted或waitlisted可撤回。accepted须提交退出申请。
+      description: 活动仍为published时，仅本人submitted或waitlisted可撤回。accepted须提交退出申请。
       tags:
       - 报名
       x-requirement: FR02
@@ -1946,7 +1951,7 @@ paths:
       operationId: decide_registration
       summary: 人工录取候补或不录取
       description: 与整批决定共用业务服务。仅submitted/waitlisted/rejected可决定，accepted不可降级。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段，校验学生启用、当前版本及名额，事务内写通知事件。候补不自动补位，异常次数在规则off时不影响决定。
-        首次报名截止只关闭学生主动报名。人工录取与恢复批准要求活动已发布且存在 starts_at > 服务器当前时刻的获批时段。最后一个时段开始时即停止录取与恢复。
+        首次报名截止只关闭学生主动报名。结果通知投递前复核报名版本；已失效的待投递结果跳过，已送达的旧结果及回执可在历史中查看。
       tags:
       - 报名
       x-requirement: FR02
@@ -2016,7 +2021,7 @@ paths:
     post:
       operationId: create_exit_request
       summary: 录取后申请退出整项活动
-      description: 本人accepted且活动published、尚有未开始时段时申请退出整项活动。每个报名最多一个pending退出。pending保留录取及名额，批准后exited释放名额。单次请假在群内处理，本接口不提供整期请假类型。
+      description: 本人accepted且活动published、尚有未开始时段时申请退出整项活动。日期活动在北京时间开始日零点关闭新退出申请。每个报名最多一个pending退出。pending保留录取及名额，批准后exited释放名额。单次请假在群内处理，本接口不提供整期请假类型。
       tags:
       - 报名
       x-requirement: FR02
@@ -2138,6 +2143,13 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
+      - name: request_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: status
+        in: query
+        schema: {type: string, enum: [pending, approved, rejected, withdrawn, cancelled]}
       - name: id
         in: path
         required: true
@@ -2196,6 +2208,7 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -2385,7 +2398,7 @@ paths:
     post:
       operationId: publish_notice
       summary: 发送活动站内通知
-      description: 接收人由当前合法名单冻结快照，selected必须属于本活动。gathering首次发布成为该活动当前集合信息，后续发布须supersedes_id指向当前源通知并原子递增information_version，避免两个并发最新版。其他重要变更也形成新通知并关联旧通知。不得把私密入群信息发给未录取人员。新增录取或恢复批准时，以当前gathering内容生成仅新录取者接收的补发通知，source_notice_id指向源通知，information_version保持一致，不修改历史接收人。事件、学生及信息版本唯一，防止重复补发。已被新信息替代的通知is_current=false，不计待确认。已退出人员不列入现场集合催办，历史回执保留。
+      description: 发布独立的普通活动通知（other），发布时设置是否需要确认。按当前活动的有效报名名单冻结接收人快照。accepted 只含已录取人员，all_applicants 包含已提交、候补和已录取人员，selected 须指定其中的学生。所选人员失效时返回 422，details 中的 ineligible_recipient 按请求数组顺序提供从 1 起算的 row。集合源发布和版本替代属于规划功能。
       tags:
       - 通知
       x-requirement: FR03
@@ -2445,6 +2458,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/notice_input'
+            example:
+              title: 集合地点提醒
+              body: 请在图书馆大厅集合。
+              notice_kind: other
+              recipient_mode: accepted
+              requires_ack: true
     get:
       operationId: list_activity_notices
       summary: 查询活动已发送通知
@@ -5279,7 +5298,7 @@ paths:
       operationId: create_export
       summary: 创建受控数据导出
       description: 按type要求activity_id/notice_id/student_id。my_hours仅本人，admin_student_hours仅后台，其余按活动授权。复用列表的状态与日期筛选。记录范围与操作者，导出值防公式注入，不含密码。
-        导出与原列表共用服务端筛选及权限。notice_receipts支持follow_up_only。
+        导出与原列表共用服务端筛选及权限。notice_receipts支持follow_up_only。activity_hours传student_ids时导出所选学生汇总，每人一行且只计current；未传时导出全部明细。admin_students按当前学生档案筛选导出全部匹配学生。
       tags:
       - 导出
       x-requirement: FR06
@@ -6116,8 +6135,8 @@ paths:
     post:
       operationId: decide_registrations_atomically
       summary: 整批录取候补或不录取
-      description: 同一活动1—100个不重复报名ID。事务内核验全部成员授权、学生状态、报名版本及可转换状态，录取检查新增人数和当前余量。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段。任一失败整批回滚，409 details定位registration_id及失败码，不返回部分成功。通知事件与状态同事务写入，按幂等键重试不重复决定。
-        首次报名截止只关闭学生主动报名。人工录取与恢复批准要求活动已发布且存在 starts_at > 服务器当前时刻的获批时段。最后一个时段开始时即停止录取与恢复。
+      description: 同一活动1—100个不重复报名ID。事务内核验全部成员授权、学生状态、报名版本及可转换状态，录取检查新增人数和当前余量。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段。任一失败整批回滚，409 details逐行返回resource_id（报名ID）及失败码，不返回部分成功。通知事件与状态同事务写入，按幂等键重试不重复决定。
+        首次报名截止只关闭学生主动报名。结果通知投递前复核报名版本；已失效的待投递结果跳过，已送达的旧结果及回执可在历史中查看。
       tags:
       - FR02
       x-requirement: FR02
@@ -6125,6 +6144,7 @@ paths:
       - AC04
       x-roles: *id001
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -6259,8 +6279,7 @@ paths:
     post:
       operationId: create_restoration_request
       summary: 退出后申请恢复报名
-      description: 仅本人exited、学生启用且活动published，服务器时间之后须仍有时段尚未开始。原报名窗口截止不阻止此恢复申请。每个报名最多一个pending恢复，pending不占名额。 首次报名截止只关闭学生主动报名。人工录取与恢复批准要求活动已发布且存在
-        starts_at > 服务器当前时刻的获批时段。最后一个时段开始时即停止录取与恢复。
+      description: 仅本人exited、学生启用且活动published，原报名窗口截止不阻止此恢复申请。每个报名最多一个pending恢复，pending不占名额。按日期发布时可办理至北京时间结束日当天，精确安排须仍有未开始的获批时段。
       tags:
       - FR02
       x-requirement: FR02
@@ -6440,6 +6459,10 @@ paths:
       - AC04
       x-roles: *id001
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
+      - name: request_id
+        in: query
+        schema: {type: string, format: uuid}
       - name: id
         in: path
         required: true
@@ -6498,8 +6521,8 @@ paths:
     post:
       operationId: decide_restoration_request
       summary: 审核恢复并重新占用名额
-      description: 仅pending。批准时锁定活动与原报名，复核有效授权、学生启用、exited状态、未开始时段和余量。同一事务将原registration_id改回accepted、增加名额占用、写历史及通知事件。名额或版本冲突整笔失败，申请保持pending。拒绝保留exited并说明原因，取消或结束自动cancelled。
-        首次报名截止只关闭学生主动报名。人工录取与恢复批准要求活动已发布且存在 starts_at > 服务器当前时刻的获批时段。最后一个时段开始时即停止录取与恢复。
+      description: 仅pending。批准时锁定活动与原报名，复核有效授权、学生启用、exited状态、有效安排和余量。同一事务将原registration_id改回accepted、增加名额占用、写历史及通知事件。名额或版本冲突整笔失败，申请保持pending。拒绝保留exited并说明原因，取消或结束自动cancelled。
+        首次报名截止只关闭学生主动报名。按日期发布时可办理至北京时间结束日当天，精确安排须仍有未开始的获批时段。
       tags:
       - FR02
       x-requirement: FR02
@@ -6507,6 +6530,7 @@ paths:
       - AC04
       x-roles: *id001
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -8700,6 +8724,9 @@ components:
           type: string
         decision_reason:
           type: string
+        can_withdraw: {type: boolean, description: 本人报名当前可撤回。}
+        can_request_exit: {type: boolean}
+        can_request_restoration: {type: boolean}
         pending_exit_request_id:
           type: string
           format: uuid
@@ -8769,6 +8796,8 @@ components:
         registration_id:
           type: string
           format: uuid
+        student_name: {type: string}
+        student_no: {type: string}
         student_id:
           type: string
           format: uuid
@@ -8934,10 +8963,9 @@ components:
           items:
             type: string
             format: uuid
-        supersedes_id:
+        notice_kind:
           type: string
-          format: uuid
-        notice_kind: *id004
+          enum: [other]
       additionalProperties: false
       required:
       - title
@@ -8988,6 +9016,9 @@ components:
         source_notice_id:
           type: string
           format: uuid
+        follow_up_closed:
+          type: boolean
+          description: 本人已退出该轮录取，历史集合回执停止跟进。
         is_current:
           type: boolean
         recipient_count:
@@ -10185,6 +10216,7 @@ components:
           - activity_hours
           - my_hours
           - admin_student_hours
+          - admin_students
         activity_id:
           type: string
           format: uuid
@@ -10194,6 +10226,22 @@ components:
         student_id:
           type: string
           format: uuid
+        student_ids:
+          type: array
+          description: activity_hours 汇总导出或 admin_students 选中导出使用；非空学生 ID 列表，须属于对应范围。未传时按筛选导出。
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        registration_ids:
+          type: array
+          description: activity_roster 选中导出使用；非空报名 ID 列表，须属于该活动。未传时按筛选导出。
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
         registration_status:
           type: string
           enum:
@@ -10217,8 +10265,22 @@ components:
           format: date
         q:
           type: string
-          description: 复用报名名单的姓名或学号筛选。
+          description: 复用名单或学生档案的姓名或学号筛选。
           maxLength: 100
+        cohort:
+          type: string
+          description: admin_students 按级部筛选。
+          maxLength: 100
+        grade:
+          type: string
+          description: admin_students 按四位入学年份筛选。
+          pattern: ^[0-9]{4}$
+        account_status:
+          type: string
+          description: admin_students 按账号状态筛选。
+          enum:
+          - active
+          - inactive
         include_history:
           type: boolean
           default: false
@@ -10252,6 +10314,14 @@ components:
             - include_history
           - required:
             - follow_up_only
+          - required:
+            - student_ids
+          - required:
+            - cohort
+          - required:
+            - grade
+          - required:
+            - account_status
         required:
         - activity_id
       - properties:
@@ -10275,6 +10345,16 @@ components:
             - q
           - required:
             - include_history
+          - required:
+            - student_ids
+          - required:
+            - cohort
+          - required:
+            - grade
+          - required:
+            - account_status
+          - required:
+            - registration_ids
         required:
         - notice_id
       - properties:
@@ -10296,6 +10376,14 @@ components:
             - q
           - required:
             - follow_up_only
+          - required:
+            - cohort
+          - required:
+            - grade
+          - required:
+            - account_status
+          - required:
+            - registration_ids
         required:
         - activity_id
       - properties:
@@ -10319,6 +10407,16 @@ components:
             - q
           - required:
             - follow_up_only
+          - required:
+            - student_ids
+          - required:
+            - cohort
+          - required:
+            - grade
+          - required:
+            - account_status
+          - required:
+            - registration_ids
       - properties:
           type:
             type: string
@@ -10338,8 +10436,45 @@ components:
             - q
           - required:
             - follow_up_only
+          - required:
+            - student_ids
+          - required:
+            - cohort
+          - required:
+            - grade
+          - required:
+            - account_status
+          - required:
+            - registration_ids
         required:
         - student_id
+      - properties:
+          type:
+            type: string
+            enum:
+            - admin_students
+        not:
+          anyOf:
+          - required:
+            - activity_id
+          - required:
+            - notice_id
+          - required:
+            - student_id
+          - required:
+            - registration_ids
+          - required:
+            - registration_status
+          - required:
+            - receipt_status
+          - required:
+            - from_date
+          - required:
+            - to_date
+          - required:
+            - include_history
+          - required:
+            - follow_up_only
     export_job:
       type: object
       properties:
@@ -10366,6 +10501,7 @@ components:
         expires_at:
           type: string
           format: date-time
+          description: 文件生成完成起 24 小时；到期后查询显示 expired 且下载拒绝。
         error_message:
           type: string
       additionalProperties: false
@@ -10565,12 +10701,13 @@ components:
         inbox_counts:
           type: object
           description: 本人通知列表请求 with_counts 时返回，计数覆盖整个筛选范围。
-          required: [all, unread, pending]
+          required: [all, unread, pending, attention]
           additionalProperties: false
           properties:
             all: { type: integer, minimum: 0 }
             unread: { type: integer, minimum: 0 }
             pending: { type: integer, minimum: 0 }
+            attention: { type: integer, minimum: 0, description: 未读或当前待确认的通知条数，同一条只计一次。 }
         items:
           type: array
           items:
@@ -11306,6 +11443,8 @@ components:
         registration_id:
           type: string
           format: uuid
+        student_name: {type: string}
+        student_no: {type: string}
         student_id:
           type: string
           format: uuid
@@ -11476,6 +11615,11 @@ components:
           type: string
           format: date-time
           description: 本页同一服务端评估时刻，与每个活动的state_evaluated_at相同。空页也提供。
+        owner_options:
+          type: array
+          description: 仅managed/all返回。按当前身份的授权管理范围独立计算的负责人候选，不受分页、窗口和筛选影响，供筛选控件使用；同一负责人只出现一次，按显示名称排序。
+          items:
+            $ref: '#/components/schemas/timeline_owner_option'
       additionalProperties: false
       required:
       - items
@@ -11483,6 +11627,18 @@ components:
       - page_size
       - total
       - state_evaluated_at
+    timeline_owner_option:
+      type: object
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+      additionalProperties: false
+      required:
+      - account_id
+      - display_name
     hour_warning:
       type: object
       properties:
@@ -12133,6 +12289,7 @@ components:
           minimum: 0
         status_counts:
           $ref: '#/components/schemas/roster_status_counts'
+        can_decide: {type: boolean, description: 按活动状态和当前获批安排判断名单决定是否开放。}
         accepted_count:
           type: integer
           minimum: 0

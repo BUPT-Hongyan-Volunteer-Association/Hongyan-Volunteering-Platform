@@ -120,14 +120,20 @@ export type Target =
   | { activityId: string }
   | { activityIds: (tx: Tx) => Promise<string[]> }
   | { reviewId: string }
+  | { requestId: string }
   | { registrationId: string }
   | null;
-type Access = 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 'team' | 'tech';
+type Access = 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 'team' | 'tech' | 'export';
 type CommandArgs = [tx: Tx, row: LoadedActivity | null, actor: Actor, reauthorize: Reauthorize];
 type Write = () => Promise<unknown>;
 
 async function targetActivityId(tx: Tx, target: Exclude<Target, { activityIds: unknown } | null>) {
   if ('activityId' in target) return target.activityId;
+  if ('requestId' in target) {
+    const request = await tx.exitRequest.findUnique({ where: { id: target.requestId }, select: { registration: { select: { activity_id: true } } } });
+    if (!request) invisible();
+    return request.registration.activity_id;
+  }
   const reference =
     'reviewId' in target
       ? await tx.activityReview.findUnique({

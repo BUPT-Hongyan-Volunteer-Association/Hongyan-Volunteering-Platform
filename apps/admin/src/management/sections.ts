@@ -26,23 +26,7 @@ export const sections = {
       },
     ],
   },
-  audit: {
-    title: '审计记录',
-    records: [
-      {
-        id: 'AU2026-017',
-        title: 'AU2026-017 · 授予负责人',
-        status: '已记录',
-        fields: [
-          ['操作人', '合成审核员'],
-          ['对象', '0000000123'],
-          ['操作时间', '2026-11-17 09:30（北京时间）'],
-          ['变更原因', '活动交接'],
-          ['前后权限', '学生 → 学生、负责人'],
-        ],
-      },
-    ],
-  },
+  audit: { title: '审计记录', records: [] },
 } satisfies Record<string, AdminSection>;
 export type SectionKey = keyof typeof sections;
-export const previewSectionKeys = ['failures', 'audit'] as const;
+export const previewSectionKeys = ['failures'] as const;
