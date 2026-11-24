@@ -146,17 +146,27 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     const decision = await bulk([a, b], 'rejected', owner, key);
     assert.equal(success(decision).affected_count, 2);
     assert.deepEqual(await bulk([a, b], 'rejected', owner, key), decision);
+    await worker.drain();
     [a, b] = success(await bulk(await Promise.all([registration(a), registration(b)]), 'waitlisted')).items;
+    // 候补进入退避时先完成补录，迟到重试必须以报名版本判定。
+    const delayed = await db.registrationDecisionEvent.findUniqueOrThrow({
+      where: { registration_id_registration_version: { registration_id: a.id, registration_version: a.version } },
+    });
+    await db.notificationEvent.update({ where: { id: delayed.event_id }, data: { next_retry_at: new Date(Date.now() + 60_000) } });
     a = success(await bulk([a], 'accepted')).items[0];
     assert.equal((await bulk([a], 'rejected')).code, 'invalid_state');
     await worker.drain();
+    await worker.drain(new Date(Date.now() + 61_000));
+    assert.equal((await db.notificationEvent.findUniqueOrThrow({ where: { id: delayed.event_id } })).status, 'superseded');
+    assert.equal(await db.notice.count({ where: { source_event_id: delayed.event_id } }), 0);
     for (const [u, expected] of [
       [alice, '已被录取'],
       [bob, '进入候补'],
     ]) {
       const rows = success(await u.request('/me/notices?notice_kind=result')).items;
       assert.ok(rows.some((n) => n.body.includes(expected)));
-      assert.ok(rows.some((n) => n.body.includes('未被录取')));
+      assert.ok(rows.some((n) => n.body.includes('未被录取') && !n.is_current));
+      assert.equal(rows.filter(n => n.is_current).length, 1);
     }
   });
   await t.test('退出和恢复均可撤回、驳回，批准退出仅释放一次', async () => {

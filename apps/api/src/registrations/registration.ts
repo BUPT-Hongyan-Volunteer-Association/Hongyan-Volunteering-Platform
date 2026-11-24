@@ -1,3 +1,4 @@
+import { canChangeRegistration } from '@hongyan/contracts/activity';
 import { audit } from '../audit.js';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -86,6 +87,12 @@ export async function recordChanges(
     data: previous.map(r => history(r, r.status === 'submitted' ? r.submitted_at : null, null)),
     skipDuplicates: true,
   });
+  // 决定与投递共用活动锁。保留已发送通知和回执，关闭旧报名版本的确认。
+  const previousIds = previous.filter(r => ['accepted', 'waitlisted', 'rejected'].includes(r.status)).map(r => r.id);
+  if (previousIds.length) await tx.$executeRaw`
+    UPDATE notice n SET is_current = false, version = n.version + 1, updated_at = CURRENT_TIMESTAMP
+    FROM notification_event e WHERE n.source_event_id = e.id AND n.is_current
+      AND e.event_type = 'registration_decided' AND e.resource_id = ANY(${previousIds}::uuid[])`;
   await tx.registrationHistory.createMany({ data: current.map(r => history(r, time, actor)) });
 }
 
@@ -203,7 +210,7 @@ export async function decideBatch(
       message = '版本已更新，请刷新后复核';
     } else if (!enabled.has(row.student_id)) message = '学生已停用';
     else if (!available) message = '活动已结束或没有可办理的获批时段';
-    else if (!['submitted', 'waitlisted', 'rejected'].includes(row.status) || row.status === input.decision)
+    else if (!canChangeRegistration(row.status, input.decision))
       message = '当前报名状态不能作此决定';
     return message ? [{ field: 'items', row: i + 1, resource_id, code, message }] : [];
   });

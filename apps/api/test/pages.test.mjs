@@ -910,6 +910,29 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await visible(owner.getByText('已选 0 人', { exact: true }));
     });
 
+    await t.test('批量和个人说明分别投递，已录取人员仍可导出', async () => {
+      await owner.goto(web + '/managed/' + first.id + '/roster');
+      await owner.getByLabel('选择名单测试2', { exact: true }).check();
+      await owner.getByLabel('所选人员的处理说明（选填）').fill('只给所选人员的说明');
+      await button(owner, '查看名单测试2').click();
+      await owner.getByLabel('给名单测试2的处理说明（选填）').fill('只给原详情的说明');
+      await button(owner, '查看名单测试5').click();
+      assert.equal(await owner.getByLabel('给名单测试5的处理说明（选填）').inputValue(), '');
+      await button(owner, '不录取此人').click();
+      await visible(owner.getByText('名单测试5已标为未录取。'));
+      const record = await db.registration.findFirstOrThrow({ where: { activity_id: first.id, student: { account: { display_name: '名单测试5' } } } });
+      assert.equal(record.decision_reason, null);
+      await api.get(NoticeWorker).drain();
+      const result = await db.notice.findFirstOrThrow({ where: { notice_kind: 'result', activity_id: first.id,
+        receipts: { some: { student_id: record.student_id } } } });
+      assert.doesNotMatch(result.body, /只给/);
+      assert.equal(await owner.getByLabel('所选人员的处理说明（选填）').inputValue(), '只给所选人员的说明');
+      await button(owner, '已录取 18').click();
+      await owner.getByLabel('选择名单测试10', { exact: true }).check();
+      assert.ok(await button(owner, '不录取所选').isDisabled());
+      assert.ok(await button(owner, '导出所选名单（1）').isEnabled());
+    });
+
     await t.test('已打开的报名名单在成员被移出后拒绝旧窗口决定', async () => {
       await helper.goto(web + '/managed/' + first.id + '/roster');
       await helper.getByLabel('选择名单测试1', { exact: true }).check();
@@ -1549,8 +1572,19 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       }
       await visible(button(student, '撤回退出申请'));
       await visible(student.getByText('退出申请已提交。', { exact: true }));
+      await owner.setViewportSize({ width: 1440, height: 900 });
       await link(owner, '退出与恢复').click();
-      await button(owner, '处理申请').click();
+      const entry = owner.getByRole('link', { name: /^处理申请 · 体验学生/ });
+      await entry.click();
+      await visible(button(owner, '批准退出'));
+      await visible(entry);
+      const exitUrl = owner.url();
+      await owner.reload();
+      await visible(button(owner, '批准退出'));
+      assert.equal(owner.url(), exitUrl);
+      await owner.setViewportSize({ width: 390, height: 844 });
+      assert.ok(await entry.isHidden());
+      await fits(owner);
       await button(owner, '批准退出').click();
       await visible(owner.getByText('退出申请已批准。', { exact: true }));
       await student.reload();
@@ -1558,8 +1592,34 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await student.getByLabel('申请原因').fill('时间已协调');
       await button(student, '申请恢复报名').click();
       await visible(button(student, '撤回恢复申请'));
-      await button(owner, '恢复申请').click();
-      await button(owner, '处理申请').click();
+      await link(owner, '返回申请列表').click();
+      await link(owner, '恢复申请').click();
+      await pickOption(owner, '申请状态', '全部状态');
+      await entry.click();
+      await visible(button(owner, '批准恢复'));
+      const restorationUrl = owner.url();
+      await link(owner, '返回申请列表').click();
+      assert.equal(new URL(owner.url()).searchParams.get('kind'), 'restoration');
+      assert.equal(new URL(owner.url()).searchParams.get('status'), 'all');
+      // 无类型的旧链接须先定位详情，再用正确队列校正深分页。
+      const heldLookup = await holdResponse(owner, '**/exit-requests?*request_id=*');
+      const wrongListReads = [];
+      const recordLookup = req => {
+        const url = new URL(req.url());
+        if (url.pathname.endsWith('/exit-requests') && !url.searchParams.has('request_id')) wrongListReads.push(req.url());
+      };
+      owner.on('request', recordLookup);
+      try {
+        await owner.goto(restorationUrl.split('?')[0] + '?request_page=2');
+        await heldLookup.received;
+        await settleRender(owner);
+        assert.deepEqual(wrongListReads, []);
+      } finally {
+        owner.off('request', recordLookup);
+        await heldLookup.release();
+      }
+      await visible(button(owner, '批准恢复'));
+      await owner.waitForURL(url => url.searchParams.get('request_page') === '1' && url.searchParams.get('kind') === 'restoration');
       await button(owner, '批准恢复').click();
       await visible(owner.getByText('恢复申请已批准。', { exact: true }));
       await student.reload();
@@ -1567,6 +1627,40 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       assert.equal(student.url(), detail);
       await helper.goto(detail);
       await visible(helper.getByText('未找到该报名记录。'));
+    });
+
+    await t.test('上一条申请的复核完成不会解除当前申请的版本冲突', async () => {
+      const requests = [];
+      for (const name of ['名单测试10', '名单测试11']) {
+        const r = await db.registration.findFirstOrThrow({ where: { activity_id: first.id, status: 'accepted', student: { account: { display_name: name } } } });
+        requests.push(await db.exitRequest.create({ data: { registration_id: r.id, reason: '期末课程调整' } }));
+      }
+      const [a,b] = requests;
+      const base = web + '/managed/' + first.id + '/requests';
+      const withdrawElsewhere = row => db.exitRequest.update({ where: { id: row.id }, data: { version: { increment: 1 }, status: 'withdrawn' } });
+      await owner.setViewportSize({ width: 1440, height: 900 });
+      await owner.goto(base + '?kind=exit');
+      await owner.getByRole('link', { name: /^处理申请 · 名单测试11 / }).click();
+      await owner.getByRole('link', { name: /^处理申请 · 名单测试10 / }).click();
+      await visible(button(owner, '批准退出'));
+      await withdrawElsewhere(a);
+      await button(owner, '批准退出').click();
+      await visible(button(owner, '刷新复核'));
+      const held = await holdResponse(owner, '**/exit-requests?*page_size=*');
+      try {
+        await button(owner, '刷新复核').click();
+        await held.received;
+        await owner.goBack();
+        await visible(owner.getByRole('heading', { name: '名单测试11的退出申请' }));
+        await withdrawElsewhere(b);
+        await button(owner, '批准退出').click();
+        await visible(button(owner, '刷新复核'));
+      } finally {
+        await held.release();
+      }
+      await settleRender(owner);
+      assert.ok(await button(owner, '刷新复核').isVisible());
+      assert.ok(await button(owner, '批准退出').isDisabled());
     });
 
     await t.test('会话到期后在原表单重试，兼任负责人保留管理入口', async () => {

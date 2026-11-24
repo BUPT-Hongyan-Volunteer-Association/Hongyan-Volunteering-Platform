@@ -1946,7 +1946,7 @@ paths:
       operationId: decide_registration
       summary: 人工录取候补或不录取
       description: 与整批决定共用业务服务。仅submitted/waitlisted/rejected可决定，accepted不可降级。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段，校验学生启用、当前版本及名额，事务内写通知事件。候补不自动补位，异常次数在规则off时不影响决定。
-        首次报名截止只关闭学生主动报名。
+        首次报名截止只关闭学生主动报名。结果通知投递前复核报名版本；已失效的待投递结果跳过，已送达的旧结果及回执可在历史中查看。
       tags:
       - 报名
       x-requirement: FR02
@@ -6129,7 +6129,7 @@ paths:
       operationId: decide_registrations_atomically
       summary: 整批录取候补或不录取
       description: 同一活动1—100个不重复报名ID。事务内核验全部成员授权、学生状态、报名版本及可转换状态，录取检查新增人数和当前余量。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段。任一失败整批回滚，409 details逐行返回resource_id（报名ID）及失败码，不返回部分成功。通知事件与状态同事务写入，按幂等键重试不重复决定。
-        首次报名截止只关闭学生主动报名。
+        首次报名截止只关闭学生主动报名。结果通知投递前复核报名版本；已失效的待投递结果跳过，已送达的旧结果及回执可在历史中查看。
       tags:
       - FR02
       x-requirement: FR02

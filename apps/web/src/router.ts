@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import PublicActivities from './activities/PublicActivities.vue';
 import ManagedActivities from './activities/ManagedActivities.vue';
 import ActivityEditor from './activities/ActivityEditor.vue';
-import RequestQueue from './registrations/RequestQueue.vue';
+import RequestWorkspace from './registrations/RequestWorkspace.vue';
 import AttendanceRecords from './attendance/AttendanceRecords.vue';
 import HourBatches from './hours/HourBatches.vue';
 import HourBatchDetail from './hours/HourBatchDetail.vue';
@@ -29,7 +29,7 @@ export const router = createRouter({
         {
           path: ':area(requests)/:item?',
           name: 'organizer-section',
-          component: RequestQueue,
+          component: RequestWorkspace,
           props: route => ({ activityId: String(route.params.id), requestId: route.params.item || undefined }),
           meta: { area: 'roster' },
         },

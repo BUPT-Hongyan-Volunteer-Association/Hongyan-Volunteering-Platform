@@ -92,7 +92,7 @@ onUnmounted(() => {
         </template>
       </RecordSummaryList>
       <p v-else>{{ item ? '未找到该报名记录。' : '暂无符合条件的报名记录。' }}</p>
-      <RequestQueue v-if="item && result.items[0]" :registration="result.items[0]" :writes-paused="refreshing" :activity-id="result.items[0].activity_id"
+      <RequestQueue v-if="item && result.items[0]" :registration="result.items[0]" :writes-paused="refreshing"
         @changed="msg => { feedback = msg; load(); }" />
       <Pager
         v-if="!item"

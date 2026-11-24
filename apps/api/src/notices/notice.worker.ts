@@ -13,6 +13,7 @@ type DecisionPayload = {
   student_id: string;
   status: string;
   decision_reason?: string | null;
+  registration_version?: number;
   actor_id?: string;
   kind?: string;
 };
@@ -310,10 +311,17 @@ async function resultPublication(
   event: NotificationEvent,
   activity_id: string,
   published: number,
-): Promise<Publication> {
+): Promise<Publication | null> {
   const payload = event.payload as DecisionPayload;
   if (!payload.student_id || !payload.status)
     throw new DeliveryError('录取结果缺少接收人或决定状态');
+  if (event.event_type === 'registration_decided') {
+    if (!payload.registration_version) throw new DeliveryError('报名结果缺少决定版本');
+    const current = await tx.registration.findFirst({ where: {
+      id: event.resource_id, activity_id, student_id: payload.student_id, version: payload.registration_version,
+    }, select: { id: true } });
+    if (!current) return null;
+  }
   const revision = await tx.activityRevision.findUniqueOrThrow({
     where: { activity_id_revision: { activity_id, revision: published } },
     select: { content: true },

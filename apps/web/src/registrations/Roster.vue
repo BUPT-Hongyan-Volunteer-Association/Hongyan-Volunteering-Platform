@@ -4,7 +4,7 @@ let selectionClearedOnLeave = false;
 </script>
 <script setup lang="ts">
 import UiSelect from '@hongyan/ui/UiSelect.vue';
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, shallowReactive, watch } from 'vue';
 import { onBeforeRouteLeave, useRoute } from 'vue-router';
 import {
   ApiError,
@@ -16,6 +16,7 @@ import {
   type Registration,
   type ActivityRosterPage,
 } from '@hongyan/contracts';
+import { canChangeRegistration } from '@hongyan/contracts/activity';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import ExportButton from '@hongyan/ui/ExportButton.vue';
 import { noAccess } from '@hongyan/ui/usePageRead';
@@ -101,27 +102,36 @@ async function load() {
     }
   }
 }
-const snapshots = new Map<string, Registration>();
+const snapshots = shallowReactive(new Map<string, Registration>());
+const conflicts = ref<{ id: string; text: string }[]>([]);
+const batchReason = ref(''), singleReason = ref('');
+watch(inspected, () => { singleReason.value = ''; }, { flush: 'sync' });
 watch(() => [...selected.value], ids => {
+  if (!ids.length || ids.some(id => !snapshots.has(id))) batchReason.value = '';
   for (const id of snapshots.keys()) if (!selected.value.has(id)) snapshots.delete(id);
   for (const row of result.value?.items ?? [])
     if (selected.value.has(row.id) && !snapshots.has(row.id)) snapshots.set(row.id, row);
 }, { flush: 'sync' });
-const conflicts = ref<{ id: string; text: string }[]>([]);
-const reason = ref('');
 type Decision = RegistrationDecision['decision'];
 const actions = { accepted: '录取', waitlisted: '设为候补', rejected: '不录取' } as const;
 const paused = computed(() => saving.value || refreshRequired.value || props.writesPaused || !result.value?.can_decide);
+function allowed(decision: Decision, rows: Registration[]) {
+  return !!result.value && rows.length > 0 && rows.length <= 100 &&
+    rows.every(r => canChangeRegistration(r.status, decision)) &&
+    (decision !== 'accepted' || rows.length <= result.value.capacity - result.value.accepted_count);
+}
+const batch = computed(() => [...snapshots.values()]);
 async function decide(decision: Decision, single?: Registration) {
   if (paused.value) return;
-  const rows = single ? [single] : [...snapshots.values()];
-  if (!rows.length || rows.length > 100) return;
+  const rows = single ? [single] : batch.value;
+  if (!allowed(decision, rows)) return;
   const activityId = String(route.params.id);
   const filterKey = filterVersion;
   saving.value = true;
   writeError.value = '';
   conflicts.value = [];
-  const decisionInput = { decision, ...(reason.value.trim() && { reason: reason.value.trim() }) };
+  const reason = (single ? singleReason : batchReason).value.trim();
+  const decisionInput = { decision, ...(reason && { reason }) };
   try {
     if (single) {
       const body = { ...decisionInput, expected_version: single.version };
@@ -139,7 +149,7 @@ async function decide(decision: Decision, single?: Registration) {
     notice.value = decision === 'waitlisted' ? '已将' + who + '设为候补。'
       : decision === 'accepted' ? '已录取' + who + '。' : who + '已标为未录取。';
     for (const r of rows) selected.value.delete(r.id);
-    reason.value = '';
+    if (!single) batchReason.value = '';
     await load();
   } catch (e) {
     if (!mounted || activityId !== route.params.id) return;
@@ -182,7 +192,7 @@ const otherStates = computed(() => [
 function clear() {
   filterVersion++;
   conflicts.value = [];
-  reason.value = '';
+  batchReason.value = '';
   notice.value = selected.value.size ? '筛选或活动已变更，已清空选择。' : '';
   inspected.value = undefined;
   writeError.value = '';
@@ -235,8 +245,8 @@ onUnmounted(() => {
         v-model="q"
     /></label>
     <span class="state-chip attention">已选 {{ selected.size }} 人</span>
-    <label>处理说明（选填）<input v-model="reason" maxlength="1000" /></label>
-    <button v-for="(label, key) in actions" :key="key" :disabled="paused || !selected.size || selected.size > 100"
+    <label v-if="selected.size">所选人员的处理说明（选填）<input v-model="batchReason" maxlength="1000" /></label>
+    <button v-for="(label, key) in actions" :key="key" :disabled="paused || !allowed(key, batch)"
       @click="decide(key)">{{ key === 'waitlisted' ? '所选设为候补' : label + '所选' }}</button>
     <ExportButton
       :input="filterExportInput"
@@ -253,6 +263,13 @@ onUnmounted(() => {
       @recheck="load"
     />
   </div>
+  <p v-if="result && selected.size && selected.size <= 100">
+    <template v-if="!result.can_decide">本活动的报名决定已关闭。</template>
+    <template v-else-if="batch.every(r => canChangeRegistration(r.status, 'accepted')) && selected.size > result.capacity - result.accepted_count">
+      当前余量不足以录取全部所选人员。<button @click="load">刷新余量</button>
+    </template>
+    <template v-else-if="!Object.keys(actions).some(k => allowed(k as Decision, batch))">所选状态无法统一办理，请调整选择或导出名单。</template>
+  </p>
   <p v-if="notice" role="status">{{ notice }}</p>
   <p v-if="writeError" role="alert">
     {{ writeError }}
@@ -365,8 +382,9 @@ onUnmounted(() => {
       >
     </dl>
     <template v-if="['submitted', 'waitlisted', 'rejected'].includes(inspected.status)">
+      <label class="single-note">给{{ inspected.student_name }}的处理说明（选填）<textarea v-model="singleReason" maxlength="1000" rows="2" /></label>
       <button v-for="(label,key) in actions" :key="key"
-        :disabled="paused || inspected.status === key || (key === 'accepted' && result!.accepted_count >= result!.capacity)"
+        :disabled="paused || !allowed(key, [inspected])"
         @click="decide(key, inspected)">{{ key === 'accepted' && inspected.status === 'waitlisted' ? '手动补录' : label + '此人' }}</button>
     </template>
     <small
@@ -376,6 +394,7 @@ onUnmounted(() => {
   </section>
 </template>
 <style scoped>
+.single-note { display: grid; gap: 6px; max-width: 36rem; margin-block: 12px; }
 .roster-heading {
   display: flex;
   align-items: center;
