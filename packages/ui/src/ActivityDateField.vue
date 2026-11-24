@@ -22,6 +22,7 @@ function select(date: string) {
   <div class="activity-date">
     <ScheduleDatePicker
       :date="day || localDate(Date.now())"
+      :disabled="disabled"
       :period="day || '选择日期'"
       :label="withTime ? label + '日期' : label"
       @select="select"
@@ -61,7 +62,8 @@ function select(date: string) {
 }
 .activity-date :deep(.date-picker) {
   border: 1px solid var(--field-line);
-  min-height: 40px;
+  min-height: var(--date-field-height);
+  font-variant-numeric: tabular-nums;
   font-size: 14px;
   font-weight: 450;
   justify-content: space-between;
@@ -69,7 +71,7 @@ function select(date: string) {
 }
 .activity-date :deep(.el-date-editor) {
   width: 7.5rem;
-  --el-input-height: 40px;
+  --el-input-height: var(--date-field-height);
 }
 .activity-date :deep(input.el-input__inner) {
   border: 0;
@@ -83,15 +85,6 @@ function select(date: string) {
 .clear-date {
   font-size: 12px;
   padding-inline: 4px;
-}
-@media (max-width: 700px) {
-  .activity-date :deep(.date-picker),
-  .clear-date {
-    min-height: 44px;
-  }
-  .activity-date :deep(.el-date-editor) {
-    --el-input-height: 44px;
-  }
 }
 </style>
 <style>

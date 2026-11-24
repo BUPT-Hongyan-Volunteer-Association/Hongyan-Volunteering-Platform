@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
+import { nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { ElPopover } from 'element-plus';
 import 'element-plus/es/components/popover/style/css';
 import ServiceCalendar from '../ServiceCalendar.vue';
@@ -7,13 +7,16 @@ import UiIcon from '../UiIcon.vue';
 import { dropdownPosition } from '../dropdownPosition';
 import { validDate } from './window';
 
-const props = defineProps<{ date: string; period: string; highlighted?: boolean; label?: string }>();
+const props = defineProps<{ date: string; period: string; highlighted?: boolean; label?: string; disabled?: boolean }>();
 const emit = defineEmits<{ select: [date: string] }>();
 const expanded = ref(false);
 const trigger = ref<HTMLButtonElement>();
 const panel = ref<HTMLElement>();
 const input = ref(''),
   error = ref('');
+watch(() => props.disabled, (disabled) => {
+  if (disabled) expanded.value = false;
+});
 function toggle() {
   if (!expanded.value) {
     input.value = props.date;
@@ -56,6 +59,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('focusin', outside);
 });
 function select(date: string) {
+  if (props.disabled) return;
   if (!validDate(date)) {
     error.value = '请输入有效的年、月、日，格式为 YYYY-MM-DD。';
     return;
@@ -88,6 +92,7 @@ function select(date: string) {
       <button
         ref="trigger"
         type="button"
+        :disabled="disabled"
         class="date-picker"
         :class="{ highlighted }"
         :aria-label="label || ('查看日期，' + period)"

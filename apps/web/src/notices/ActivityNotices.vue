@@ -115,7 +115,7 @@ async function reloadReceipts() {
 
 <template>
   <section :class="{ 'reading-area': !item }">
-    <div class="page-heading">
+    <div class="page-heading inline-actions">
       <h2>通知与回执</h2>
       <RouterLink v-if="!compose" class="button primary" :to="{ path: listPath, query: { ...listQuery, compose: '1' } }">发布通知</RouterLink>
     </div>
@@ -123,8 +123,7 @@ async function reloadReceipts() {
       @published="(id) => router.replace({ path: listPath + '/' + id, query: { page: route.query.page } })"
       @cancel="router.replace({ path: listPath, query: listQuery })" @denied="emit('denied')" />
     <p v-else-if="error" role="alert">{{ error }} <button @click="refresh()">重新读取</button></p>
-    <p v-else-if="!listing" role="status">正在读取通知…</p>
-
+    <p v-else-if="!listing" class="notice-loading" role="status">正在读取通知…</p>
     <RecordWorkspace v-else :selected="!!item">
       <template #list>
         <div v-if="listing.page.items.length" class="entry-list notice-queue">
@@ -251,6 +250,13 @@ async function reloadReceipts() {
 </template>
 
 <style scoped>
+.notice-loading {
+  animation: reveal-loading 180ms step-end;
+}
+@keyframes reveal-loading {
+  from { visibility: hidden; }
+  to { visibility: visible; }
+}
 .receipt-scroll {
   overflow-x: auto;
 }

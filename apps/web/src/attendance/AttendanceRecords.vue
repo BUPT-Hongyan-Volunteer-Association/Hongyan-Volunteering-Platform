@@ -12,6 +12,7 @@ import {
   type AttendanceStatus,
   type AttendanceStudentIdentity,
 } from '@hongyan/contracts';
+import ActivityDateField from '@hongyan/ui/ActivityDateField.vue';
 import Pager from '@hongyan/ui/Pager.vue';
 import RecordTable from '@hongyan/ui/RecordTable.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
@@ -160,20 +161,22 @@ onUnmounted(() => { mounted = false; });
 
 <template>
   <section class="reading-area" aria-labelledby="attendance-heading">
-    <header class="page-heading attendance-heading">
+    <header class="page-heading inline-actions">
       <h2 id="attendance-heading">现场人员记录</h2>
-      <button v-if="!visibleForm" class="primary" :disabled="writesPaused || accessLost" @click="openForm()">登记异常</button>
+      <div class="page-actions">
+        <RouterLink class="button" :to="{ path: '/managed/' + path.id + '/incidents', query: { page: $route.query.page } }">异常记录</RouterLink>
+        <button v-if="!visibleForm" class="primary" :disabled="writesPaused || accessLost" @click="openForm()">登记异常</button>
+      </div>
     </header>
-    <div class="page-actions">
-      <RouterLink class="button" :to="{ path: '/managed/' + path.id + '/incidents', query: { page: $route.query.page } }">异常记录</RouterLink>
-    </div>
 
     <form v-if="visibleForm" class="attendance-form" @submit.prevent="save()">
       <h3>{{ editing ? '修改记录' : '批量登记' }}</h3>
       <p v-if="editing">{{ editing.student_name }} · {{ editing.student_no }} · {{ editing.service_date }}</p>
       <fieldset :disabled="locked">
         <div class="date-and-status">
-          <label v-if="!editing">登记服务日期<input type="date" required v-model="serviceDate" /></label>
+          <div v-if="!editing" class="date-field">登记服务日期
+            <ActivityDateField label="登记服务日期" v-model="serviceDate" :disabled="locked" />
+          </div>
           <label v-if="editing?.status !== 'unregistered_participation'">异常类型
             <UiSelect label="异常类型" v-model="status" :disabled="locked"
               :options="editing ? options.filter((choice) => choice.value !== 'unregistered_participation') : options" />
@@ -202,7 +205,7 @@ onUnmounted(() => { mounted = false; });
         <button v-if="stale" type="button" @click="closeForm">{{ editing ? '刷新记录复核' : '查看该日记录' }}</button>
       </p>
       <div class="page-actions">
-        <button class="primary" :disabled="locked || (needsReason && !reason.trim()) || (!editing && status !== 'unregistered_participation' && !selected.length)">
+        <button class="primary" :disabled="locked || (!editing && !serviceDate) || (needsReason && !reason.trim()) || (!editing && status !== 'unregistered_participation' && !selected.length)">
           {{ saving ? '正在保存…' : editing ? '保存修改' : '保存记录' }}
         </button>
         <button type="button" :disabled="saving" @click="closeForm">取消</button>
@@ -212,8 +215,9 @@ onUnmounted(() => { mounted = false; });
 
     <template v-else>
       <div class="page-actions filters">
-        <label>服务日期 <input type="date" :value="listQuery.date" @change="showDay(($event.target as HTMLInputElement).value)" /></label>
-        <button v-if="listQuery.date" type="button" class="quiet" @click="showDay('')">查看全部日期</button>
+        <div class="date-field">服务日期
+          <ActivityDateField label="服务日期" :model-value="listQuery.date" @update:model-value="showDay" />
+        </div>
         <span v-if="result" class="state-chip neutral">共 {{ result.total }} 条异常</span>
       </div>
       <p v-if="notice" role="status">{{ notice }}</p>
@@ -232,43 +236,49 @@ onUnmounted(() => { mounted = false; });
 </template>
 
 <style scoped>
-.attendance-heading {
-  margin-bottom: 14px;
-}
 .filters {
-  margin-bottom: 12px;
+  gap: 12px 16px;
+  margin-bottom: 20px;
 }
-.filters label {
+.filters .date-field {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 .attendance-form {
   max-width: 42rem;
-  padding: 16px;
+  padding: clamp(16px, 3vw, 24px);
   border: 1px solid var(--line);
   border-radius: var(--radius);
 }
+.attendance-form h3 { margin-bottom: 16px; }
 .attendance-form fieldset {
   display: grid;
-  gap: 14px;
+  gap: 20px;
   min-inline-size: 0;
-  margin: 0 0 14px;
+  margin: 0 0 20px;
   padding: 0;
   border: 0;
 }
-.date-and-status,
+.date-and-status {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, max-content));
+  --select-height: var(--date-field-height);
+  align-items: start;
+  gap: 12px;
+}
 .identity-row {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
-  gap: 8px 14px;
+  gap: 12px 16px;
 }
+.date-field,
 .date-and-status label,
 .identity-row label,
 .reason-field {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   font-size: 14px;
 }
 .identity-row label {

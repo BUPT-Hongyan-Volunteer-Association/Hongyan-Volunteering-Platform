@@ -71,7 +71,9 @@ defineExpose({ refresh, clear });
 </script>
 <template>
   <section class="ledger">
-    <div class="page-title"><h1>{{ title }}</h1></div>
+    <div class="page-title">
+      <component :is="scope.type === 'activity_hours' ? 'h2' : 'h1'">{{ title }}</component>
+    </div>
     <slot name="links" />
     <form class="hour-filters" @submit.prevent="applyFilters">
       <div>起始日期<ActivityDateField label="起始日期" v-model="from" /></div>
@@ -170,7 +172,9 @@ defineExpose({ refresh, clear });
 </template>
 <style scoped>
 .hour-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-block: 16px; }
-.hour-filters label { align-self: center; }
+.hour-filters > label { display: inline-flex; align-items: center; gap: 8px; }
+.hour-filters > label input { margin: 0; }
+.hour-filters > :is(label, button) { min-height: var(--date-field-height); }
 .ledger-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; background: var(--surface); padding: 10px 14px; margin-bottom: 12px; }
 .ledger-summary p { margin: 0; }
 .ledger-summary strong { color: var(--brand); font-size: 20px; font-variant-numeric: tabular-nums; }

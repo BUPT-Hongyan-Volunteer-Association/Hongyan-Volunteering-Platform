@@ -53,6 +53,14 @@ async function openOptions(page, label) {
   await list.waitFor({ state: 'visible' });
   return { trigger, list };
 }
+async function chooseDate(page, label, day) {
+  await button(page, label).click();
+  const panel = page.locator('.schedule-date-menu:visible');
+  await panel.getByLabel('输入日期').fill(day);
+  await button(panel, '确定').click();
+  await panel.waitFor({ state: 'hidden' });
+}
+
 async function pickOption(page, label, option) {
   const { list } = await openOptions(page, label);
   await list.getByRole('option', { name: option, exact: true }).click();
@@ -1917,13 +1925,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       });
       await visible(owner.getByAltText('入群二维码预览'));
       await owner.waitForFunction(() => document.querySelector('.group-qr')?.naturalWidth > 0);
-      async function chooseDate(label, day) {
-        await button(owner, label).click();
-        const panel = owner.locator('.schedule-date-menu:visible');
-        await panel.getByLabel('输入日期').fill(day);
-        await button(panel, '确定').click();
-        await panel.waitFor({ state: 'hidden' });
-      }
       for (const [label, day] of [
         ['活动开始日期', '2027-05-01'],
         ['活动结束日期', '2027-05-02'],
@@ -1932,7 +1933,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
         ['报名截止日期', '2027-05-01'],
         ['预计结果公布日期', '2027-05-01'],
       ])
-        await chooseDate(label, day);
+        await chooseDate(owner, label, day);
       assert.equal(await owner.locator('.field.invalid').count(), 0);
       assert.equal(await owner.locator('.field').filter({hasText:'预计结果公布日期'}).getByRole('combobox').count(), 0);
       const time = owner.getByRole('combobox', { name: '报名截止时分' });
@@ -2018,7 +2019,20 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await link(owner, '现场人员记录').click();
       await visible(owner.getByText('本活动暂无现场异常。'));
       await button(owner, '登记异常').click();
-      await owner.getByLabel('登记服务日期').fill(date);
+      const dateButton = button(owner, '登记服务日期');
+      await dateButton.click();
+      const calendar = owner.locator('.schedule-date-menu:visible');
+      await visible(calendar);
+      const membership = await holdResponse(owner, '**/organizer/activities/*/members');
+      try {
+        await owner.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await membership.received;
+        assert.ok(await dateButton.isDisabled());
+        await calendar.waitFor({ state: 'hidden' });
+      } finally {
+        await membership.release();
+      }
+      await chooseDate(owner, '登记服务日期', date);
       await pickOption(owner, '异常类型', '迟到');
       const people = owner.getByRole('group', { name: '报名人员' });
       const firstChoice = people.locator('.choices label').nth(1);
@@ -2032,11 +2046,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await visible(people.getByText('已选 2 人'));
       const other = await owner.context().newPage();
       await other.goto(owner.url());
-      const otherDate = other.getByLabel('服务日期', { exact: true });
-      await otherDate.fill('2000-01-01');
+      await chooseDate(other, '服务日期', '2000-01-01');
       await visible(other.getByText('该日期暂无现场异常。'));
       await button(other, '登记异常').click();
-      await other.getByLabel('登记服务日期').fill(date);
+      await chooseDate(other, '登记服务日期', date);
       const otherRoster = other.getByRole('group', { name: '报名人员' });
       await otherRoster.locator('.choices label').nth(2).getByRole('checkbox').check();
       const duplicateNo = await firstChoice.locator('small').innerText();
@@ -2064,15 +2077,14 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       assert.deepEqual(conflict.request().postDataJSON().student_ids, [duplicateRow.id]);
       await button(other, '查看该日记录').click();
       await visible(other.getByText('共 2 条异常'));
-      assert.equal(await otherDate.inputValue(), date);
+      assert.equal(await button(other, '服务日期').innerText(), date);
       await visible(other.getByRole('table').getByText(duplicateNo, { exact: true }));
       await other.close();
       await owner.reload();
       await visible(dataRows.nth(1));
-      const filter = owner.getByLabel('服务日期', { exact: true });
-      await filter.fill('2000-01-01');
+      await chooseDate(owner, '服务日期', '2000-01-01');
       await visible(owner.getByText('该日期暂无现场异常。'));
-      await filter.fill(date);
+      await chooseDate(owner, '服务日期', date);
       await visible(dataRows.nth(1));
 
       await button(dataRows.first(), '修改').click();
