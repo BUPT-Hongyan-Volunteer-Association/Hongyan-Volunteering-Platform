@@ -100,7 +100,7 @@ async function fits(page) {
   );
 }
 
-test('三端页面、真实发布与报名录取流程', { timeout: 180000 }, async (t) => {
+test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }, async (t) => {
   const password = 'T1' + randomUUID();
   const adminPassword = 'A2' + randomUUID();
   await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: password, DEMO_ADMIN_PASSWORD: adminPassword });
