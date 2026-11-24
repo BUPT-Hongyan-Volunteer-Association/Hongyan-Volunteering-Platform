@@ -87,7 +87,7 @@ export class StudentController {
       const allowed = await tx.account.count({ where: { ...managedAccountScope(actor), id: target.account_id, student: { id } } });
       if (!allowed) denied();
     };
-    return this.workflow.run(req, { accountId: target.account_id, checkAccess }, 'review', (tx, _activity, actor) =>
+    return this.workflow.runAccount(req, target.account_id, 'review', checkAccess, (tx, actor) =>
       updateStudent(tx, id, actor, validate<StudentPatch>('student_patch', body)));
   }
 

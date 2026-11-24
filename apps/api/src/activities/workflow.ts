@@ -116,15 +116,17 @@ export function detail(row: LoadedActivity) {
 
 export type Tx = Prisma.TransactionClient;
 export type Reauthorize = () => Promise<Actor>;
-type AccountTarget = { accountId: string; checkAccess: (tx: Tx, actor: Actor) => Promise<void> };
 export type Target =
-  | AccountTarget
   | { activityId: string }
   | { activityIds: (tx: Tx) => Promise<string[]> }
   | { reviewId: string }
   | { registrationId: string }
   | null;
-async function targetActivityId(tx: Tx, target: Exclude<Target, AccountTarget | { activityIds: unknown } | null>) {
+type Access = 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 'team' | 'tech';
+type CommandArgs = [tx: Tx, row: LoadedActivity | null, actor: Actor, reauthorize: Reauthorize];
+type Write = () => Promise<unknown>;
+
+async function targetActivityId(tx: Tx, target: Exclude<Target, { activityIds: unknown } | null>) {
   if ('activityId' in target) return target.activityId;
   const reference =
     'reviewId' in target
@@ -142,12 +144,32 @@ async function targetActivityId(tx: Tx, target: Exclude<Target, AccountTarget | 
 @Injectable()
 export class Workflow {
   constructor(private db: Database) {}
-  async run(
+  run(
     req: SessionRequest,
     target: Target,
     // 'self' 用于本人资源操作（如通知已读/确认），不做活动范围校验。
-    access: 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 'team' | 'tech',
-    execute: (tx: Tx, row: LoadedActivity | null, actor: Actor, reauthorize: Reauthorize) => Promise<unknown>,
+    access: Access,
+    execute: (...args: CommandArgs) => Promise<unknown>,
+    scope?: string,
+    commandInput?: unknown,
+  ) {
+    return this.runCommand(req, target, access, (...args) => () => execute(...args), scope, commandInput);
+  }
+
+  runAccount<T>(
+    req: SessionRequest, accountId: string, access: 'tech' | 'review',
+    checkAccess: (tx: Tx, actor: Actor) => Promise<T>,
+    execute: (tx: Tx, actor: Actor, checked: T) => Promise<unknown>,
+  ) {
+    return this.runCommand(req, { accountId }, access, async (tx, _row, actor) => {
+      const checked = await checkAccess(tx, actor);
+      return () => execute(tx, actor, checked);
+    });
+  }
+
+  private async runCommand(
+    req: SessionRequest, target: Target | { accountId: string }, access: Access,
+    prepare: (...args: CommandArgs) => Write | Promise<Write>,
     scope?: string,
     commandInput: unknown = req.body ?? {},
   ) {
@@ -221,7 +243,7 @@ export class Workflow {
         return actor;
       };
       const actor = await reauthorize();
-      if (target && 'accountId' in target) await target.checkAccess(tx, actor);
+      const write = await prepare(tx, row, actor, reauthorize);
       const cached = await tx.commandReceipt.findUnique({
         where: { account_id_method_path_key: identity },
       });
@@ -230,7 +252,7 @@ export class Workflow {
           throw new BusinessError(409, 'conflict', '同一幂等键的请求内容已变化');
         return cached.response;
       }
-      const response = json(envelope(await execute(tx, row, actor, reauthorize)));
+      const response = json(envelope(await write()));
       await tx.commandReceipt.create({ data: { ...identity, digest, response } });
       return response;
     });

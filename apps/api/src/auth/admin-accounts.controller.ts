@@ -84,7 +84,7 @@ export class AdminAccountsController {
       if (!target) invisible();
       if (target.student) invalid('account_id', '学生账号请在学生档案办理启停');
     };
-    return this.workflow.run(req, { accountId: id, checkAccess }, 'tech', async (tx, _row, actor) => {
+    return this.workflow.runAccount(req, id, 'tech', checkAccess, async (tx, actor) => {
       const input = validate<AccountStatusPatch>('account_status_patch', body);
       const reason = input.reason.trim();
       if (!reason) invalid('reason', '请填写启停原因');
@@ -111,7 +111,7 @@ export class AdminAccountsController {
       const visible = await tx.account.count({ where: { id, ...managedAccountScope(actor) } });
       if (!visible) return actor.roles.includes('tech_admin') ? invisible() : denied();
     };
-    return this.workflow.run(req, { accountId: id, checkAccess }, 'review', async (tx, _row, actor) => {
+    return this.workflow.runAccount(req, id, 'review', checkAccess, async (tx, actor) => {
       const input = validate<ReasonAction>('reason_action', body);
       const reason = input.reason.trim();
       if (!reason) invalid('reason', '请填写核验后的重置原因');
@@ -138,13 +138,11 @@ export class AdminAccountsController {
 
   @Put(':id/roles')
   async setRoles(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
-    let row: Row, input: RoleReplacement;
     const checkAccess = async (tx: Tx, actor: Actor) => {
       const technical = actor.roles.includes('tech_admin');
-      const target = await tx.account.findFirst({ where: { id, ...managedAccountScope(actor) }, select: fields });
-      if (!target) return technical ? invisible() : denied();
-      row = target;
-      input = validate<RoleReplacement>('role_replacement', body);
+      const row = await tx.account.findFirst({ where: { id, ...managedAccountScope(actor) }, select: fields });
+      if (!row) return technical ? invisible() : denied();
+      const input = validate<RoleReplacement>('role_replacement', body);
       const student = row.roles.find(g => g.role === 'student');
       const requestedStudent = input.roles.find(g => g.role === 'student');
       if (!technical && (!student || input.roles.some(g => g.role !== 'student' && g.role !== 'organizer'))) denied();
@@ -152,8 +150,9 @@ export class AdminAccountsController {
       if (row.student && student && (!requestedStudent ||
         (student.expires_at?.getTime() ?? null) !== (requestedStudent.expires_at ? Date.parse(requestedStudent.expires_at) : null))) denied();
       if (!row.student && requestedStudent && !student) invalid('roles', '学生身份须关联学生档案');
+      return { row, input };
     };
-    return this.workflow.run(req, { accountId: id, checkAccess }, 'review', async (tx, _activity, actor) => {
+    return this.workflow.runAccount(req, id, 'review', checkAccess, async (tx, actor, { row, input }) => {
       const reason = input.reason.trim();
       if (!reason) invalid('reason', '请填写办理原因');
       if (new Set(input.roles.map(grant => grant.role)).size !== input.roles.length)
