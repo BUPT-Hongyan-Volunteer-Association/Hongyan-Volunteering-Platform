@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { createApp } from '../dist/app.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { Database } from '../dist/database.js';
@@ -8,6 +9,108 @@ import { checkHourPreview, prepareHourPreviewFixture } from './hour-preview-fixt
 import { checkHourHttp } from './hour-http-fixture.mjs';
 
 import { browser } from './api-client.mjs';
+
+// Hold the target account until both HTTP writes are queued, in the requested order.
+async function queuedAccountWrites(db, accountId, writes) {
+  const pending = [];
+  try {
+    await db.$transaction(async tx => {
+      const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid FROM account WHERE id = ${accountId}::uuid FOR UPDATE`;
+      for (const write of writes) {
+        pending.push(write());
+        const deadline = Date.now() + 4000;
+        while (true) {
+          const [{ waiting }] = await db.$queryRaw`
+            WITH RECURSIVE queue(pid) AS (
+              SELECT ${pid}::int UNION
+              SELECT s.pid FROM pg_stat_activity s JOIN queue q ON q.pid = ANY(pg_blocking_pids(s.pid))
+                WHERE s.datname = current_database()
+            ) SELECT count(*)::int - 1 AS waiting FROM queue`;
+          if (waiting === pending.length) break;
+          assert.ok(Date.now() < deadline, '并发写入未按预期等待目标账号');
+          await delay(10);
+        }
+      }
+    }, { timeout: 12000 });
+  } finally {
+    await Promise.allSettled(pending);
+  }
+  return Promise.all(pending);
+}
+
+test('收回负责人资格与添加协作者、交接主负责人并发', async t => {
+  const password = randomUUID();
+  await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: password });
+  const app = await createApp();
+  try {
+    await app.listen(0, '127.0.0.1');
+    const base = (await app.getUrl()) + '/api/v1';
+    const db = app.get(Database);
+    const [teacher, owner, target] = Array.from({ length: 3 }, () => browser(base));
+    await Promise.all([
+      teacher.signIn('demo.teacher', password),
+      owner.signIn('0000000002', '000002', 't1' + randomUUID()),
+      target.signIn('0000000003', '000003', 't1' + randomUUID()),
+    ]);
+    const targetId = (await target.request('/me')).data.account_id;
+    const ownerId = (await owner.request('/me')).data.account_id;
+    const roles = '/admin/accounts/' + targetId + '/roles';
+    const sample = await db.activity.findUniqueOrThrow({
+      where: { activity_code: 'P2026-0001' }, include: { revisions: true },
+    });
+    for (const transfer of [false, true]) {
+      for (const revokeFirst of [true, false]) {
+        const name = (transfer ? '交接' : '添加') + (revokeFirst ? '：先收回资格' : '：先写入团队');
+        await t.test(name, async () => {
+          const current = (await teacher.request(roles)).data;
+          const grant = await teacher.write('PUT', roles, { expected_version: current.version,
+            roles: [{ role: 'student' }, { role: 'organizer' }], reason: '安排值班' });
+          assert.equal(grant.status, 200);
+          const created = await owner.write('POST', '/organizer/activities', { ...sample.revisions[0].content, title: name });
+          assert.equal(created.status, 201);
+          const activity = '/organizer/activities/' + created.data.id;
+          const members = activity + '/members';
+          let before = (await owner.request(members)).data;
+          if (transfer) {
+            const joined = await owner.write('POST', members, { account_id: targetId,
+              expected_version: before.version, reason: '预先加入为协作者' });
+            assert.equal(joined.status, 200);
+            before = joined.data;
+          }
+          const revoke = () => teacher.write('PUT', roles, { expected_version: grant.data.version,
+            roles: [{ role: 'student' }], reason: name });
+          const change = () => owner.write('POST', transfer ? activity + '/transfer-owner' : members, {
+            [transfer ? 'target_account_id' : 'account_id']: targetId, expected_version: before.version, reason: name,
+          });
+          const results = await queuedAccountWrites(db, targetId, revokeFirst ? [revoke, change] : [change, revoke]);
+          const [revoked, changed] = revokeFirst ? results : results.reverse();
+          assert.equal(revoked.status, 200);
+          assert.equal(revoked.data.version, grant.data.version + 1);
+          assert.equal(changed.status, revokeFirst ? 422 : 200);
+          if (revokeFirst) assert.equal(changed.details[0].field, transfer ? 'target_account_id' : 'account_id');
+          const after = (await teacher.request(members)).data;
+          if (revokeFirst) assert.deepEqual(after, before);
+          else {
+            assert.equal(after.version, before.version + 1);
+            assert.deepEqual(after.items.filter(m => m.member_role === 'owner').map(m => m.account_id),
+              [transfer ? targetId : ownerId]);
+            assert.deepEqual(after.items.filter(m => m.member_role === 'collaborator').map(m => m.account_id),
+              [transfer ? ownerId : targetId]);
+            assert.equal(after.owner_unavailable_reason, transfer ? 'role_missing' : undefined);
+          }
+          assert.equal(await db.auditEvent.count({ where: { resource_id: created.data.id,
+            action: transfer ? 'transfer_activity_owner' : 'add_activity_member', reason: name } }), revokeFirst ? 0 : 1);
+          assert.equal(await db.auditEvent.count({ where: { resource_id: targetId, action: 'set_account_roles', reason: name } }), 1);
+          assert.deepEqual((await target.request('/me')).data.roles, ['student']);
+          assert.equal((await target.request(activity + '/registrations')).status, 403);
+          assert.equal((await target.request('/me/hours')).status, 200);
+        });
+      }
+    }
+  } finally {
+    await app.close();
+  }
+});
 
 test('没有长期技术管理员时，老师仍可办理学生账号，限期管理员可维护后台账号', async (t) => {
   const password = randomUUID();
