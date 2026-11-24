@@ -126,7 +126,13 @@ watch(
   },
 );
 onMounted(() => {
-  if (scroller.value) resize.observe(scroller.value);
+  if (!scroller.value) return;
+  // 先量一次宽度，避免重新挂载后的第一帧按 0 宽度只画出部分刻度标签。
+  if (!available.value) {
+    available.value = Math.floor(scroller.value.clientWidth);
+    void nextTick(positionWindow);
+  }
+  resize.observe(scroller.value);
 });
 onUnmounted(() => resize.disconnect());
 </script>
@@ -183,7 +189,9 @@ onUnmounted(() => resize.disconnect());
                 ><strong>{{ row.title }}</strong
                 ><small
                   >{{ activityTypes[row.schedule_type]
-                  }}{{ row.is_ongoing ? ' · 进行中' : '' }}</small
+                  }}{{ row.is_ongoing ? ' · 进行中' : '' }}{{
+                    row.has_pending_review ? ' · 待审核' : ''
+                  }}</small
                 ></span
               >
             </button>

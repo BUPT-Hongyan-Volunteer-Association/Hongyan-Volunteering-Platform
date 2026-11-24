@@ -32,14 +32,28 @@ export const includeView = {
 } as const;
 export type LoadedActivity = Prisma.ActivityGetPayload<{ include: typeof includeView }>;
 
-export function publishedRevision(row: Pick<LoadedActivity, 'published_revision' | 'revisions'>) {
+/** 列表、日程与管理详情共用的读取视图：活动行加已取回的版本快照。 */
+export type PageRow = {
+  id: string;
+  activity_code: string;
+  status: string;
+  version: number;
+  working_revision: number;
+  published_revision: number | null;
+  members: LoadedActivity['members'];
+  revisions: LoadedActivity['revisions'];
+  reviews: { id: string; status: string }[];
+  registrations?: { status: string }[];
+};
+
+export function publishedRevision(row: Pick<PageRow, 'published_revision' | 'revisions'>) {
   return row.revisions.find(
     (r) => r.revision === row.published_revision && r.revision_state === 'approved',
   );
 }
 
 export function workingRevision(
-  row: Pick<LoadedActivity, 'working_revision' | 'published_revision' | 'revisions'>,
+  row: Pick<PageRow, 'working_revision' | 'published_revision' | 'revisions'>,
 ) {
   // The write pointer stays at the latest revision, including after rejection or withdrawal.
   const latest = row.revisions.find((r) => r.revision === row.working_revision);
@@ -49,10 +63,7 @@ export function workingRevision(
 }
 
 export function project(
-  row: Omit<LoadedActivity, 'reviews'> & {
-    registrations?: { status: string }[];
-    reviews: Pick<LoadedActivity['reviews'][number], 'id' | 'status'>[];
-  },
+  row: PageRow,
   scope: 'working' | 'published' | 'public' | 'public-detail',
   now: Date,
 ): View | null {

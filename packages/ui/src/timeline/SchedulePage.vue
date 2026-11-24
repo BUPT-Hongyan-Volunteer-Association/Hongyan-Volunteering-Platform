@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { campuses, campusName, matchesCampus } from '@hongyan/contracts/activity';
 import UiSelect from '../UiSelect.vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import type { TimelineActivity, TimelineActivityPage, TimelineItem } from '@hongyan/contracts';
+import {
+  getTimeline,
+  type GetTimelineData,
+  type TimelineActivity,
+  type TimelineItem,
+} from '@hongyan/contracts';
 import UiIcon from '../UiIcon.vue';
 import {
   activityTypes,
@@ -16,23 +20,29 @@ import {
   timelineColors,
 } from '../activityDisplay';
 import { units, validDate, validUnit, dateWindow, shiftDate, windowLabel } from './window';
+import { createScheduleRange, type RangeIntent } from './scheduleRange';
+import {
+  campusOptionsFor,
+  ownerOptionsFor,
+  revisionOptions,
+  statusOptionsFor,
+  unitArrows,
+} from './scheduleOptions';
 import ScheduleDatePicker from './ScheduleDatePicker.vue';
 import TimelineChart from './TimelineChart.vue';
-import { evaluatedAt, standalone } from './examples';
-import { loadExamplePage, type Scope } from './loadExamplePage';
 
-const props = defineProps<{ scope: Scope; showPersonalScope?: boolean }>();
+type Query = GetTimelineData['query'];
+type LoadMode = Exclude<RangeIntent['kind'], 'focus'>;
+
+const props = defineProps<{ scope: Query['scope']; showPersonalScope?: boolean }>();
 const scopes = { public: '活动日程', mine: '活动日程', managed: '本人管理日程', all: '全院日程' };
 const route = useRoute(),
   router = useRouter();
 const media = window.matchMedia('(max-width: 700px)');
 const mobile = ref(media.matches);
-const page = ref<TimelineActivityPage>();
-const loading = ref(false),
-  error = ref('');
 const detailHeading = ref<HTMLElement>();
 const managed = computed(() => props.scope === 'managed' || props.scope === 'all');
-const revision = computed(() =>
+const revision = computed<'working' | 'published'>(() =>
   managed.value && route.query.revision !== 'published' ? 'working' : 'published',
 );
 const unit = computed(() =>
@@ -41,19 +51,13 @@ const unit = computed(() =>
 const filterOpen = ref(false);
 const chart = computed(() => (route.query.view || (mobile.value ? 'list' : 'chart')) === 'chart');
 const date = computed(() =>
-  validDate(route.query.date) ? route.query.date : evaluatedAt.slice(0, 10),
+  validDate(route.query.date) ? route.query.date : localDate(Date.now()),
 );
 const range = computed(() => dateWindow(date.value, unit.value));
 const start = computed(() => range.value.start),
   end = computed(() => range.value.end);
 const periodLabel = computed(() => windowLabel(start.value, end.value, unit.value));
-const arrows = computed(() =>
-  unit.value === 'week'
-    ? ['上一周', '下一周']
-    : unit.value === 'month'
-      ? ['上个月', '下个月']
-      : ['前一天', '后一天'],
-);
+const arrows = computed(() => unitArrows(unit.value));
 const shift = (direction: number) => set('date', shiftDate(date.value, unit.value, direction));
 const filterCount = computed(
   () =>
@@ -66,34 +70,54 @@ const filterCount = computed(
       ...(managed.value ? ['owner', 'pending'] : []),
     ].filter((k) => route.query[k]).length,
 );
-const rows = computed(() =>
-  (page.value?.items ?? [])
-    .filter(
-      (r) =>
-        (!route.query.q ||
-          [r.title, r.activity_code].some((v) => v.includes(String(route.query.q)))) &&
-        (!route.query.campus || matchesCampus(r.campus, String(route.query.campus))) &&
-        (!route.query.phase || route.query.phase === r.registration_phase) &&
-        (!route.query.status || route.query.status === r.status) &&
-        (!route.query.ongoing || r.is_ongoing) &&
-        (!managed.value || !route.query.pending || r.has_pending_review) &&
-        (!managed.value || !route.query.owner || r.owner_display_name === route.query.owner),
-    )
-    .map((r) => ({
-      ...r,
-      segments: r.segments.filter(
-        (s) => Date.parse(s.starts_at) < end.value && Date.parse(s.ends_at) > start.value,
-      ),
-    }))
-    .filter((r) => r.segments.length),
+const filterValue = (name: string) => String(route.query[name] ?? '') || undefined;
+const query = computed<Query>(() => ({
+  scope: props.scope,
+  revision_scope: revision.value,
+  from: new Date(start.value).toISOString(),
+  to: new Date(end.value).toISOString(),
+  q: filterValue('q'),
+  campus: filterValue('campus'),
+  registration_phase: filterValue('phase') as Query['registration_phase'],
+  status: filterValue('status') as Query['status'],
+  is_ongoing: route.query.ongoing ? true : undefined,
+  owner_account_id: filterValue('owner'),
+  review_status: route.query.pending ? 'pending_review' : undefined,
+}));
+
+const pageSize = 20;
+const readPage = async (page: number) => {
+  const { data, response } = await getTimeline({
+    query: { ...query.value, page, page_size: pageSize },
+    throwOnError: true,
+  });
+  return { ...data.data, rangeKey: response.headers.get('X-Timeline-Range') };
+};
+
+const schedule = createScheduleRange(readPage, {
+  maxInFlight: 3,
+  pageSize,
+  window: () => ({
+    from: new Date(start.value).toISOString(),
+    to: new Date(end.value).toISOString(),
+  }),
+  selection: () => ({
+    item: typeof route.query.item === 'string' ? route.query.item : undefined,
+    slot: typeof route.query.slot === 'string' ? route.query.slot : undefined,
+  }),
+});
+const pages = schedule.pages;
+const rows = schedule.rows;
+const total = schedule.total;
+const hasMore = schedule.hasMore;
+const evaluatedAt = schedule.evaluatedAt;
+const loading = schedule.running;
+const selection = schedule.selection;
+const lastPage = computed(() => pages.value.at(-1));
+const selected = computed(() =>
+  selection.value.kind === 'kept' ? selection.value.activity : undefined,
 );
-const activity = computed(() => rows.value.find((r) => r.activity_id === route.query.item));
-const segment = computed(() =>
-  route.query.slot === undefined
-    ? activity.value?.segments[0]
-    : activity.value?.segments.find((s) => s.occurrence_key === route.query.slot),
-);
-const selected = computed(() => (segment.value ? activity.value : undefined));
+const segment = computed(() => (selection.value.kind === 'kept' ? selection.value.slot : undefined));
 const selectionMessage = ref('');
 const fullMobileDetail = computed(
   () => mobile.value && selected.value && route.query.detail !== 'summary',
@@ -105,54 +129,94 @@ const actionNotice = ref(
 );
 if (actionNotice.value)
   window.history.replaceState({ ...window.history.state, scheduleNotice: null }, '');
-watch([page, selected, () => route.query.item, () => route.query.slot], () => {
-  if (!page.value || !route.query.item || selected.value) return;
-  selectionMessage.value =
-    route.query.slot !== undefined ? '所选时段已移出当前窗口' : '所选活动已移出当前筛选。';
+
+const statusOptions = computed(() => statusOptionsFor(managed.value));
+const campusOptions = computed(() => campusOptionsFor(String(route.query.campus || '')));
+const ownerOptions = computed(() =>
+  ownerOptionsFor(lastPage.value, String(route.query.owner || '')),
+);
+const error = ref('');
+let lastMode: LoadMode = 'initial';
+let pendingRefresh = false;
+// 切换查询时立即撤下旧结果，等待中的新查询也计入读取状态。
+// 计数是响应式的：行按钮按它呈禁用态，与「加载更多」在读取中禁用一致。
+const switching = ref(0);
+
+function clearSelection() {
   void router.replace({
     query: { ...route.query, item: undefined, slot: undefined, detail: undefined },
   });
-});
-const revisionOptions = [
-  { value: 'working', label: '工作版本' },
-  { value: 'published', label: '获批版本' },
-];
-const availableStates = computed(() =>
-  Object.entries(statusLabels).filter(
-    ([key]) => managed.value || ['published', 'cancelled', 'completed'].includes(key),
-  ),
-);
-const statusOptions = computed(() => [
-  { value: '', label: '所有状态' },
-  ...availableStates.value.map(([value, label]) => ({ value, label })),
-]);
-const campusOptions = computed(() => {
-  const values = new Set(page.value?.items.map(r => r.campus).filter((c): c is string => !!c));
-  if (values.has(campuses[2])) {
-    const names = [...values].map(campusName);
-    for (const campus of campuses) if (!names.includes(campus)) values.add(campus);
-  }
-  return [{value:'', label:'所有校区'}, ...values];
-});
-const ownerOptions = computed(() => [
-  { value: '', label: '所有负责人' },
-  ...new Set(page.value?.items.map((r) => r.owner_display_name)),
-]);
-let request = 0;
-async function load() {
-  const n = ++request;
-  loading.value = true;
-  error.value = '';
-  page.value = undefined;
-  try {
-    const data = await loadExamplePage(props.scope, revision.value);
-    if (n === request) page.value = data;
-  } catch (e) {
-    if (n === request) error.value = e instanceof Error ? e.message : '读取活动范围失败';
-  } finally {
-    if (n === request) loading.value = false;
-  }
 }
+
+/** 读取成功后才判选中失效：页面只按 kind 映射说明并清空 URL，不自己解析时段键。 */
+function applySelection() {
+  const state = selection.value;
+  if (state.kind === 'kept' || state.kind === 'none') return;
+  selectionMessage.value =
+    state.kind === 'window-moved'
+      ? '所选时段已移出当前窗口'
+      : state.kind === 'schedule-updated'
+        ? '所选时段已随安排更新失效，已回到日程。'
+        : '所选活动已移出当前筛选。';
+  clearSelection();
+}
+
+/** 选中活动不在已加载范围且还有更多页时，按 §1.6 补读到它或范围耗尽。 */
+function needsBackfill() {
+  const item = typeof route.query.item === 'string' ? route.query.item : undefined;
+  return !!item && !rows.value.some((row) => row.activity_id === item) && hasMore.value;
+}
+
+async function load(mode: LoadMode) {
+  if (mode !== 'initial' && (loading.value || switching.value > 0)) return;
+  if (mode !== 'retry') lastMode = mode;
+  if (mode === 'initial') switching.value += 1;
+  error.value = '';
+  let refreshAfter = false;
+  try {
+    let outcome = await schedule.run({ kind: mode });
+    while (outcome.status === 'ok' && needsBackfill()) {
+      const item = String(route.query.item);
+      outcome = await schedule.run({ kind: 'focus', activityId: item });
+      if (route.query.item === item) break;
+    }
+    if (outcome.status === 'aborted') return;
+    if (outcome.status !== 'ok') {
+      pendingRefresh = false;
+      if (outcome.status === 'unstable') {
+        error.value = pages.value.length ? '状态待刷新，请重试' : '日程仍在变化，请重新读取';
+        return;
+      }
+      if (outcome.forbidden) {
+        if (route.query.item) clearSelection();
+        error.value = '当前身份无权查看该日程范围，请重新登录或返回。';
+      } else if (pages.value.length) {
+        error.value = lastMode === 'more' ? '未能加载更多，请重试' : '状态待刷新，请重试';
+      } else {
+        error.value = outcome.message;
+      }
+      return;
+    }
+    applySelection();
+    if (pendingRefresh) {
+      pendingRefresh = false;
+      refreshAfter = true;
+    }
+  } finally {
+    if (mode === 'initial') switching.value -= 1;
+  }
+  if (refreshAfter) void load('refresh');
+}
+
+const refresh = () => {
+  if (document.visibilityState !== 'visible') return;
+  if (loading.value) {
+    pendingRefresh = true;
+    return;
+  }
+  void load('refresh');
+};
+let timer: number | undefined;
 const listQuery = computed(() => ({
   q: route.query.q,
   phase: route.query.phase,
@@ -169,6 +233,8 @@ function set(key: string, value: string) {
 const valueOf = (event: Event) => (event.target as HTMLInputElement).value;
 let opener: Element | null = null;
 async function choose(r: TimelineActivity, s: TimelineItem) {
+  // 切换条件期间旧行仍在画面上，但不能据此改地址栏（DESIGN.md「切换期间…禁止交互」）。
+  if (switching.value > 0) return;
   selectionMessage.value = '';
   opener = document.activeElement;
   await router.push({
@@ -199,17 +265,36 @@ function keydown(e: KeyboardEvent) {
 function resized() {
   mobile.value = media.matches;
 }
-watch([() => props.scope, revision], load, { immediate: true });
+watch(
+  [() => JSON.stringify(query.value), () => props.scope, revision],
+  ([, scope, version], [, previousScope, previousVersion]) => {
+    selectionMessage.value = '';
+    if (previousScope && (scope !== previousScope || version !== previousVersion) && route.query.item)
+      clearSelection();
+    void load('initial');
+  },
+  { immediate: true },
+);
+watch([() => route.query.item, () => route.query.slot], () => {
+  if (!route.query.item || loading.value || error.value) return;
+  if (selection.value.kind === 'kept') return;
+  if (needsBackfill()) void load('refresh');
+  else applySelection();
+});
 onMounted(() => {
   media.addEventListener('change', resized);
   window.addEventListener('keydown', keydown);
-  window.addEventListener('focus', load);
+  window.addEventListener('focus', refresh);
+  document.addEventListener('visibilitychange', refresh);
+  timer = window.setInterval(refresh, 60000);
 });
 onUnmounted(() => {
-  request++;
+  schedule.cancel();
+  window.clearInterval(timer);
   media.removeEventListener('change', resized);
   window.removeEventListener('keydown', keydown);
-  window.removeEventListener('focus', load);
+  window.removeEventListener('focus', refresh);
+  document.removeEventListener('visibilitychange', refresh);
 });
 </script>
 
@@ -241,7 +326,7 @@ onUnmounted(() => {
     <header class="page-heading schedule-heading">
       <div class="page-title">
         <h1>{{ scopes[scope] }}</h1>
-        <span class="sample-label">示例日程 · 北京时间</span>
+        <span class="sample-label">北京时间</span>
       </div>
       <div v-if="!fullMobileDetail" class="view-actions">
         <div class="segmented view-switch" role="group" aria-label="显示方式">
@@ -363,7 +448,7 @@ onUnmounted(() => {
           <button class="icon-button" :aria-label="arrows[1]" :title="arrows[1]" @click="shift(1)">
             <UiIcon name="ArrowRight" />
           </button>
-          <button @click="set('date', localDate(Date.now()))">今天</button>
+          <button v-if="scope !== 'all'" @click="set('date', localDate(Date.now()))">今天</button>
         </div>
         <div class="scale-control">
           <span id="time-scale-label">时间刻度</span>
@@ -380,20 +465,35 @@ onUnmounted(() => {
         </div>
       </div>
     </template>
-    <p v-if="loading" class="notice" role="status">正在读取活动范围…</p>
-    <p v-else-if="error" role="alert">{{ error }} <button @click="load">重新读取</button></p>
+    <p v-if="loading && !pages.length" class="notice" role="status">正在读取活动日程…</p>
+    <p v-else-if="error && !pages.length" role="alert">
+      {{ error }} <button @click="load('initial')">重新读取</button>
+    </p>
     <template v-else>
+      <p v-if="error" class="notice" role="status">
+        {{ error }}
+        <button @click="load('retry')">重试</button>
+      </p>
       <p v-if="selectionMessage" role="status" class="notice">{{ selectionMessage }}</p>
       <div v-if="!rows.length" class="empty-state">
         <UiIcon name="Calendar" />
         <p>该窗口和筛选条件下没有活动</p>
       </div>
-      <div v-else class="schedule-view" :class="{ split: selected && !mobile }">
+      <div
+        v-else
+        class="schedule-view"
+        :class="{ split: selected && !mobile }"
+        :aria-busy="loading"
+      >
         <section v-show="!fullMobileDetail" aria-label="筛选结果">
           <div class="view-caption">
             <h2>活动计划</h2>
             <small
-              >{{ rows.length }} 项 · 示例状态时刻 {{ localTime(page!.state_evaluated_at) }}</small
+              >{{ total }} 项<template v-if="hasMore"
+                >（已显示 {{ rows.length }}）</template
+              ><template v-if="scope !== 'all'">
+                · 状态时刻 {{ localTime(evaluatedAt) }}</template
+              ></small
             >
           </div>
           <div v-show="chart">
@@ -402,7 +502,7 @@ onUnmounted(() => {
               :unit="unit"
               :start="start"
               :end="end"
-              :now="managed ? undefined : Date.parse(page!.state_evaluated_at)"
+              :now="managed ? undefined : Date.parse(evaluatedAt)"
               :selected="segment?.occurrence_key"
               @choose="choose"
             />
@@ -413,18 +513,24 @@ onUnmounted(() => {
               :key="r.activity_id"
               :class="{ picked: r.activity_id === selected?.activity_id }"
             >
-              <button class="row-button" @click="choose(r, r.segments[0])">
+              <button
+                class="row-button"
+                :disabled="switching > 0"
+                @click="choose(r, r.segments[0])"
+              >
                 <i :style="{ background: timelineColors[r.color_index] }" />{{ r.title }}
               </button>
               <p class="meta-line">
                 {{ statusLabels[r.status] }} · {{ phaseLabels[r.registration_phase]
-                }}{{ r.is_ongoing ? ' · 进行中' : '' }}{{ r.has_pending_review ? ' · 待审核' : '' }}
+                }}{{ r.is_ongoing ? ' · 进行中' : '' }}{{ r.has_pending_review ? ' · 待审核' : ''
+                }}{{ r.has_planned_overlap ? ' · 与本人其他活动时间重叠' : '' }}
               </p>
               <div class="slot-list">
                 <button
                   v-for="s in r.segments"
                   :key="s.occurrence_key"
                   class="compact"
+                  :disabled="switching > 0"
                   @click="choose(r, s)"
                 >
                   <UiIcon name="Clock" />{{ localTime(s.starts_at) }} – {{ localTime(s.ends_at) }}
@@ -432,6 +538,11 @@ onUnmounted(() => {
               </div>
             </li>
           </ul>
+          <div v-if="hasMore" class="page-actions schedule-more">
+            <button :disabled="loading" @click="load('more')">
+              加载更多（剩余 {{ total - rows.length }} 项）
+            </button>
+          </div>
         </section>
         <aside v-if="selected && segment" class="schedule-detail" aria-label="时段详情">
           <div v-if="!mobile || fullMobileDetail" class="detail-bar">
@@ -485,11 +596,15 @@ onUnmounted(() => {
             <template
               v-if="
                 selected.is_ongoing &&
-                Date.parse(segment.starts_at) <= Date.parse(page!.state_evaluated_at) &&
-                Date.parse(page!.state_evaluated_at) < Date.parse(segment.ends_at)
+                Date.parse(segment.starts_at) <= Date.parse(evaluatedAt) &&
+                Date.parse(evaluatedAt) < Date.parse(segment.ends_at)
               "
               ><dt>所选时段</dt>
               <dd>进行中</dd></template
+            >
+            <template v-if="segment.has_planned_overlap"
+              ><dt>计划提示</dt>
+              <dd>与本人其他已录取活动的计划时段重叠</dd></template
             >
             <template v-if="managed"
               ><dt>所选版本</dt>
@@ -524,7 +639,7 @@ onUnmounted(() => {
             /></RouterLink>
             <RouterLink
               class="button primary"
-              v-if="(scope === 'public' || scope === 'mine') && selected.activity_id !== standalone"
+              v-if="scope === 'public' || scope === 'mine'"
               :to="{
                 path: '/activities/' + selected.activity_id,
                 state: { scheduleReturn: route.fullPath },
@@ -637,6 +752,9 @@ onUnmounted(() => {
 .view-caption small {
   color: var(--muted);
 }
+.schedule-more {
+  margin-top: 12px;
+}
 .split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 26%);
@@ -735,6 +853,9 @@ onUnmounted(() => {
   font-size: 16px;
   font-weight: 650;
   color: var(--ink);
+}
+.schedule-list .row-button:disabled {
+  color: #647186;
 }
 .row-button i {
   width: 5px;
