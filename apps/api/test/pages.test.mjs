@@ -546,7 +546,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       }
       await helper.setViewportSize({ width: 1440, height: 900 });
       await notice.click();
-      await visible(helper.locator('.notice-detail').getByText('已读未确认', { exact: true }));
+      const openedNotice = helper.getByRole('heading', { name: '请带志愿者证件', exact: true }).locator('..');
+      await visible(openedNotice.getByText('已读未确认', { exact: true }));
       await visible(badge.getByText('1', { exact: true }));
       await link(helper, '返回通知').click();
       await link(helper, '全部 2').click();
