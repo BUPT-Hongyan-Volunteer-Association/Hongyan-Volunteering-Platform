@@ -71,7 +71,9 @@ defineExpose({ refresh, clear });
 </script>
 <template>
   <section class="ledger">
-    <div class="page-title"><h1>{{ title }}</h1></div>
+    <div class="page-title">
+      <component :is="scope.type === 'activity_hours' ? 'h2' : 'h1'">{{ title }}</component>
+    </div>
     <slot name="links" />
     <form class="hour-filters" @submit.prevent="applyFilters">
       <div>起始日期<ActivityDateField label="起始日期" v-model="from" /></div>
