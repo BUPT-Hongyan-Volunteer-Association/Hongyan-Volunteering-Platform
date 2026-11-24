@@ -189,7 +189,6 @@ async function reloadReceipts() {
             <button :disabled="loading" @click="reloadReceipts">刷新回执</button>
           <ExportButton
             v-if="current"
-            :key="current.id + ':' + followUp"
             :input="receiptExportInput"
             :disabled="loading"
             @recheck="refreshReceipts"

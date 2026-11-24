@@ -91,6 +91,13 @@ export async function hourRecordViews(tx: Tx, records: Parameters<typeof hourRec
   return records.map((row) => hourRecordView(row, title(row.activity_id, row.origin_schedule_revision)));
 }
 
+export function ledgerDateRange({ from_date, to_date }: HourLedgerFilters) {
+  const start = from_date === undefined ? undefined : parseCalendarDate(from_date) ?? invalid('from_date', '请选择有效的起始日期');
+  const end = to_date === undefined ? undefined : parseCalendarDate(to_date) ?? invalid('to_date', '请选择有效的结束日期');
+  if (start && end && start > end) invalid('to_date', '结束日期须等于或晚于起始日期');
+  return { gte: start, lte: end };
+}
+
 // 页面和 #18 导出传入各自的 RepeatableRead 事务。省略分页即读取整个筛选范围。
 export async function readHourLedger(
   tx: Tx, actor: Actor, scope: HourLedgerScope, filters: HourLedgerFilters, page?: ReturnType<typeof pagination>,
@@ -105,12 +112,8 @@ export async function readHourLedgerWithScope(
   filters: HourLedgerFilters,
   page?: ReturnType<typeof pagination>,
 ) {
-  const { from_date, to_date, include_history } = filters;
-  const start = from_date === undefined ? undefined : parseCalendarDate(from_date) ?? invalid('from_date', '请选择有效的起始日期');
-  const end = to_date === undefined ? undefined : parseCalendarDate(to_date) ?? invalid('to_date', '请选择有效的结束日期');
-  if (start && end && start > end) invalid('to_date', '结束日期须等于或晚于起始日期');
-  const where = { ...scopeWhere, ...approvedOrigin, service_date: { gte: start, lte: end } };
-  const visible = { ...where, ...(!include_history && { status: 'current' }) };
+  const where = { ...scopeWhere, ...approvedOrigin, service_date: ledgerDateRange(filters) };
+  const visible = { ...where, ...(!filters.include_history && { status: 'current' }) };
   const records = await tx.hourRecord.findMany({
     where: visible, include: hourRecordInclude,
     ...(page && { skip: page.skip, take: page.page_size }),

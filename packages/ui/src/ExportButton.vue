@@ -26,6 +26,7 @@ let serial = 0;
 onScopeDispose(() => { active = false; });
 watch(() => JSON.stringify(props.input), () => {
   serial++;
+  command.confirmed();
   job.value = undefined;
   error.value = '';
   busy.value = false;
@@ -66,8 +67,10 @@ async function start() {
   busy.value = true; error.value = ''; job.value = undefined;
   try {
     const { data } = await createExport({ body, throwOnError: true, headers: command.headers('create_export', body.type, body) });
-    command.confirmed();
-    if (active && current === serial) job.value = data.data;
+    if (active && current === serial) {
+      command.confirmed();
+      job.value = data.data;
+    }
   } catch (reason) {
     if (active && current === serial) report(reason);
   } finally { if (active && current === serial) busy.value = false; }
@@ -112,7 +115,7 @@ async function download() {
     if (!active || current !== serial) return;
     if (reason instanceof ApiError && reason.status === 409) {
       await readStatus();
-      if (job.value?.status !== 'ready') return;
+      if (!active || current !== serial || job.value?.status !== 'ready') return;
     }
     report(reason);
   }

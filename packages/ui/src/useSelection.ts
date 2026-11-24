@@ -18,14 +18,8 @@ export function useIdSelection(pageIdsSource: MaybeRefOrGetter<string[]>) {
     }
     selected.value = next;
   }
-  function toggleStudent(id: string, checked: boolean) {
-    const next = new Set(selected.value);
-    if (checked) next.add(id);
-    else next.delete(id);
-    selected.value = next;
-  }
   function clear() {
     selected.value.clear();
   }
-  return { selected, pageIds, pageChecked, pageIndeterminate, togglePage, toggleStudent, clear };
+  return { selected, pageIds, pageChecked, pageIndeterminate, togglePage, clear };
 }

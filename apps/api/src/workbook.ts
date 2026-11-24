@@ -12,12 +12,13 @@ function escapeText(value: string) {
   });
   return controls
     .join('')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
     .replaceAll('\r', '')
     .replaceAll('\n', ' ')
-    .slice(0, 32767);
+    .slice(0, 32767)
+    .replace(/[\uD800-\uDFFF\uFFFE\uFFFF]/gu, '�')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
 function columnName(index: number) {

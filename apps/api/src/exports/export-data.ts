@@ -7,7 +7,7 @@ import { rosterOrderBy, rosterWhere } from '../registrations/registration.js';
 import { studentWhere } from '../students/query.js';
 import type { Tx } from '../activities/workflow.js';
 import { denied, invalid, invisible } from '../http.js';
-import { approvedOrigin, authorizeHourLedger, readHourLedgerWithScope } from '../hours/read-ledger.js';
+import { approvedOrigin, authorizeHourLedger, ledgerDateRange, readHourLedgerWithScope } from '../hours/read-ledger.js';
 import {
   followUpEmpty,
   receiptWhere,
@@ -285,15 +285,18 @@ async function selectedSummaryContent(tx: Tx, scope: StoredScope): Promise<Expor
     select: { id: true, student_no: true, account: { select: { display_name: true } } },
   });
   if (students.length !== ids.length) return invisible();
-  const ledger = await readHourLedgerWithScope(tx, { activity_id: scope.activity_id! }, {
-    from_date: scope.from_date,
-    to_date: scope.to_date,
-    include_history: false,
+  const totals = await tx.hourRecord.groupBy({
+    by: ['student_id'],
+    where: {
+      ...approvedOrigin,
+      activity_id: scope.activity_id!,
+      student_id: { in: ids },
+      status: 'current',
+      service_date: ledgerDateRange(scope),
+    },
+    _sum: { hours: true },
   });
-  const sums = new Map<string, number>();
-  for (const row of ledger.items)
-    if (ids.includes(row.student_id))
-      sums.set(row.student_id, (sums.get(row.student_id) ?? 0) + Number(row.credited_hours));
+  const sums = new Map(totals.map((row) => [row.student_id, row._sum.hours?.toNumber() ?? 0]));
   return {
     fileName: '活动时长汇总_' + fileNamePart(activity.activity_code) + '_' + workbookDate() + '.xlsx',
     sheet: {
@@ -305,7 +308,7 @@ async function selectedSummaryContent(tx: Tx, scope: StoredScope): Promise<Expor
         .map((student) => [
           student.account.display_name,
           student.student_no,
-          Number((sums.get(student.id) ?? 0).toFixed(1)),
+          sums.get(student.id) ?? 0,
         ]),
     },
   };

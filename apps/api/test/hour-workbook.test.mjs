@@ -1,10 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { unzipSync, zipSync, strToU8, strFromU8 } from 'fflate';
+import { errorWorkbook } from '../dist/hours/error-report.js';
+import { readXlsxSheet } from '../dist/students/xlsx.js';
 import { parseHourWorkbook } from '../dist/hours/workbook.js';
 import { asStrict, cell, headers, row, sheet, template, workbook } from './hour-workbook-fixture.mjs';
 
 const parse = (buffer) => parseHourWorkbook('合成.xlsx', buffer);
+
+test('错误报告按文本长度截断，保留 XML 转义字符', () => {
+  const expected = '甲'.repeat(32766) + '&';
+  const file = errorWorkbook([{ field: '备注', message: expected + '乙' }]);
+  const cells = readXlsxSheet(Buffer.from(file), '校验错误').rows[1].cells;
+  assert.equal(cells.find((cell) => cell.column === 2).text, expected);
+});
 
 test('实际空白模板只解析时长录入，样式行不计数', async () => {
   const result = await parse(template);

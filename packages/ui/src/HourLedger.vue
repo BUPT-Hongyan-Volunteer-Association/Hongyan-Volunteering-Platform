@@ -48,9 +48,8 @@ const {
   pageChecked,
   pageIndeterminate,
   togglePage,
-  toggleStudent,
   clear: clearSelection,
-} = useIdSelection(computed(() => (data.value?.items ?? []).map((row) => row.student_id)));
+} = useIdSelection(() => (data.value?.items ?? []).map((row) => row.student_id));
 const summaryExportInput = computed(() => ({
   type: 'activity_hours' as const,
   activity_id: props.scope.type === 'activity_hours' ? props.scope.activity_id : '',
@@ -65,7 +64,7 @@ watch(
     () => filters.value.include_history,
     () => props.scope.type === 'activity_hours' ? props.scope.activity_id : '',
   ],
-  () => clearSelection(),
+  clearSelection,
 );
 const statuses: Record<HourRecord['status'], string> = { current: '有效', superseded: '已更正', voided: '已撤销' };
 defineExpose({ refresh, clear });
@@ -90,7 +89,6 @@ defineExpose({ refresh, clear });
       <template v-if="scope.type === 'activity_hours'">
         <span class="meta-line">已选 {{ selected.size }} 名学生</span>
         <ExportButton
-          :key="'detail-' + JSON.stringify(exportInput)"
           :input="exportInput"
           :disabled="loading || !data"
           create-label="导出全部明细"
@@ -98,7 +96,6 @@ defineExpose({ refresh, clear });
           @recheck="refresh(false)"
         />
         <ExportButton
-          :key="'summary-' + JSON.stringify(summaryExportInput)"
           :input="summaryExportInput"
           :disabled="loading || !data || !selected.size"
           create-label="导出所选学生汇总"
@@ -106,7 +103,7 @@ defineExpose({ refresh, clear });
           @recheck="refresh(false)"
         />
       </template>
-      <ExportButton v-else :key="JSON.stringify(exportInput)" :input="exportInput" :disabled="loading || !data" @recheck="refresh(false)" />
+      <ExportButton v-else :input="exportInput" :disabled="loading || !data" @recheck="refresh(false)" />
     </div>
     <template v-if="data">
       <p v-if="!data.items.length">当前条件下没有时长记录。</p>
@@ -133,8 +130,8 @@ defineExpose({ refresh, clear });
               <input
                 type="checkbox"
                 :aria-label="'选择学生 ' + row.student_no"
-                :checked="selected.has(row.student_id)"
-                @change="toggleStudent(row.student_id, ($event.target as HTMLInputElement).checked)"
+                :value="row.student_id"
+                v-model="selected"
               />
             </td>
             <td v-if="scope.type === 'activity_hours'" data-label="学生">{{ row.student_name }}<small>{{ row.student_no }}</small></td>

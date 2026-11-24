@@ -38,9 +38,8 @@ const {
   pageChecked,
   pageIndeterminate,
   togglePage,
-  toggleStudent,
   clear: clearSelection,
-} = useIdSelection(computed(() => rows.value.map((row) => row.id)));
+} = useIdSelection(() => rows.value.map((row) => row.id));
 const exportInput = computed(() => ({
   type: 'admin_students' as const,
   q: route.query.q ? String(route.query.q) : undefined,
@@ -122,7 +121,7 @@ watch(
     () => route.query.grade,
     () => route.query.status,
   ],
-  () => clearSelection(),
+  clearSelection,
 );
 function goPage(next: number) {
   void router.push({ query: { ...route.query, page: next } });
@@ -136,9 +135,8 @@ function goPage(next: number) {
       <span class="state-chip neutral">共 {{ total }} 人</span>
     </div>
     <div class="page-actions">
-      <ExportButton :key="JSON.stringify(exportInput)" :input="exportInput" :disabled="loading" @recheck="load" />
+      <ExportButton :input="exportInput" :disabled="loading" @recheck="load" />
       <ExportButton
-        :key="JSON.stringify(selectedExportInput)"
         :input="selectedExportInput"
         :disabled="loading || !selected.size"
         :create-label="'导出所选学生' + (selected.size ? '（' + selected.size + '）' : '')"
@@ -194,8 +192,8 @@ function goPage(next: number) {
               <input
                 type="checkbox"
                 :aria-label="'选择学生 ' + student.student_no"
-                :checked="selected.has(student.id)"
-                @change="toggleStudent(student.id, ($event.target as HTMLInputElement).checked)"
+                :value="student.id"
+                v-model="selected"
               />
             </td>
             <th scope="row">{{ student.student_no }}</th>
