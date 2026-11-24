@@ -11,6 +11,8 @@ import {
   type ActivityRosterPage,
 } from '@hongyan/contracts';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
+import ExportButton from '@hongyan/ui/ExportButton.vue';
+import { useIdSelection } from '@hongyan/ui/useSelection';
 import { registrationLabels } from './labels';
 import Pager from '@hongyan/ui/Pager.vue';
 const props = defineProps<{ writesPaused: boolean }>();
@@ -18,7 +20,6 @@ const route = useRoute(),
   q = ref(''),
   state = ref<Registration['status'] | ''>('submitted'),
   page = ref(1),
-  selected = ref(new Set<string>()),
   notice = ref(''),
   inspected = ref<Registration>();
 const time = new Intl.DateTimeFormat('zh-CN', {
@@ -33,11 +34,25 @@ const filters = ['submitted', 'accepted', 'waitlisted', ''] as const;
 const lessCommon = ['rejected', 'withdrawn', 'exited'] as const;
 const labels = { ...registrationLabels, submitted: '待处理', waitlisted: '候补' };
 const result = ref<ActivityRosterPage>();
+const { selected, pageChecked, pageIndeterminate, togglePage } = useIdSelection(
+  () => (result.value?.items ?? []).map((row) => row.id),
+);
 const readError = ref('');
 const writeError = ref('');
 const saving = ref(false);
 const refreshRequired = ref(false);
 const command = createCommand();
+const filterExportInput = computed(() => ({
+  type: 'activity_roster' as const,
+  activity_id: String(route.params.id),
+  ...(q.value.trim() && { q: q.value.trim() }),
+  ...(state.value && { registration_status: state.value }),
+}));
+const selectedExportInput = computed(() => ({
+  type: 'activity_roster' as const,
+  activity_id: String(route.params.id),
+  registration_ids: [...selected.value],
+}));
 let serial = 0;
 let mounted = true;
 async function load() {
@@ -124,17 +139,12 @@ function clear() {
   selected.value.clear();
   page.value = 1;
 }
-watch([q, state], clear, { flush: 'sync' });
+watch([q, state, () => route.params.id], clear, { flush: 'sync' });
 watch([() => route.params.id, q, state, page], load, { immediate: true });
 onUnmounted(() => {
   mounted = false;
   serial++;
 });
-function toggleAll(checked: boolean) {
-  for (const r of result.value?.items ?? [])
-    if (checked) selected.value.add(r.id);
-    else selected.value.delete(r.id);
-}
 </script>
 <template>
   <div class="roster-heading">
@@ -177,10 +187,21 @@ function toggleAll(checked: boolean) {
     <button disabled class="primary" aria-label="录取所选（待接入）" aria-describedby="roster-note">
       <UiIcon name="Check" />录取所选<span v-if="selected.size">（{{ selected.size }}）</span>
     </button>
-    <button disabled aria-label="设为候补（待接入）" aria-describedby="roster-note">设为候补</button
-    ><button disabled aria-label="导出名单（待接入）" aria-describedby="roster-note">
-      <UiIcon name="Download" />导出名单
-    </button>
+    <button disabled aria-label="设为候补（待接入）" aria-describedby="roster-note">设为候补</button>
+    <ExportButton
+      :input="filterExportInput"
+      :disabled="saving || !!readError"
+      create-label="导出筛选结果"
+      download-label="下载名单文件"
+      @recheck="load"
+    />
+    <ExportButton
+      :input="selectedExportInput"
+      :disabled="!selected.size || saving"
+      :create-label="'导出所选名单' + (selected.size ? '（' + selected.size + '）' : '')"
+      download-label="下载所选名单"
+      @recheck="load"
+    />
   </div>
   <p v-if="notice" role="status">{{ notice }}</p>
   <p v-if="writeError" role="alert">
@@ -207,14 +228,9 @@ function toggleAll(checked: boolean) {
                 <input
                   type="checkbox"
                   aria-label="选择本页"
-                  :indeterminate="
-                    result.items.some((r) => selected.has(r.id)) &&
-                    !result.items.every((r) => selected.has(r.id))
-                  "
-                  :checked="
-                    result.items.length > 0 && result.items.every((r) => selected.has(r.id))
-                  "
-                  @change="toggleAll(($event.target as HTMLInputElement).checked)"
+                  :indeterminate="pageIndeterminate"
+                  :checked="pageChecked"
+                  @change="togglePage(($event.target as HTMLInputElement).checked)"
               /></label>
             </th>
             <th>姓名</th>
@@ -254,7 +270,7 @@ function toggleAll(checked: boolean) {
     <div class="roster-pager">
       <div>
         <small>本页 {{ result.items.length }} 人，共 {{ result.total }} 人</small
-        ><small id="roster-note">批量录取、候补及导出待接入</small>
+        ><small id="roster-note">批量录取、候补待接入</small>
       </div>
       <Pager
         :page="page"

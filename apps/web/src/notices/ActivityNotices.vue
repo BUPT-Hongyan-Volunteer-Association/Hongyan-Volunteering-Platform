@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import './notices.css';
 import { computed } from 'vue';
 import PublishNotice from './PublishNotice.vue';
 import { useRoute, useRouter } from 'vue-router';
-import { listActivityNotices, listNoticeReceipts } from '@hongyan/contracts';
+import { listActivityNotices, listNoticeReceipts, type ExportInput } from '@hongyan/contracts';
 import RecordWorkspace from '@hongyan/ui/RecordWorkspace.vue';
 import Pager from '@hongyan/ui/Pager.vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
+import ExportButton from '@hongyan/ui/ExportButton.vue';
 import { localDateTime } from '@hongyan/ui/activityDisplay';
 import { pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 
@@ -100,6 +102,11 @@ const {
   () => void refresh(),
 );
 const receipts = computed(() => receiptPage.value?.rows);
+const receiptExportInput = computed<ExportInput>(() => ({
+  type: 'notice_receipts',
+  notice_id: current.value?.id ?? '',
+  follow_up_only: followUp.value === '1',
+}));
 async function reloadReceipts() {
   await refresh(false);
   if (current.value) await refreshReceipts();
@@ -181,6 +188,12 @@ async function reloadReceipts() {
               ]"
             />
             <button :disabled="loading" @click="reloadReceipts">刷新回执</button>
+          <ExportButton
+            v-if="current"
+            :input="receiptExportInput"
+            :disabled="loading"
+            @recheck="refreshReceipts"
+          />
           </div>
           <p v-if="receiptError" role="alert">{{ receiptError }}</p>
           <p v-else-if="!receipts" role="status">正在读取回执…</p>
@@ -227,7 +240,7 @@ async function reloadReceipts() {
             />
 
           </template>
-          <p v-if="!current.is_current" class="hint">
+          <p v-if="!current.is_current" class="notice-hint">
             这条通知已被后续版本替代，回执仅作为历史记录保留。
           </p>
         </section>
@@ -238,27 +251,12 @@ async function reloadReceipts() {
 </template>
 
 <style scoped>
-.notice-queue a {
-  flex-wrap: wrap;
-}
-.notice-queue a[aria-current] {
-  background: var(--brand-tint);
-  box-shadow: inset 3px 0 var(--brand);
-}
 .receipt-scroll {
   overflow-x: auto;
 }
-.notice-body {
-  white-space: pre-line;
-  line-height: 1.8;
-  margin: 16px 0;
-  /* 通知正文可能带长链接或长编号，必须允许在任意位置断行，否则会撑破页面。 */
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
 .receipt-summary {
   margin: 4px 0 12px;
-  color: var(--text-muted, #666);
+  color: #666;
 }
 .row-actions :deep(.platform-select) {
   --select-width: 11rem;
@@ -279,11 +277,7 @@ async function reloadReceipts() {
 .receipt-table td {
   text-align: left;
   padding: 8px 6px;
-  border-bottom: 1px solid var(--border, #e5e5e5);
+  border-bottom: 1px solid #e5e5e5;
   white-space: nowrap;
-}
-.hint {
-  color: var(--text-muted, #666);
-  margin-top: 12px;
 }
 </style>

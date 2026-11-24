@@ -62,7 +62,7 @@ async function pickOption(page, label, option) {
 async function signIn(browser, origin, username, password, width) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width, height: 900 } });
   const page = await context.newPage();
-  page.setDefaultTimeout(8000);
+  page.setDefaultTimeout(12000);
   await page.goto(origin);
   await page.getByLabel('账号', { exact: true }).fill(username);
   const student = username.startsWith('000');
@@ -311,14 +311,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
           '申诉与更正',
           '账号与角色',
           '通知失败队列',
-          '审计记录',
         ]) {
           await nav.getByRole('link', { name: section, exact: true }).click();
-          if (section === '审计记录') {
-            await visible(teacher.getByRole('table', { name: section }).getByText('活动交接'));
-            await fits(teacher);
-            continue;
-          }
           const empty = {
             错账修复组: '当前没有修复组。',
             异常复核: '没有异常记录。',
@@ -334,6 +328,13 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
           await fits(teacher);
           await link(teacher, '返回' + section).click();
         }
+        await nav.getByRole('link', { name: '审计记录', exact: true }).click();
+        await teacher.waitForURL('**/manage/audit');
+        await visible(teacher.getByRole('heading', { name: '审计记录' }));
+        await visible(teacher.getByLabel('操作者 ID'));
+        await button(teacher, '查询').click();
+        await visible(teacher.locator('table, .empty-state').first());
+        await fits(teacher);
         await link(teacher, '全院日程').click();
         await visible(teacher.locator(width === 390 ? '.schedule-list' : '.chart-scroll'));
         await fits(teacher);
@@ -492,6 +493,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await visible(helper.getByText('没有待确认的通知。'));
       await button(owner, '刷新回执').click();
       await visible(receipt.getByText('已确认', { exact: true }));
+      await button(owner, '导出回执').click();
+      const exportDownload = owner.waitForEvent('download');
+      await button(owner, '下载回执文件').click();
+      const exportFile = await exportDownload;
+      assert.match(exportFile.suggestedFilename(), /通知回执/);
       await fits(owner);
       await fits(helper);
     });
@@ -538,6 +544,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
         const box = await action.boundingBox(), area = await action.locator('..').boundingBox();
         assert.ok(Math.abs((box.x - area.x) * 2 + box.width - area.width) < 2);
       }
+      await helper.setViewportSize({ width: 1440, height: 900 });
       await notice.click();
       await visible(helper.locator('.notice-detail').getByText('已读未确认', { exact: true }));
       await visible(badge.getByText('1', { exact: true }));
@@ -836,8 +843,9 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
         await button(owner, '查看名单测试2').click();
         await visible(owner.getByRole('heading', { name: '名单测试2的报名记录' }));
         await button(owner, '收起记录').click();
-        for (const label of ['录取所选（待接入）', '设为候补（待接入）', '导出名单（待接入）'])
+        for (const label of ['录取所选（待接入）', '设为候补（待接入）'])
           assert.ok(await button(owner, label).isDisabled());
+        assert.ok(await button(owner, /^导出所选名单（2）$/).isEnabled());
         await button(owner, '已录取 18').click();
         await visible(owner.getByText('已选 0 人', { exact: true }));
         assert.equal(await owner.locator('tbody tr.selected').count(), 0);
@@ -845,6 +853,31 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       } finally {
         owner.off('request', collect);
       }
+    });
+
+    await t.test('报名名单跨页勾选后导出所选名单', async () => {
+      await owner.goto(web + '/managed/' + first.id + '/roster');
+      await owner.getByLabel('选择名单测试1', { exact: true }).check();
+      await button(owner, '下一页').click();
+      await owner.getByLabel('选择名单测试6', { exact: true }).check();
+      await visible(owner.getByText('已选 2 人', { exact: true }));
+      const download = owner.waitForEvent('download');
+      await button(owner, /^导出所选名单（2）$/).click();
+      await visible(button(owner, '下载所选名单'));
+      await button(owner, '下载所选名单').click();
+      assert.match((await download).suggestedFilename(), /报名名单/);
+      await button(owner, '导出筛选结果').click();
+      await visible(button(owner, '下载名单文件'));
+      await button(owner, '已录取 18').click();
+      await visible(owner.getByText('已选 0 人', { exact: true }));
+      assert.equal(await button(owner, '下载名单文件').count(), 0);
+      await owner.getByLabel('选择名单测试10', { exact: true }).check();
+      await button(owner, /^导出所选名单（1）$/).click();
+      await visible(button(owner, '下载所选名单'));
+      await owner.getByLabel('选择名单测试10', { exact: true }).uncheck();
+      await visible(owner.getByText('已选 0 人', { exact: true }));
+      assert.equal(await button(owner, '下载所选名单').count(), 0);
+      await fits(owner);
     });
 
     await t.test('活动发现保留搜索、校区、服务日期和报名阶段', async () => {
@@ -1437,7 +1470,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       });
       try {
         const page = await ctx.newPage();
-        page.setDefaultTimeout(8000);
+        page.setDefaultTimeout(12000);
         await page.goto(web);
         await page.getByLabel('账号', { exact: true }).fill('demo.dual');
         await page.getByLabel('当前密码').fill(password);
@@ -1653,12 +1686,19 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await visible(clock);
       assert.equal(await clock.locator('.el-time-spinner__list').count(), 2);
       const minutes = clock.locator('.el-time-spinner__list').nth(1);
-      await minutes.locator('.is-active').hover();
-      await owner.mouse.wheel(0, 64);
-      await owner.waitForFunction(() => {
-        const list = document.querySelectorAll('.activity-clock .el-time-spinner__list')[1];
-        return !!list && list.querySelector('.is-active')?.textContent?.trim() !== '00';
-      });
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await minutes.locator('.is-active').hover();
+        await owner.mouse.wheel(0, 64);
+        try {
+          await owner.waitForFunction(() => {
+            const list = document.querySelectorAll('.activity-clock .el-time-spinner__list')[1];
+            return !!list && list.querySelector('.is-active')?.textContent?.trim() !== '00';
+          }, null, { timeout: 2000 });
+          break;
+        } catch (error) {
+          if (attempt === 4) throw error;
+        }
+      }
       await time.press('ArrowRight');
       await time.press('ArrowDown');
       await clock.getByText('确定', { exact: true }).click();

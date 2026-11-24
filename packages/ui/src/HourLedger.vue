@@ -3,10 +3,11 @@ import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { listActivityHours, listMyHours, listStudentHours, type HourRecord } from '@hongyan/contracts';
 import ActivityDateField from './ActivityDateField.vue';
-import HourExportButton from './HourExportButton.vue';
+import ExportButton from './ExportButton.vue';
 import Pager from './Pager.vue';
 import { beijing } from './hourDisplay';
 import { pageNumber, usePageRead } from './usePageRead';
+import { useIdSelection } from './useSelection';
 
 const props = defineProps<{ scope: { type: 'my_hours' } | { type: 'activity_hours'; activity_id: string }
   | { type: 'admin_student_hours'; student_id: string }; title: string; batchBase?: string; groupBase?: string }>();
@@ -41,6 +42,30 @@ const { data, error, loading, refresh, clear } = usePageRead(
     return (await listStudentHours({ path: { id: scope.student_id }, ...options })).data.data;
   }, () => emit('denied'),
 );
+const {
+  selected,
+  pageIds: pageStudents,
+  pageChecked,
+  pageIndeterminate,
+  togglePage,
+  clear: clearSelection,
+} = useIdSelection(() => (data.value?.items ?? []).map((row) => row.student_id));
+const summaryExportInput = computed(() => ({
+  type: 'activity_hours' as const,
+  activity_id: props.scope.type === 'activity_hours' ? props.scope.activity_id : '',
+  from_date: filters.value.from_date,
+  to_date: filters.value.to_date,
+  student_ids: [...selected.value],
+}));
+watch(
+  [
+    () => filters.value.from_date,
+    () => filters.value.to_date,
+    () => filters.value.include_history,
+    () => props.scope.type === 'activity_hours' ? props.scope.activity_id : '',
+  ],
+  clearSelection,
+);
 const statuses: Record<HourRecord['status'], string> = { current: '有效', superseded: '已更正', voided: '已撤销' };
 defineExpose({ refresh, clear });
 </script>
@@ -61,19 +86,54 @@ defineExpose({ refresh, clear });
         <p>筛选范围内累计 <strong>{{ data.total_hours }} 小时</strong></p>
         <span class="meta-line">共 {{ data.total }} 条记录</span>
       </template>
-      <HourExportButton :key="JSON.stringify(exportInput)" :input="exportInput" :disabled="loading || !data" @recheck="refresh(false)" />
+      <template v-if="scope.type === 'activity_hours'">
+        <span class="meta-line">已选 {{ selected.size }} 名学生</span>
+        <ExportButton
+          :input="exportInput"
+          :disabled="loading || !data"
+          create-label="导出全部明细"
+          download-label="下载全部明细"
+          @recheck="refresh(false)"
+        />
+        <ExportButton
+          :input="summaryExportInput"
+          :disabled="loading || !data || !selected.size"
+          create-label="导出所选学生汇总"
+          download-label="下载所选学生汇总"
+          @recheck="refresh(false)"
+        />
+      </template>
+      <ExportButton v-else :input="exportInput" :disabled="loading || !data" @recheck="refresh(false)" />
     </div>
     <template v-if="data">
       <p v-if="!data.items.length">当前条件下没有时长记录。</p>
       <div v-else class="scroll-table ledger-table">
         <table aria-label="时长明细">
           <thead><tr>
+            <th v-if="scope.type === 'activity_hours'" class="select-cell">
+              <input
+                v-if="pageStudents.length"
+                type="checkbox"
+                aria-label="选择本页学生"
+                :checked="pageChecked"
+                :indeterminate="pageIndeterminate"
+                @change="togglePage(($event.target as HTMLInputElement).checked)"
+              />
+            </th>
             <th v-if="scope.type === 'activity_hours'">学生</th>
             <th scope="col">活动</th><th scope="col">服务日期</th><th scope="col">时长</th>
             <th scope="col">状态</th><th scope="col">账务来源</th>
             <th v-if="$slots.actions" scope="col">操作</th>
           </tr></thead>
           <tbody><tr v-for="row in data.items" :key="row.id" :class="{ selected: route.query.record === row.id }">
+            <td v-if="scope.type === 'activity_hours'" class="select-cell">
+              <input
+                type="checkbox"
+                :aria-label="'选择学生 ' + row.student_no"
+                :value="row.student_id"
+                v-model="selected"
+              />
+            </td>
             <td v-if="scope.type === 'activity_hours'" data-label="学生">{{ row.student_name }}<small>{{ row.student_no }}</small></td>
             <th scope="row">{{ row.activity_title ?? row.activity_code }}<small v-if="row.activity_title">{{ row.activity_code }}</small></th>
             <td data-label="服务日期">{{ row.service_date }}</td>
@@ -115,6 +175,8 @@ defineExpose({ refresh, clear });
 .ledger-summary p { margin: 0; }
 .ledger-summary strong { color: var(--brand); font-size: 20px; font-variant-numeric: tabular-nums; }
 .ledger-summary :deep(.page-actions) { margin: 0; }
+.ledger-summary > :deep(.page-actions) { display: contents; }
+.select-cell { width: 2.5rem; }
 .ledger-table th, .ledger-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
 .ledger-table small { display: block; color: var(--muted); }
 .ledger-source { display: grid; gap: 4px; min-width: 10rem; max-width: 24rem; font-size: 13px; }

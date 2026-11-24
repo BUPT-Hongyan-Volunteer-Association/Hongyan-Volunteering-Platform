@@ -29,7 +29,7 @@ async function sendWorkbook(page, name, bytes) {
 }
 
 // 以契约响应驱动现有页面，验证请求范围、状态和下载动作。
-async function checkExportButton(page, expected, workbook) {
+async function checkExportButton(page, expected, workbook, labels = { create: '导出筛选结果', download: '下载时长文件' }) {
   const collection = '/api/v1/exports', id = randomUUID(), path = collection + '/' + id;
   const routeMatch = (url) => [collection, path, path + '/download'].includes(url.pathname);
   const expiry = new Date(Date.now() + 86400000).toISOString();
@@ -59,7 +59,7 @@ async function checkExportButton(page, expected, workbook) {
   };
   await page.route(routeMatch, handler);
   try {
-    const create = button(page, '导出筛选结果'), download = button(page, '下载时长文件');
+    const create = button(page, labels.create), download = button(page, labels.download);
     await create.click();
     await shown(text(page, '正在生成文件…'));
     assert.equal(await create.isDisabled(), true);
@@ -213,10 +213,50 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   }
   await Promise.all([
     checkExportButton(owner, { type: 'activity_hours', activity_id: activity.id, ...filterInput },
-      ledgerWorkbook(activity, [{ student: b, day }])),
+      ledgerWorkbook(activity, [{ student: b, day }]), { create: '导出全部明细', download: '下载全部明细' }),
     checkExportButton(secondStudent, { type: 'my_hours', include_history: false }),
     checkExportButton(teacher, { type: 'admin_student_hours', student_id: a.id, ...filterInput }),
   ]);
+
+  // 跨两页勾选学生，导出所选学生汇总
+  for (let index = 0; index < 22; index++) {
+    const username = '0000008' + String(index).padStart(3, '0');
+    const account = await db.account.create({
+      data: {
+        username, display_name: '勾选学生' + String(index).padStart(2, '0'),
+        password_hash: 'fixture', must_change_password: false,
+        roles: { create: { role: 'student' } },
+        student: { create: { student_no: username } },
+      },
+      include: { student: true },
+    });
+    await seedApprovedHours(db, {
+      student_id: account.student.id, activity_id: activity.id, service_date: new Date(day),
+      hours: '1.0', version: 1, status: 'current', origin_schedule_revision: 1,
+      misconduct_reported: 'none', misconduct_version: 0,
+    }, manager.account_id);
+  }
+  await owner.reload();
+  await shown(text(owner, /筛选范围内累计/));
+  await owner.getByLabel(/^选择学生 /).first().check();
+  await shown(text(owner, /已选 1 名学生/));
+  await button(owner, '下一页').click();
+  await owner.getByRole('navigation', { name: '分页' }).getByText(/^第\s*2\s*\//).waitFor();
+  await owner.getByRole('checkbox', { name: /^选择学生 /, checked: false }).first().check();
+  await shown(text(owner, /已选 2 名学生/));
+  const summaryRequest = owner.waitForRequest((request) =>
+    request.method() === 'POST' && request.url().endsWith('/api/v1/exports'));
+  await button(owner, '导出所选学生汇总').click();
+  const summaryBody = (await summaryRequest).postDataJSON();
+  assert.equal(summaryBody.type, 'activity_hours');
+  assert.equal(summaryBody.activity_id, activity.id);
+  assert.equal(summaryBody.student_ids.length, 2);
+  assert.equal(summaryBody.from_date, day);
+  assert.equal(summaryBody.to_date, day);
+  await shown(button(owner, '下载所选学生汇总'));
+  const summaryDownload = owner.waitForEvent('download');
+  await button(owner, '下载所选学生汇总').click();
+  assert.match((await summaryDownload).suggestedFilename(), /活动时长汇总/);
 
   async function close(path, method, missing) {
     await teacher.goto(admin + '/manage/appeals/' + path.split('/').at(-1));

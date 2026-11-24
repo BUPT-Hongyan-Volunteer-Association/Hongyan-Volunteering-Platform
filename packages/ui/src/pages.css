@@ -135,6 +135,10 @@
   color: var(--brand);
   background: var(--surface);
 }
+.entry-list > a[aria-current='true'] {
+  background: var(--brand-tint);
+  box-shadow: inset 3px 0 var(--brand);
+}
 .entry-list .row-end {
   margin-left: auto;
   flex-wrap: nowrap;
