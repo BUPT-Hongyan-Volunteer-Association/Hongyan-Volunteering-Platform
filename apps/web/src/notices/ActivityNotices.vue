@@ -3,11 +3,12 @@ import './notices.css';
 import { computed } from 'vue';
 import PublishNotice from './PublishNotice.vue';
 import { useRoute, useRouter } from 'vue-router';
-import { listActivityNotices, listNoticeReceipts } from '@hongyan/contracts';
+import { listActivityNotices, listNoticeReceipts, type ExportInput } from '@hongyan/contracts';
 import RecordWorkspace from '@hongyan/ui/RecordWorkspace.vue';
 import Pager from '@hongyan/ui/Pager.vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
+import ExportButton from '@hongyan/ui/ExportButton.vue';
 import { localDateTime } from '@hongyan/ui/activityDisplay';
 import { pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 
@@ -101,6 +102,11 @@ const {
   () => void refresh(),
 );
 const receipts = computed(() => receiptPage.value?.rows);
+const receiptExportInput = computed<ExportInput>(() => ({
+  type: 'notice_receipts',
+  notice_id: current.value?.id ?? '',
+  follow_up_only: followUp.value === '1',
+}));
 async function reloadReceipts() {
   await refresh(false);
   if (current.value) await refreshReceipts();
@@ -182,6 +188,12 @@ async function reloadReceipts() {
               ]"
             />
             <button :disabled="loading" @click="reloadReceipts">刷新回执</button>
+          <ExportButton
+            v-if="current"
+            :input="receiptExportInput"
+            :disabled="loading"
+            @recheck="refreshReceipts"
+          />
           </div>
           <p v-if="receiptError" role="alert">{{ receiptError }}</p>
           <p v-else-if="!receipts" role="status">正在读取回执…</p>

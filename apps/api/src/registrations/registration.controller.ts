@@ -21,7 +21,7 @@ import { validate } from '../activities/validation.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import { envelope, invalid, invisible } from '../http.js';
-import { admit, apply, registrationView } from './registration.js';
+import { admit, apply, registrationView, rosterOrderBy, rosterSearchWhere, rosterWhere } from './registration.js';
 
 const zeroCounts: RosterStatusCounts = {
   submitted: 0,
@@ -127,17 +127,7 @@ export class RegistrationController {
         const status = statusFilter(q.status);
         if (q.q !== undefined && typeof q.q !== 'string') invalid('q', '请输入姓名或学号');
         const search = q.q?.trim();
-        const matching = {
-          activity_id: id,
-          ...(search && {
-            student: {
-              OR: [
-                { student_no: { contains: search } },
-                { account: { display_name: { contains: search } } },
-              ],
-            },
-          }),
-        };
+        const matching = rosterSearchWhere({ activity_id: id, q: search });
         const counts = { ...zeroCounts };
         const grouped = await tx.registration.groupBy({
           by: ['status'],
@@ -164,10 +154,10 @@ export class RegistrationController {
         const rows =
           skip < total
             ? await tx.registration.findMany({
-                where: { ...matching, status },
+                where: rosterWhere({ activity_id: id, q: search, status }),
                 skip,
                 take: page_size,
-                orderBy: [{ submitted_at: 'asc' }, { id: 'asc' }],
+                orderBy: rosterOrderBy,
                 include: {
                   student: {
                     select: { student_no: true, account: { select: { display_name: true } } },

@@ -5,6 +5,7 @@ import '@hongyan/ui/pages.css';
 import ManagementPage from './management/ManagementPage.vue';
 import StudentImports from './management/StudentImports.vue';
 import StudentsPage from './management/StudentsPage.vue';
+import AuditPage from './management/AuditPage.vue';
 import { previewSectionKeys } from './management/sections';
 import SchedulePage from '@hongyan/ui/SchedulePage.vue';
 import TaskInbox from './TaskInbox.vue';
@@ -28,6 +29,7 @@ const router = createRouter({
         { path: 'manage/imports/:item?', component: StudentImports },
         { path: 'manage/students/:item?', component: StudentsPage },
         { path: 'manage/students/:item/hours', component: () => import('./hours/StudentHours.vue') },
+        { path: 'manage/audit/:item?', component: AuditPage },
         { path: 'manage/corrections/:item?', component: () => import('@hongyan/ui/HourCorrectionGroups.vue'), props: { admin: true }, meta: { profile: true } },
         { path: 'manage/appeals/:item?', component: () => import('@hongyan/ui/HourAppeals.vue'), props: { mode: 'admin' } },
         { path: 'manage/incidents', component: () => import('@hongyan/ui/HourIncidents.vue'), props: { mode: 'admin' } },
