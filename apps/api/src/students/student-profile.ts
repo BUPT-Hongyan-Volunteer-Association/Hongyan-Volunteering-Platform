@@ -1,7 +1,7 @@
 import type { StudentPatch } from '@hongyan/contracts/types';
 import { checkVersion, type Tx } from '../activities/workflow.js';
 import { audit } from '../audit.js';
-import { requirePermanentAdmin } from '../auth/account-access.js';
+import { guardPermanentAdminLoss } from '../auth/account-access.js';
 import type { Actor } from '../auth/session.guard.js';
 import { invalid } from '../http.js';
 
@@ -60,13 +60,13 @@ export async function updateStudent(tx: Tx, id: string, actor: Actor, input: Stu
   const nameChanged = name !== undefined && name !== row.account.display_name;
   if (!statusChanged && !nameChanged && !Object.keys(profile).length) return studentView(row);
 
+  if (statusChanged && !active) await guardPermanentAdminLoss(tx, row.account_id);
   if (statusChanged || nameChanged) {
     await tx.account.update({ where: { id: row.account_id }, data: {
       ...(statusChanged && { active }), ...(nameChanged && { display_name: name }), version: { increment: 1 },
     } });
   }
   if (statusChanged && !active) {
-    await requirePermanentAdmin(tx);
     await tx.httpSession.deleteMany({ where: { account_id: row.account_id } });
   }
   const next = await tx.student.update({ where: { id }, data: { ...profile, version: { increment: 1 } }, include });

@@ -1,4 +1,4 @@
-import { managedAccountScope, requirePermanentAdmin } from './account-access.js';
+import { guardPermanentAdminLoss, managedAccountScope } from './account-access.js';
 import { Body, Controller, Get, Header, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import type { AccountStatusPatch, ReasonAction, RoleReplacement, StaffAccountInput } from '@hongyan/contracts/types';
 import { checkVersion, Workflow, type Tx } from '../activities/workflow.js';
@@ -91,11 +91,11 @@ export class AdminAccountsController {
       const row = await tx.account.findUniqueOrThrow({ where: { id }, select: fields });
       checkVersion(row.version, input.expected_version);
       const active = input.status === 'active';
-      const next = active === row.active ? row : await tx.account.update({
+      if (active === row.active) return summary(row);
+      if (!active) await guardPermanentAdminLoss(tx, id);
+      const next = await tx.account.update({
         where: { id }, data: { active, version: { increment: 1 } }, select: fields,
       });
-      await requirePermanentAdmin(tx);
-      if (active === row.active) return summary(next);
       if (!active) await tx.httpSession.deleteMany({ where: { account_id: id } });
       await audit(tx, { actor_id: actor.account_id, action: 'set_account_status', resource_type: 'account',
         resource_id: id, reason, before: { status: row.active ? 'active' : 'inactive', version: row.version },
@@ -119,9 +119,9 @@ export class AdminAccountsController {
       checkVersion(account.version, input.expected_version);
       if (account.password_hash === null)
         throw new BusinessError(409, 'invalid_state', '该账号的凭证已待发放，请重新核对');
+      await guardPermanentAdminLoss(tx, id);
       const { version } = await tx.account.update({ where: { id },
         data: { password_hash: null, must_change_password: true, version: { increment: 1 } }, select: { version: true } });
-      await requirePermanentAdmin(tx);
       await tx.httpSession.deleteMany({ where: { account_id: id } });
       await audit(tx, { actor_id: actor.account_id, action: 'reset_password', resource_type: 'account', resource_id: id,
         reason, before: { credential_pending: false, version: account.version }, after: { credential_pending: true, version } });
@@ -169,12 +169,13 @@ export class AdminAccountsController {
       if (!removed.length && !changed.length) return { account_id: id, version: row.roles_version, roles: before };
       if (changed.some(g => g.expires_at && g.expires_at.getTime() <= Date.now()))
         invalid('roles', '到期时间必须晚于当前时间');
+      if (removed.includes('tech_admin') || changed.some(g => g.role === 'tech_admin' && g.expires_at !== null))
+        await guardPermanentAdminLoss(tx, id);
       if (removed.length) await tx.roleGrant.deleteMany({ where: { account_id: id, role: { in: removed } } });
       for (const grant of changed) await tx.roleGrant.upsert({
         where: { account_id_role: { account_id: id, role: grant.role } },
         create: { account_id: id, ...grant }, update: { expires_at: grant.expires_at },
       });
-      if (removed.includes('tech_admin') || changed.some(g => g.role === 'tech_admin')) await requirePermanentAdmin(tx);
       const updated = await tx.account.update({ where: { id }, data: { roles_version: { increment: 1 } }, select: fields });
       const after = grants(updated);
       await audit(tx, { actor_id: actor.account_id, resource_type: 'account', resource_id: id,

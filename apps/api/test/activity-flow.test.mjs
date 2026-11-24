@@ -9,6 +9,57 @@ import { checkHourHttp } from './hour-http-fixture.mjs';
 
 import { browser } from './api-client.mjs';
 
+test('没有长期技术管理员时，老师仍可办理学生账号，限期管理员可维护后台账号', async (t) => {
+  const password = randomUUID();
+  await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: password, DEMO_ADMIN_PASSWORD: '' });
+  const app = await createApp();
+  try {
+    await app.listen(0, '127.0.0.1');
+    const base = (await app.getUrl()) + '/api/v1';
+    const teacher = browser(base), tech = browser(base);
+    await teacher.signIn('demo.teacher', password);
+    const student = (await teacher.request('/admin/accounts?q=0000000001')).data.items[0];
+    const path = '/admin/students/' + student.student_id;
+    const off = await teacher.write('PATCH', path, {
+      expected_version: student.student_version, status: 'inactive', reason: '离开试点',
+    });
+    assert.equal(off.status, 200);
+    const on = await teacher.write('PATCH', path, {
+      expected_version: off.data.version, status: 'active', reason: '已核实返校', pilot_scope_verified: true,
+    });
+    assert.equal(on.data.status, 'active');
+    const accountPath = '/admin/accounts/' + student.account_id;
+    const account = (await teacher.request(accountPath)).data;
+    assert.equal((await teacher.write('POST', accountPath + '/password-reset', {
+      expected_version: account.version, reason: '已核验学生本人',
+    })).status, 200);
+
+    const db = app.get(Database);
+    const dual = await db.account.findUniqueOrThrow({ where: { username: 'demo.dual' } });
+    const expires_at = new Date(Date.now() + 86400000);
+    await db.roleGrant.create({ data: { account_id: dual.id, role: 'tech_admin', expires_at } });
+    await tech.signIn('demo.dual', password);
+    const staffPath = '/admin/accounts/' + (await teacher.request('/me')).data.account_id;
+    const roles = (await tech.request(staffPath + '/roles')).data;
+    const granted = await tech.write('PUT', staffPath + '/roles', {
+      expected_version: roles.version, roles: [...roles.roles, { role: 'tech_admin', expires_at }], reason: '临时轮值',
+    });
+    assert.equal(granted.status, 200);
+    let version = (await tech.request(staffPath)).data.version;
+    for (const status of ['inactive', 'active']) {
+      const result = await tech.write('PATCH', staffPath, { status, expected_version: version, reason: '办理轮岗' });
+      assert.equal(result.status, 200);
+      assert.equal(result.data.status, status);
+      version = result.data.version;
+    }
+    assert.equal((await tech.write('PUT', staffPath + '/roles', {
+      expected_version: granted.data.version, roles: roles.roles, reason: '临时轮值结束',
+    })).status, 200);
+  } finally {
+    await app.close();
+  }
+});
+
 test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持一致', async (t) => {
   const staffPassword = randomUUID();
   const adminPassword = randomUUID();
@@ -924,33 +975,42 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       const set = (client, path, version, roles) => client.write('PUT', path + '/roles', {
         expected_version: version, reason: '管理员轮值', roles,
       });
-      const state = async path => (await admin.request(path + '/roles')).data;
+      const state = async (path, client = admin) => (await client.request(path + '/roles')).data;
       const primaryRoles = (await state(primary)).roles;
       const backupRoles = (await state(backup)).roles;
       const limited = primaryRoles.map(g => g.role === 'tech_admin' ? { ...g, expires_at } : g);
       const sole = await state(primary);
       assert.equal((await set(admin, primary, sole.version, sole.roles.filter(g => g.role !== 'tech_admin'))).code, 'invalid_state');
       assert.deepEqual(await state(primary), sole);
-      for (const operation of ['revoke', 'disable']) {
+      for (const [primaryAction, backupAction] of [['limit', 'revoke'], ['limit', 'disable'], ['revoke', 'disable']]) {
+        const requestedRoles = primaryAction === 'limit' ? limited : primaryRoles.filter(g => g.role !== 'tech_admin');
         const original = await state(backup);
         const granted = await set(admin, backup, original.version, [...backupRoles, { role: 'tech_admin' }]);
         assert.equal(granted.status, 200);
         const primaryVersion = (await state(primary)).version;
         const accountVersion = (await admin.request(backup)).data.version;
         const results = await Promise.all([
-          set(admin, primary, primaryVersion, limited),
-          operation === 'revoke' ? set(teacher, backup, granted.data.version, backupRoles)
+          set(admin, primary, primaryVersion, requestedRoles),
+          backupAction === 'revoke' ? set(teacher, backup, granted.data.version, backupRoles)
             : teacher.write('PATCH', backup, { expected_version: accountVersion, status: 'inactive', reason: '值班交接' }),
         ]);
         assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
         assert.equal(results.find(r => r.status === 409).code, 'invalid_state');
         const primaryWon = results[0].status === 200;
-        assert.deepEqual((await state(primary)).roles, primaryWon ? limited : primaryRoles);
-        const backupState = await state(backup);
-        assert.deepEqual(backupState.roles, !primaryWon && operation === 'revoke' ? backupRoles : granted.data.roles);
-        assert.equal((await admin.request(backup)).data.status, !primaryWon && operation === 'disable' ? 'inactive' : 'active');
-        if (primaryWon) assert.equal((await set(admin, primary, primaryVersion + 1, primaryRoles)).status, 200);
-        if (!primaryWon && operation === 'disable') {
+        const remaining = primaryWon ? teacher : admin;
+        assert.equal((await remaining.request('/me')).status, 200);
+        const primaryState = await state(primary, remaining);
+        assert.deepEqual(primaryState.roles, primaryWon ? requestedRoles : primaryRoles);
+        const backupState = await state(backup, remaining);
+        assert.deepEqual(backupState.roles, !primaryWon && backupAction === 'revoke' ? backupRoles : granted.data.roles);
+        const backupAccount = (await remaining.request(backup)).data;
+        assert.equal(backupAccount.status, !primaryWon && backupAction === 'disable' ? 'inactive' : 'active');
+        if (primaryWon) {
+          assert.equal(backupState.version, granted.data.version);
+          assert.equal(backupAccount.version, accountVersion);
+          assert.equal((await set(remaining, primary, primaryVersion + 1, primaryRoles)).status, 200);
+        } else assert.equal(primaryState.version, primaryVersion);
+        if (!primaryWon && backupAction === 'disable') {
           assert.equal((await admin.write('PATCH', backup, {
             expected_version: accountVersion + 1, status: 'active', reason: '恢复履职',
           })).status, 200);
