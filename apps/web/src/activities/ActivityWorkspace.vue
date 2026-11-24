@@ -36,7 +36,7 @@ const sections = [
   ['batches', '时长批次'],
   ['hours', '时长台账'],
 ];
-const deniedRefresh = ['activity-notices', 'activity-attendance', 'hour-batches', 'hour-batch', 'activity-hours',
+const deniedRefresh = ['organizer-section', 'activity-notices', 'activity-attendance', 'hour-batches', 'hour-batch', 'activity-hours',
   'activity-hour-appeals', 'activity-hour-corrections', 'activity-hour-incidents'];
 const members = ref<ActivityMember[]>([]);
 const error = ref('');
@@ -121,7 +121,7 @@ onUnmounted(() => {
         :is="Component"
         v-on="deniedRefresh.includes(String(route.name)) ? { denied: refresh } : {}"
         v-bind="
-          ['organizer-section', 'activity-hour-incidents'].includes(String(route.name))
+          route.name === 'activity-hour-incidents'
             ? {}
             : route.name === 'activity-edit'
               ? { writesPaused: verifying || !!error, snapshot: detail, onLoaded: showDetail }

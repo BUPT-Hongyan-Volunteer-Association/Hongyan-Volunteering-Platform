@@ -13,7 +13,9 @@ type DecisionPayload = {
   student_id: string;
   status: string;
   decision_reason?: string | null;
+  registration_version?: number;
   actor_id?: string;
+  kind?: string;
 };
 
 type Publication = {
@@ -120,15 +122,16 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
     if (!activity_id) throw new DeliveryError('通知事件缺少活动标识');
     await this.db.$transaction(async (tx) => {
       // 审批与投递共用活动锁，版本号和当前通知随回执一起提交。
-      const [activity] = await tx.$queryRaw<{ published_revision: number | null }[]>`
-        SELECT published_revision FROM activity WHERE id = ${activity_id}::uuid FOR UPDATE`;
+      const [activity] = await tx.$queryRaw<{ published_revision: number | null; status: string }[]>`
+        SELECT published_revision, status FROM activity WHERE id = ${activity_id}::uuid FOR UPDATE`;
       const existing = await tx.notice.findUnique({
         where: { source_event_id: event.id },
         select: { id: true },
       });
       let status = 'delivered';
       if (!existing) {
-        status = activity?.published_revision
+        const obsoleteGathering = event.event_type === 'gathering_supplement' && activity?.status !== 'published';
+        status = activity?.published_revision && !obsoleteGathering
           ? await this.publish(tx, event, activity_id, activity.published_revision, now)
           : 'superseded';
       }
@@ -153,14 +156,32 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
     published: number,
     now: Date,
   ) {
+    if (event.event_type === 'gathering_supplement') {
+      const payload = event.payload as { source_notice_id: string; student_id: string; registration_version: number };
+      const source = await tx.notice.findFirst({ where: {
+        id: payload.source_notice_id, activity_id, notice_kind: 'gathering', is_current: true, source_notice_id: null,
+      } });
+      const registration = await tx.registration.findFirst({ where: {
+        id: event.resource_id, activity_id, student_id: payload.student_id, status: 'accepted', version: payload.registration_version,
+      } });
+      if (!source || !registration) return 'superseded';
+      await tx.notice.create({ data: {
+        activity_id, title: source.title, body: source.body, notice_kind: 'gathering',
+        requires_ack: source.requires_ack, information_version: source.information_version,
+        source_notice_id: source.id, source_event_id: event.id, published_at: now, published_by: source.published_by,
+        receipts: { create: { student_id: payload.student_id } },
+      } });
+      return 'delivered';
+    }
     const change = event.event_type === 'activity_changed';
     const hour = hourNoticeKind(event.event_type);
-    if (!change && !hour && event.event_type !== 'registration_decided')
+    if (!change && !hour && !['registration_decided', 'request_decided'].includes(event.event_type))
       throw new DeliveryError('未知的通知事件类型');
     const notice_kind = hour ?? (change ? 'change' : 'result');
     const previous = await tx.notice.findFirst({
-      where: { activity_id, notice_kind },
+      where: { activity_id, notice_kind, source_notice_id: null },
       orderBy: { information_version: 'desc' },
+      select: { id: true, is_current: true, information_version: true, source_revision: true, base_revision: true },
     });
     const publication = hour ? await hourPublication(tx, event, published) : change
       ? await changePublication(tx, event, activity_id, published, previous)
@@ -219,7 +240,7 @@ async function changePublication(
   event: NotificationEvent,
   activity_id: string,
   published: number,
-  previous: Notice | null,
+  previous: Pick<Notice, 'id' | 'is_current' | 'source_revision' | 'base_revision'> | null,
 ): Promise<Publication | null> {
   const revision = event.source_revision;
   if (revision === null) throw new DeliveryError('变更通知缺少审核来源');
@@ -291,15 +312,31 @@ async function resultPublication(
   event: NotificationEvent,
   activity_id: string,
   published: number,
-): Promise<Publication> {
+): Promise<Publication | null> {
   const payload = event.payload as DecisionPayload;
   if (!payload.student_id || !payload.status)
     throw new DeliveryError('录取结果缺少接收人或决定状态');
+  if (event.event_type === 'registration_decided') {
+    if (!payload.registration_version) throw new DeliveryError('报名结果缺少决定版本');
+    const current = await tx.registration.findFirst({ where: {
+      id: event.resource_id, activity_id, student_id: payload.student_id, version: payload.registration_version,
+    }, select: { id: true } });
+    if (!current) return null;
+  }
   const revision = await tx.activityRevision.findUniqueOrThrow({
     where: { activity_id_revision: { activity_id, revision: published } },
     select: { content: true },
   });
   const { title } = revision.content as unknown as ActivityInput;
+  if (event.event_type === 'request_decided') {
+    const kind = payload.kind === 'exit' ? '退出' : '恢复';
+    const statuses: Record<string, string> = { approved: '已批准', rejected: '已驳回', cancelled: '因活动取消或结束已取消' };
+    return {
+      title: title + kind + '申请结果', body: kind + '申请' + statuses[payload.status] +
+        (payload.decision_reason ? '。说明：' + payload.decision_reason : '。'),
+      recipients: [payload.student_id], published_by: payload.actor_id ?? null, source_revision: published,
+    };
+  }
   return {
     title: `${title}报名结果`,
     body: resultBody(title, payload.status, payload.decision_reason ?? null),

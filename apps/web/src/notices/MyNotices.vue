@@ -114,8 +114,9 @@ const {
 });
 const selected = computed(() => detail.value?.notice);
 function state(notice: Notice) {
-  if (!notice.is_current) return { label: '已被替代', tone: 'mute' };
+  if (!notice.is_current) return { label: notice.notice_kind === 'result' ? '历史结果' : '已被替代', tone: 'mute' };
   if (notice.acknowledged_at) return { label: '已确认', tone: 'done' };
+  if (notice.follow_up_closed) return { label: '已停止跟进', tone: 'mute' };
   if (notice.read_at) return { label: notice.requires_ack ? '已读未确认' : '已读', tone: 'wait' };
   return { label: '未读', tone: 'new' };
 }
@@ -235,7 +236,7 @@ onUnmounted(() => {
             </template>
             <template #action="{ row }">
               <div
-                v-if="row.notice.requires_ack && row.notice.is_current && !row.notice.acknowledged_at"
+                v-if="!row.notice.follow_up_closed && row.notice.requires_ack && row.notice.is_current && !row.notice.acknowledged_at"
                 class="confirm-action"
               >
                 <button class="compact" :disabled="busy" @click="ack(row.notice)">确认收到</button>
@@ -296,7 +297,7 @@ onUnmounted(() => {
           </dl>
           <div class="row-actions">
             <button
-              v-if="selected.requires_ack && !selected.acknowledged_at && selected.is_current"
+              v-if="!selected.follow_up_closed && selected.requires_ack && !selected.acknowledged_at && selected.is_current"
               class="primary"
               :disabled="busy"
               @click="ack(selected)"
@@ -316,7 +317,8 @@ onUnmounted(() => {
             </button>
           </div>
           <p v-if="!selected.is_current" class="notice-hint">
-            这条通知已被同一活动的后续版本替代，可在列表查看最新通知。
+            <template v-if="selected.notice_kind === 'result'">这是当时的报名结果。<RouterLink to="/registrations">查看我的报名</RouterLink></template>
+            <template v-else>这条通知已被同一活动的后续版本替代，可在列表查看最新通知。</template>
           </p>
         </section>
         <p v-else>

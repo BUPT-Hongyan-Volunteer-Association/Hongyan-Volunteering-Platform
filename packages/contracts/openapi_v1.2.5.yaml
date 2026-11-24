@@ -1747,7 +1747,7 @@ paths:
     post:
       operationId: withdraw_registration
       summary: 录取前撤回报名
-      description: 仅本人submitted或waitlisted可撤回。accepted须提交退出申请。
+      description: 活动仍为published时，仅本人submitted或waitlisted可撤回。accepted须提交退出申请。
       tags:
       - 报名
       x-requirement: FR02
@@ -1946,7 +1946,7 @@ paths:
       operationId: decide_registration
       summary: 人工录取候补或不录取
       description: 与整批决定共用业务服务。仅submitted/waitlisted/rejected可决定，accepted不可降级。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段，校验学生启用、当前版本及名额，事务内写通知事件。候补不自动补位，异常次数在规则off时不影响决定。
-        首次报名截止只关闭学生主动报名。人工录取与恢复批准要求活动已发布且存在 starts_at > 服务器当前时刻的获批时段。最后一个时段开始时即停止录取与恢复。
+        首次报名截止只关闭学生主动报名。结果通知投递前复核报名版本；已失效的待投递结果跳过，已送达的旧结果及回执可在历史中查看。
       tags:
       - 报名
       x-requirement: FR02
@@ -2016,7 +2016,7 @@ paths:
     post:
       operationId: create_exit_request
       summary: 录取后申请退出整项活动
-      description: 本人accepted且活动published、尚有未开始时段时申请退出整项活动。每个报名最多一个pending退出。pending保留录取及名额，批准后exited释放名额。单次请假在群内处理，本接口不提供整期请假类型。
+      description: 本人accepted且活动published、尚有未开始时段时申请退出整项活动。日期活动在北京时间开始日零点关闭新退出申请。每个报名最多一个pending退出。pending保留录取及名额，批准后exited释放名额。单次请假在群内处理，本接口不提供整期请假类型。
       tags:
       - 报名
       x-requirement: FR02
@@ -2138,6 +2138,13 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
+      - name: request_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: status
+        in: query
+        schema: {type: string, enum: [pending, approved, rejected, withdrawn, cancelled]}
       - name: id
         in: path
         required: true
@@ -2196,6 +2203,7 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -2385,7 +2393,7 @@ paths:
     post:
       operationId: publish_notice
       summary: 发送活动站内通知
-      description: 发布独立的普通活动通知（other），发布时设置是否需要确认。按当前活动的有效报名名单冻结接收人快照。accepted 只含已录取人员，all_applicants 包含已提交、候补和已录取人员，selected 须指定其中的学生。所选人员失效时返回 422，details 中的 ineligible_recipient 按请求数组顺序提供从 1 起算的 row。集合通知发布、版本替代和补发属于规划功能。
+      description: 发布独立的普通活动通知（other），发布时设置是否需要确认。按当前活动的有效报名名单冻结接收人快照。accepted 只含已录取人员，all_applicants 包含已提交、候补和已录取人员，selected 须指定其中的学生。所选人员失效时返回 422，details 中的 ineligible_recipient 按请求数组顺序提供从 1 起算的 row。集合源发布和版本替代属于规划功能。
       tags:
       - 通知
       x-requirement: FR03
@@ -6120,8 +6128,8 @@ paths:
     post:
       operationId: decide_registrations_atomically
       summary: 整批录取候补或不录取
-      description: 同一活动1—100个不重复报名ID。事务内核验全部成员授权、学生状态、报名版本及可转换状态，录取检查新增人数和当前余量。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段。任一失败整批回滚，409 details定位registration_id及失败码，不返回部分成功。通知事件与状态同事务写入，按幂等键重试不重复决定。
-        首次报名截止只关闭学生主动报名。人工录取与恢复批准要求活动已发布且存在 starts_at > 服务器当前时刻的获批时段。最后一个时段开始时即停止录取与恢复。
+      description: 同一活动1—100个不重复报名ID。事务内核验全部成员授权、学生状态、报名版本及可转换状态，录取检查新增人数和当前余量。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段。任一失败整批回滚，409 details逐行返回resource_id（报名ID）及失败码，不返回部分成功。通知事件与状态同事务写入，按幂等键重试不重复决定。
+        首次报名截止只关闭学生主动报名。结果通知投递前复核报名版本；已失效的待投递结果跳过，已送达的旧结果及回执可在历史中查看。
       tags:
       - FR02
       x-requirement: FR02
@@ -6129,6 +6137,7 @@ paths:
       - AC04
       x-roles: *id001
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -6263,8 +6272,7 @@ paths:
     post:
       operationId: create_restoration_request
       summary: 退出后申请恢复报名
-      description: 仅本人exited、学生启用且活动published，服务器时间之后须仍有时段尚未开始。原报名窗口截止不阻止此恢复申请。每个报名最多一个pending恢复，pending不占名额。 首次报名截止只关闭学生主动报名。人工录取与恢复批准要求活动已发布且存在
-        starts_at > 服务器当前时刻的获批时段。最后一个时段开始时即停止录取与恢复。
+      description: 仅本人exited、学生启用且活动published，原报名窗口截止不阻止此恢复申请。每个报名最多一个pending恢复，pending不占名额。按日期发布时可办理至北京时间结束日当天，精确安排须仍有未开始的获批时段。
       tags:
       - FR02
       x-requirement: FR02
@@ -6444,6 +6452,10 @@ paths:
       - AC04
       x-roles: *id001
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
+      - name: request_id
+        in: query
+        schema: {type: string, format: uuid}
       - name: id
         in: path
         required: true
@@ -6502,8 +6514,8 @@ paths:
     post:
       operationId: decide_restoration_request
       summary: 审核恢复并重新占用名额
-      description: 仅pending。批准时锁定活动与原报名，复核有效授权、学生启用、exited状态、未开始时段和余量。同一事务将原registration_id改回accepted、增加名额占用、写历史及通知事件。名额或版本冲突整笔失败，申请保持pending。拒绝保留exited并说明原因，取消或结束自动cancelled。
-        首次报名截止只关闭学生主动报名。人工录取与恢复批准要求活动已发布且存在 starts_at > 服务器当前时刻的获批时段。最后一个时段开始时即停止录取与恢复。
+      description: 仅pending。批准时锁定活动与原报名，复核有效授权、学生启用、exited状态、有效安排和余量。同一事务将原registration_id改回accepted、增加名额占用、写历史及通知事件。名额或版本冲突整笔失败，申请保持pending。拒绝保留exited并说明原因，取消或结束自动cancelled。
+        首次报名截止只关闭学生主动报名。按日期发布时可办理至北京时间结束日当天，精确安排须仍有未开始的获批时段。
       tags:
       - FR02
       x-requirement: FR02
@@ -6511,6 +6523,7 @@ paths:
       - AC04
       x-roles: *id001
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
@@ -8687,6 +8700,9 @@ components:
           type: string
         decision_reason:
           type: string
+        can_withdraw: {type: boolean, description: 本人报名当前可撤回。}
+        can_request_exit: {type: boolean}
+        can_request_restoration: {type: boolean}
         pending_exit_request_id:
           type: string
           format: uuid
@@ -8756,6 +8772,8 @@ components:
         registration_id:
           type: string
           format: uuid
+        student_name: {type: string}
+        student_no: {type: string}
         student_id:
           type: string
           format: uuid
@@ -8974,6 +8992,9 @@ components:
         source_notice_id:
           type: string
           format: uuid
+        follow_up_closed:
+          type: boolean
+          description: 本人已退出该轮录取，历史集合回执停止跟进。
         is_current:
           type: boolean
         recipient_count:
@@ -11394,6 +11415,8 @@ components:
         registration_id:
           type: string
           format: uuid
+        student_name: {type: string}
+        student_no: {type: string}
         student_id:
           type: string
           format: uuid
@@ -12231,6 +12254,7 @@ components:
           minimum: 0
         status_counts:
           $ref: '#/components/schemas/roster_status_counts'
+        can_decide: {type: boolean, description: 按活动状态和当前获批安排判断名单决定是否开放。}
         accepted_count:
           type: integer
           minimum: 0

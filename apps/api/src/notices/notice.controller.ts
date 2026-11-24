@@ -86,6 +86,7 @@ export class NoticeController {
       },
     };
     const followUp: Prisma.NoticeReceiptWhereInput = {
+      follow_up_closed: false,
       acknowledged_at: null,
       notice: {
         is_current: true,
@@ -150,7 +151,7 @@ export class NoticeController {
       if (!receipt) invisible();
       if (acknowledge ? receipt.acknowledged_at : receipt.read_at)
         return noticeView(receipt.notice, receipt);
-      if (acknowledge && (!receipt.notice.is_current || !receipt.notice.requires_ack)) wrongState();
+      if (acknowledge && (receipt.follow_up_closed || !receipt.notice.is_current || !receipt.notice.requires_ack)) wrongState();
       const now = new Date();
       const updated = await tx.noticeReceipt.update({
         where,
@@ -195,7 +196,7 @@ export class NoticeController {
       }
       if (!recipients.length) invalid('recipient_mode', '当前范围没有接收人，请调整范围');
       const previous = await tx.notice.aggregate({
-        where: { activity_id, notice_kind: 'other' }, _max: { information_version: true },
+        where: { activity_id, notice_kind: 'other', source_notice_id: null }, _max: { information_version: true },
       });
       const notice = await tx.notice.create({
         data: {

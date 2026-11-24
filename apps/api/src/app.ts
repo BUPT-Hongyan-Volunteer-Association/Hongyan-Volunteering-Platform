@@ -24,6 +24,7 @@ import { DraftController } from './activities/draft.controller.js';
 import { Workflow } from './activities/workflow.js';
 import { Database } from './database.js';
 import { PublicController } from './activities/public.controller.js';
+import { RecruitmentRequests } from './registrations/requests.controller.js';
 import { RegistrationController } from './registrations/registration.controller.js';
 import { AttendanceController } from './attendance/attendance.controller.js';
 import { ManagedController } from './activities/managed.controller.js';
@@ -96,6 +97,7 @@ class HttpErrorFilter implements ExceptionFilter {
     GroupImageController,
     ReviewController,
     RegistrationController,
+    RecruitmentRequests,
     AttendanceController,
     NoticeController,
     HourBatchesController,

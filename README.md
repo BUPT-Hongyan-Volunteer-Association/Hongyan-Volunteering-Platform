@@ -4,6 +4,8 @@
 
 负责人在活动的「通知与回执」中可发布普通通知，选择全部有效报名人员、已录取人员或指定学生，并决定是否需要确认。活动关键信息修订获批及报名结果仍会自动通知。学生端「通知」角标按未读或待确认的通知条数去重。打开详情即标为已读，需要确认的通知可在列表或详情点击「确认收到」，负责人随后可查看回执。
 
+学生从「我的报名 → 办理与进度」撤回报名或办理整项活动的退出与恢复。负责人从「报名名单」跨页选择最多 100 条报名统一作出决定，在「退出与恢复」审批申请。退出获批时释放名额，恢复获批时重新占用名额。
+
 负责人可在「现场人员记录」按服务日期批量登记迟到、缺席、请假或自定义情况，并查询和更正已登记的异常。正常签到无需在这里录入。
 
 审核员可从「建档导入」下载 v1.5 学生名单模板，填写后上传，按原表行号核对并确认，再到「学生档案」查询建档结果。
@@ -38,7 +40,7 @@
 
 ## 开发检查
 
-类型检查用 `pnpm typecheck`，服务端回归用 `pnpm --filter @hongyan/api test:flow`（活动流程和现场异常）、`pnpm --filter @hongyan/api test:timeline`（活动日程）、`pnpm --filter @hongyan/api test:students`（学生名单导入）、`pnpm --filter @hongyan/api test:notice`（通知与回执）和 `pnpm --filter @hongyan/api test:exports`（业务导出与审计），页面回归用 `pnpm test:pages`。服务端与页面回归都会创建独立测试库，数据库账号须有建库权限。页面回归和身份选择页可使用已安装的 Chrome 或 Edge。用 Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，再通过 HTTPS 访问。
+类型检查用 `pnpm typecheck`，服务端回归用 `pnpm --filter @hongyan/api test:flow`（活动、招募及现场异常）、`pnpm --filter @hongyan/api test:timeline`（活动日程）、`pnpm --filter @hongyan/api test:students`（学生名单导入）、`pnpm --filter @hongyan/api test:notice`（通知与回执）和 `pnpm --filter @hongyan/api test:exports`（业务导出与审计），页面回归用 `pnpm test:pages`。服务端与页面回归都会创建独立测试库，数据库账号须有建库权限。页面回归和身份选择页可使用已安装的 Chrome 或 Edge。用 Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，再通过 HTTPS 访问。
 
 时长工作簿解析测试用 `pnpm --filter @hongyan/api test:hour-workbook`，逐行预览测试用 `pnpm --filter @hongyan/api test:hour-preview`。两者均可在本地离线运行。
 

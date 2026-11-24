@@ -1,6 +1,10 @@
-import type { Activity, Registration } from './generated/types.gen.js';
+import type { Activity, Registration, RegistrationDecision } from './generated/types.gen.js';
 
 export const activeRegistrationStatuses: Registration['status'][] = ['submitted', 'waitlisted', 'accepted'];
+
+export function canChangeRegistration(status: string, decision: RegistrationDecision['decision']) {
+  return ['submitted', 'waitlisted', 'rejected'].includes(status) && status !== decision;
+}
 
 export const campuses = ['沙河校区', '西土城校区', '沙河及西土城校区'];
 export function campusName(value?: string) {

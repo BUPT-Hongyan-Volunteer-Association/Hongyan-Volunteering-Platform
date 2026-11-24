@@ -27,7 +27,7 @@ export function receiptWhere(
     ...(status === 'unread' && { read_at: null }),
     ...(status === 'read' && { read_at: { not: null }, acknowledged_at: null }),
     ...(status === 'acknowledged' && { acknowledged_at: { not: null } }),
-    ...(follow_up_only && { acknowledged_at: null }),
+    ...(follow_up_only && { acknowledged_at: null, follow_up_closed: false }),
     ...(follow_up_only &&
       attendanceKinds.includes(notice.notice_kind) && {
         student: {
