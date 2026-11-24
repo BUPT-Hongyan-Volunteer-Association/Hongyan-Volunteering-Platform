@@ -195,6 +195,7 @@ model Registration {
   version         Int                   @default(1)
   statement       String?
   decision_reason String?
+  exit_requests   ExitRequest[]
   history         RegistrationHistory[]
   submitted_at    DateTime              @default(now()) @db.Timestamptz(3)
   student         Student               @relation(fields: [student_id], references: [id])
@@ -203,6 +204,21 @@ model Registration {
   @@unique([activity_id, student_id])
   @@index([student_id])
   @@map("registration")
+}
+
+model ExitRequest {
+  id              String       @id @default(uuid()) @db.Uuid
+  registration_id String       @db.Uuid
+  registration    Registration @relation(fields: [registration_id], references: [id])
+  reason          String
+  status          String       @default("pending")
+  decision_reason String?
+  version         Int          @default(1)
+  created_at      DateTime     @default(now()) @db.Timestamptz(3)
+  updated_at      DateTime     @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@index([registration_id])
+  @@map("exit_request")
 }
 
 model RegistrationHistory {

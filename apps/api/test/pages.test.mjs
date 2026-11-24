@@ -344,12 +344,29 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await checkStudentImportPages(teacher, admin, { fits, pickOption, db });
     });
 
-    await t.test('时间轴按真实安排绘制分段，当前线取自服务端时刻', async () => {
+    await t.test('时间轴按真实安排绘制分段，当前线取自服务端时刻', async (t) => {
       await student.setViewportSize({ width: 1440, height: 900 });
       await student.goto(web + '/schedule');
       const ongoing = student.locator('.chart tbody tr').filter({ hasText: '正在进行演示' });
       await visible(ongoing);
       assert.ok((await student.locator('.now-line').count()) > 0);
+      assert.equal(await student.getByRole('slider').count(), 0);
+
+      // 同一进行中的活动，负责人只看到接口给出的状态时刻文字。
+      const organizer = await signIn(browser, web, '0000000003', password, 1440);
+      t.after(() => organizer.context().close());
+      const response = organizer.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/timeline');
+      await organizer.goto(web + '/managed-schedule?unit=day&view=chart');
+      const { data } = await (await response).json();
+      await visible(organizer.locator('.chart tbody tr').filter({ hasText: '正在进行演示' }));
+      const clockText = new Date(data.state_evaluated_at).toLocaleTimeString('en-GB', {
+        timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit',
+      });
+      assert.match(await organizer.locator('.view-caption').innerText(), /状态时刻/);
+      assert.ok((await organizer.locator('.view-caption').innerText()).includes(clockText));
+      assert.equal(await organizer.locator('.chart .now-line, .chart thead path[fill="#003399"]').count(), 0);
+      assert.equal(await organizer.getByRole('slider').count(), 0);
+
       await student.getByLabel('进行中').check();
       await student.waitForURL((u) => u.searchParams.get('ongoing') === '1');
       await button(student, '列表').click();

@@ -217,7 +217,10 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       assert.deepEqual(codes(ongoingOnly), ['TL-0002', 'TL-0005']);
     });
 
-    await t.test('本人范围以有效录取关系为准', async () => {
+    await t.test('本人日程在退出申请待处理期间保留获批时段，退出获批后移除', async () => {
+      await db.registration.create({
+        data: { activity_id: ongoing.id, student_id: studentRow.id, status: 'withdrawn' },
+      });
       const empty = await timeline(student, 'scope=mine&' + window);
       assert.equal(empty.status, 200);
       assert.equal(empty.data.total, 0);
@@ -229,11 +232,30 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       const mine = await timeline(student, 'scope=mine&' + window);
       assert.deepEqual(codes(mine), ['TL-0001']);
       assert.equal(mine.data.items[0].has_pending_review, undefined);
-      for (const status of ['withdrawn', 'exited']) {
-        await db.registration.update({ where: { id: registration.id }, data: { status } });
-        assert.equal((await timeline(student, 'scope=mine&' + window)).data.total, 0);
-      }
+      const request = await db.exitRequest.create({
+        data: { registration_id: registration.id, reason: '课程安排冲突' },
+        include: { registration: true },
+      });
+      assert.equal(request.status, 'pending');
+      assert.equal(request.registration.status, 'accepted');
+      const pending = await timeline(student, 'scope=mine&' + window);
+      assert.equal(pending.status, 200);
+      assert.equal(pending.data.total, 1);
+      const [activity] = pending.data.items;
+      assert.equal(activity.activity_id, multi.id);
+      assert.equal(activity.revision_state, 'approved');
+      assert.deepEqual(activity.segments, mine.data.items[0].segments);
+
+      await db.$transaction([
+        db.exitRequest.update({ where: { id: request.id }, data: { status: 'approved', version: 2 } }),
+        db.registration.update({ where: { id: registration.id }, data: { status: 'exited' } }),
+      ]);
+      const exited = await timeline(student, 'scope=mine&' + window);
+      assert.equal(exited.status, 200);
+      assert.equal(exited.data.total, 0);
+      assert.deepEqual(exited.data.items, []);
       await db.registration.update({ where: { id: registration.id }, data: { status: 'accepted' } });
+      assert.deepEqual(codes(await timeline(student, 'scope=mine&' + window)), ['TL-0001']);
     });
 
     await t.test('负责人仅见本人管理的活动，后台按授权读取工作版本', async () => {

@@ -83,7 +83,7 @@
 
 ## 验收
 
-- F1：public 与 mine 的响应不含 has_pending_review、current_review_id；学生带工作版本或后台筛选参数得到 403；mine 随报名状态 accepted → exited → accepted 增删活动。
+- F1：public 与 mine 的响应不含 has_pending_review、current_review_id；学生带工作版本或后台筛选参数得到 403；本人录取后日程可见；关联退出申请为 pending 时保留获批分段；申请获批且报名变为 exited 后移出，恢复录取后重新出现。
 - F2：四种刻度切换后列表与时间轴内容一致；32 日窗口被拒绝；周规则活动的排除日缺席、补充时段出现。
 - F3：从后台日程选段进入真实审核页，批准后返回同一 URL（窗口、刻度、视图、筛选不变），学生端刷新显示新安排；驳回后返回显示原安排；选段在新版本里仍存在则保留，不存在则清除并给出说明；pending=1 下处理后的活动消失。
 - F4：预置录取关系后 mine 出现活动，改为 exited 后刷新消失，恢复 accepted 后重新出现；移除负责人的成员关系后刷新，managed 列表、时间轴与详情都不再出现该活动，其他活动保留。
@@ -99,5 +99,5 @@
 
 - 服务端查询 `apps/api/src/timeline/timeline.ts` 与活动读取 `apps/api/src/activities/list.ts`；契约见 `packages/contracts/openapi_v1.2.5.yaml` 的 `get_timeline`。
 - 页面 `packages/ui/src/timeline/SchedulePage.vue`；审核页的返回入口 `apps/admin/src/activities/ReviewPage.vue`（scheduleReturn）。
-- 关系预置：registration（accepted / exited）与 activity_member。
+- 关系预置：registration（accepted / exited）、exit_request（pending / approved）与 activity_member。
 - 回归：`apps/api/test/pages.test.mjs`、`apps/api/test/timeline.test.mjs` 与 `apps/api/test/timeline-fixture.mjs`。
