@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { ApiError, createCommand, setAccountRoles, type AccountRoles, type AccountSummary, type RoleReplacement } from '@hongyan/contracts';
 
-const props = defineProps<{ account: AccountSummary; state: AccountRoles; now: number; role: 'organizer' | 'reviewer' | 'tech_admin' }>();
+const props = defineProps<{ account: AccountSummary; now: number; role: 'organizer' | 'reviewer' | 'tech_admin' }>();
 const emit = defineEmits<{ saved: [AccountRoles, string]; reload: [] }>();
 const command = createCommand();
 const editing = ref<'grant' | 'remove'>();
@@ -15,7 +15,7 @@ const description = {
   reviewer: '老师审核员可进入审核后台，办理学生授权、审核等业务。',
   tech_admin: '技术管理员可管理高权限账号、角色和登录凭证。',
 };
-const grant = computed(() => props.state.roles.find(grant => grant.role === props.role));
+const grant = computed(() => props.account.roles.find(grant => grant.role === props.role));
 const active = computed(() => !!grant.value && (!grant.value.expires_at || Date.parse(grant.value.expires_at) > props.now));
 
 function open(action: 'grant' | 'remove') {
@@ -30,8 +30,8 @@ function open(action: 'grant' | 'remove') {
 async function submit() {
   if (!editing.value || busy.value || stale.value) return;
   const removing = editing.value === 'remove';
-  const body: RoleReplacement = { expected_version: props.state.version,
-    reason: reason.value.trim(), roles: props.state.roles.filter(grant => grant.role !== props.role) };
+  const body: RoleReplacement = { expected_version: props.account.roles_version,
+    reason: reason.value.trim(), roles: props.account.roles.filter(grant => grant.role !== props.role) };
   if (!body.reason) { error.value = '请填写办理原因。'; return; }
   if (!removing) {
     const expiry = term.value === 'limited' ? Date.parse(end.value + '+08:00') : undefined;

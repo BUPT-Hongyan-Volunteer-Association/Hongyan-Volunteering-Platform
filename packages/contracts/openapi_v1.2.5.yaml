@@ -131,7 +131,7 @@ paths:
     post:
       operationId: change_password
       summary: 设置或修改密码
-      description: 允许受限首登会话调用。核验当前凭证，修改后撤销旧会话并轮换当前会话。
+      description: 允许受限首登会话调用。核验当前凭证，修改后递增账号版本、撤销旧会话，并随当前会话一起返回新的 CSRF 令牌。
       tags:
       - 账号
       x-requirement: FR06
@@ -166,6 +166,12 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '200':
           description: 成功
+          headers:
+            X-CSRF-Token:
+              description: 当前浏览器后续写请求使用的新会话令牌。
+              required: true
+              schema:
+                type: string
           content:
             application/json:
               schema:

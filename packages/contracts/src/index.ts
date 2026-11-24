@@ -1,5 +1,5 @@
 import { client } from './generated/client.gen';
-import { getCsrf } from './generated/sdk.gen';
+import { changePassword, getCsrf } from './generated/sdk.gen';
 import type { Error as ContractError } from './generated/types.gen';
 
 let csrfToken: string | undefined;
@@ -53,6 +53,15 @@ export const passwordRequirement = '至少 8 个字符，包含英文字母和�
 export function writeHeaders() {
   if (!csrfToken) throw new Error('会话尚未建立，请刷新后重试');
   return { 'X-CSRF-Token': csrfToken };
+}
+
+export async function changeOwnPassword(current_password: string, new_password: string) {
+  const { response } = await changePassword({
+    body: { current_password, new_password }, headers: writeHeaders(), throwOnError: true,
+  });
+  csrfToken = response.headers.get('X-CSRF-Token') ?? undefined;
+  // Older API versions rotate the cookie without returning its token.
+  if (!csrfToken) window.dispatchEvent(new Event('hongyan-session-expired'));
 }
 
 /** 每个表单实例持有一个命令。原请求结果未知时保留相同的幂等键。 */

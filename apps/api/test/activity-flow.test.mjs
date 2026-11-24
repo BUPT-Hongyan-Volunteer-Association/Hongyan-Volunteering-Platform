@@ -1315,16 +1315,26 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
 
     await t.test('老师核验后重置普通负责人凭证，旧密码和全部会话作废', async () => {
       const second = browser(base), admin = browser(base);
-      await second.signIn('0000000002', ownerPassword);
       await admin.signIn('demo.admin', adminPassword);
       const id = (await owner.request('/me')).data.account_id;
       const path = '/admin/accounts/' + id;
+      const opened = (await teacher.request(path)).data;
+      const newPassword = 'T1' + randomUUID();
+      assert.equal((await owner.request('/auth/change-password', { method: 'POST',
+        body: { current_password: ownerPassword, new_password: newPassword } })).status, 200);
+      const stale = await teacher.write('POST', path + '/password-reset', {
+        expected_version: opened.version, reason: '改密前打开的重置表单',
+      });
+      assert.equal(stale.status, 409);
+      assert.equal(stale.code, 'version_conflict');
+      await second.signIn('0000000002', newPassword);
+      await owner.request('/auth/csrf');
       const before = (await teacher.request(path)).data;
+      assert.equal(before.version, opened.version + 1);
       const body = { expected_version: before.version, reason: '本人申请找回凭证' };
       const reset = (actor, data, key) => actor.write('POST', path + '/password-reset', data, key);
       assert.equal((await reset(owner, body)).status, 403);
       assert.equal((await reset(teacher, { ...body, reason: ' ' })).status, 422);
-      assert.equal((await reset(teacher, { ...body, expected_version: before.version + 1 })).code, 'version_conflict');
       const key = randomUUID();
       const results = await Promise.all([reset(teacher, body, key), reset(teacher, body, key)]);
       assert.equal(results[0].status, 200);
@@ -1334,7 +1344,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal((await owner.request('/me')).status, 401);
       assert.equal((await second.request('/me')).status, 401);
       await second.request('/auth/csrf');
-      for (const secret of [ownerPassword, '000002'])
+      for (const secret of [newPassword, '000002'])
         assert.equal((await second.request('/auth/login', { method: 'POST', body: { username: '0000000002', password: secret } })).status, 401);
       const events = await db.auditEvent.findMany({ where: { resource_id: id, action: 'reset_password' } });
       assert.equal(events.length, 1);

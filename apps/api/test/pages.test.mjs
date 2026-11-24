@@ -3355,17 +3355,20 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       const oldSession = await signIn(browser, web, username, password, 1440, null);
       try {
         await next.fill(replacement);
-        // The password write succeeds even if fetching the rotated session token needs a retry.
-        await helper.route('**/api/v1/auth/csrf', route => route.abort(), { times: 1 });
+        let csrfReads = 0;
+        const trackCsrf = request => { if (request.url().endsWith('/auth/csrf')) csrfReads++; };
+        helper.on('request', trackCsrf);
         await save.click();
         await visible(helper.getByRole('status').filter({ hasText: '密码已更改。' }));
-        await button(helper, '重新连接').click();
-        await visible(save);
+        helper.off('request', trackCsrf);
+        assert.equal(csrfReads, 0);
         assert.equal(await current.inputValue(), '');
         assert.equal(await next.inputValue(), '');
         await oldSession.reload();
         await visible(button(oldSession, '登录'));
+        const logout = helper.waitForResponse(response => response.url().endsWith('/auth/logout'));
         await button(helper, '退出登录').click();
+        assert.equal((await logout).status(), 200);
         await helper.getByLabel('账号', { exact: true }).fill(username);
         await helper.getByLabel('当前密码').fill(password);
         await button(helper, '登录').click();

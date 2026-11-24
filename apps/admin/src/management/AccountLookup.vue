@@ -16,9 +16,6 @@ const route = useRoute();
 const number = ref('');
 const managedRole = ref<'organizer' | 'reviewer' | 'tech_admin'>('organizer');
 const account = ref<AccountSummary>();
-const roleState = computed(() => account.value && {
-  account_id: account.value.account_id, version: account.value.roles_version, roles: account.value.roles,
-});
 const directoryRevision = ref(0);
 const now = ref(Date.now());
 const clock = window.setInterval(() => { now.value = Date.now(); }, 1000);
@@ -137,23 +134,23 @@ function saved(roles: AccountRoles, notice: string) {
     <RouterLink v-if="!technical && !detailId" class="onboard" to="/manage/imports">导入学生名单建档</RouterLink>
     <p role="status">{{ message || (account ? '已找到可查看的账号' : '') }}</p>
     <button v-if="detailId && message" @click="lookup()">重新读取</button>
-    <section v-if="account && roleState" class="identity-card" aria-label="账号核对结果">
+    <section v-if="account" class="identity-card" aria-label="账号核对结果">
       <header class="section-heading"><h2>{{ account.display_name }}</h2><span class="state-chip">{{ account.status === 'active' ? '启用' : '停用' }}</span></header>
       <dl>
         <dt>{{ account.student_id ? '学号' : '登录账号' }}</dt><dd>{{ account.username }}</dd>
         <template v-if="account.credential_pending"><dt>登录凭证</dt><dd>待发放，暂不可登录</dd></template>
         <dt>角色与有效期</dt>
-        <dd><ul><li v-for="grant in roleState.roles" :key="grant.role"><strong>{{ labels[grant.role] }}</strong> · {{ validity(grant) }}</li></ul>
-          <span v-if="!roleState.roles.length">无角色</span></dd>
+        <dd><ul><li v-for="grant in account.roles" :key="grant.role"><strong>{{ labels[grant.role] }}</strong> · {{ validity(grant) }}</li></ul>
+          <span v-if="!account.roles.length">无角色</span></dd>
       </dl>
       <p v-if="account.student_id">具备负责人资格不等于已加入某个活动。</p>
       <label v-if="technical" class="role-choice">要办理的角色
         <select v-model="managedRole"><option value="organizer">负责人</option><option value="reviewer">老师审核员</option><option value="tech_admin">技术管理员</option></select>
       </label>
-      <AccountRoleForm v-if="technical || (account.student_id && roleState.roles.some(g => g.role === 'student')
-        && !roleState.roles.some(g => g.role === 'reviewer' || g.role === 'tech_admin'))"
-        :key="[account.account_id, roleState.version, managedRole].join('/')" :role="technical ? managedRole : 'organizer'"
-        :account="account" :state="roleState" :now="now"
+      <AccountRoleForm v-if="technical || (account.student_id && account.roles.some(g => g.role === 'student')
+        && !account.roles.some(g => g.role === 'reviewer' || g.role === 'tech_admin'))"
+        :key="[account.account_id, account.roles_version, managedRole].join('/')" :role="technical ? managedRole : 'organizer'"
+        :account="account" :now="now"
         @saved="saved" @reload="lookup" />
       <details :key="account.account_id + ':' + account.version" class="account-security">
         <summary>账号安全</summary>

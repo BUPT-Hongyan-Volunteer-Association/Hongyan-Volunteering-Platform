@@ -99,7 +99,7 @@ export class AccountController {
     await this.db.$transaction(async (tx) => {
       const updated = await tx.account.updateMany({
         where: { id, active: true, password_hash: account.password_hash },
-        data: { password_hash, must_change_password: false },
+        data: { password_hash, must_change_password: false, version: { increment: 1 } },
       });
       if (
         !updated.count ||
@@ -112,6 +112,7 @@ export class AccountController {
       await tx.httpSession.create({ data: issued.data });
     });
     setCookie(res, issued);
+    res.set('Cache-Control', 'no-store').set('X-CSRF-Token', issued.data.csrf_token);
     return envelope({ completed: true });
   }
 

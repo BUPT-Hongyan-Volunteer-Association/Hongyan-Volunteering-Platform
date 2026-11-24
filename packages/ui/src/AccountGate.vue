@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue';
 import {
   ApiError,
-  changePassword,
+  changeOwnPassword,
   getProfile,
   login,
   logout,
@@ -48,20 +48,14 @@ async function submit(action: 'login' | 'change' | 'logout') {
   busy.value = true;
   message.value = '';
   try {
-    const headers = writeHeaders();
     if (action === 'login')
       await login({
-        headers,
+        headers: writeHeaders(),
         body: { username: username.value, password: password.value },
         throwOnError: true,
       });
-    if (action === 'change')
-      await changePassword({
-        headers,
-        body: { current_password: password.value, new_password: next.value },
-        throwOnError: true,
-      });
-    if (action === 'logout') await logout({ headers, throwOnError: true });
+    if (action === 'change') await changeOwnPassword(password.value, next.value);
+    if (action === 'logout') await logout({ headers: writeHeaders(), throwOnError: true });
     showPassword.value = false;
     password.value = '';
     next.value = '';
