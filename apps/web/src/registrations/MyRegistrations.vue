@@ -40,11 +40,12 @@ const rows = computed(() =>
 );
 const error = ref('');
 const feedback = ref('');
+const refreshing = ref(false);
 let serial = 0;
 async function load() {
   const turn = ++serial;
   error.value = '';
-  result.value = undefined;
+  refreshing.value = true;
   try {
     const { data } = await listMyRegistrations({
       query: item.value
@@ -58,13 +59,18 @@ async function load() {
     });
     if (turn === serial) result.value = data.data;
   } catch (e) {
-    if (turn === serial) error.value = e instanceof Error ? e.message : '报名记录读取失败';
+    if (turn === serial) {
+      result.value = undefined;
+      error.value = e instanceof Error ? e.message : '报名记录读取失败';
+    }
+  } finally {
+    if (turn === serial) refreshing.value = false;
   }
 }
 function filter(value: string) {
   void router.push({ path: '/registrations', query: { status: value || undefined } });
 }
-watch(() => route.fullPath, () => { feedback.value = ''; void load(); }, { immediate: true });
+watch(() => route.fullPath, () => { result.value = undefined; feedback.value = ''; void load(); }, { immediate: true });
 onMounted(() => window.addEventListener('focus', load));
 onUnmounted(() => {
   serial++;
@@ -104,7 +110,7 @@ onUnmounted(() => {
         </template>
       </RecordSummaryList>
       <p v-else>{{ item ? '未找到该报名记录。' : '暂无符合条件的报名记录。' }}</p>
-      <RequestQueue v-if="item && result.items[0]" :registration="result.items[0]" :activity-id="result.items[0].activity_id"
+      <RequestQueue v-if="item && result.items[0]" :registration="result.items[0]" :writes-paused="refreshing" :activity-id="result.items[0].activity_id"
         @changed="msg => { feedback = msg; load(); }" />
       <Pager
         v-if="!item"

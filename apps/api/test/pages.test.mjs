@@ -898,6 +898,23 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await visible(owner.getByText('已将1 人设为候补。', { exact: true }));
     });
 
+    await t.test('已打开的报名名单在成员被移出后拒绝旧窗口决定', async () => {
+      await helper.goto(web + '/managed/' + first.id + '/roster');
+      await helper.getByLabel('选择名单测试1', { exact: true }).check();
+      const account = await db.account.findUniqueOrThrow({ where: { username: '0000000004' } });
+      const key = { activity_id: first.id, account_id: account.id };
+      const member = await db.activityMember.delete({ where: { activity_id_account_id: key } });
+      try {
+        const response = helper.waitForResponse(r => r.url().includes('/registration-decisions') && r.request().method() === 'POST');
+        await button(helper, '不录取所选').click();
+        assert.equal((await response).status(), 404);
+        await visible(helper.getByRole('alert'));
+        assert.equal(await helper.getByLabel('选择名单测试1', { exact: true }).count(), 0);
+      } finally {
+        await db.activityMember.create({ data: member });
+      }
+    });
+
     await t.test('活动发现保留搜索、校区、服务日期和报名阶段', async () => {
       const rev = await db.activityRevision.findFirstOrThrow({
         where: { activity_id: first.id, revision: 1 },
@@ -1454,6 +1471,17 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await button(student, '申请报名').click();
       await visible(button(student, '已提交，待审核'));
 
+      await link(student.locator('.activity-detail'), '我的报名').click();
+      await link(student, '办理与进度').click();
+      const original = student.url().split('/registrations/')[1].split('?')[0];
+      await button(student, '撤回报名').click();
+      await visible(student.getByText('已撤回报名。', { exact: true }));
+      await link(student, '查看活动详情').click();
+      await student.getByText('报名说明（选填）', { exact: true }).click();
+      await student.getByLabel('申请说明').fill('可准时到场');
+      await button(student, '重新申请报名').click();
+      await visible(button(student, '已提交，待审核'));
+
       await owner.goto(web + '/managed');
       await link(owner, '校园服务甲').click();
       await link(owner, '报名名单').click();
@@ -1474,6 +1502,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       const row = await db.registration.findFirstOrThrow({
         where: { activity_id: first.id, student: { student_no: '0000000001' } },
       });
+      assert.equal(row.id, original);
       assert.equal(row.status, 'accepted');
       assert.equal(
         await db.registrationDecisionEvent.count({ where: { registration_id: row.id } }),
@@ -1485,6 +1514,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await link(student, '办理与进度').click();
       const detail = student.url();
       await student.getByLabel('申请原因').fill('时间冲突');
+      const refreshed = student.waitForResponse(r => r.url().includes('/me/exit-requests?'));
+      await student.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await refreshed;
+      assert.equal(await student.getByLabel('申请原因').inputValue(), '时间冲突');
       await button(student, '申请退出整项活动').click();
       await visible(button(student, '撤回退出申请'));
       await link(owner, '退出与恢复').click();

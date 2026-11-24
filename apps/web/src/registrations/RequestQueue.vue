@@ -102,7 +102,10 @@ watch(
   },
   { flush: 'sync' },
 );
-watch([kind, status, page, () => props.requestId, () => props.activityId], load, { immediate: true });
+watch(() => props.registration?.status, value => {
+  if (value === 'exited') kind.value = 'restoration';
+});
+watch([kind, status, page, () => props.requestId, () => props.activityId, () => props.registration], load, { immediate: true });
 onUnmounted(() => {
   serial++;
 });
