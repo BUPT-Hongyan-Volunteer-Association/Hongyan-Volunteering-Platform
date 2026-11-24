@@ -161,7 +161,7 @@ onUnmounted(() => { mounted = false; });
 
 <template>
   <section class="reading-area" aria-labelledby="attendance-heading">
-    <header class="page-heading attendance-heading">
+    <header class="page-heading inline-actions">
       <h2 id="attendance-heading">现场人员记录</h2>
       <div class="page-actions">
         <RouterLink class="button" :to="{ path: '/managed/' + path.id + '/incidents', query: { page: $route.query.page } }">异常记录</RouterLink>
@@ -236,16 +236,15 @@ onUnmounted(() => { mounted = false; });
 </template>
 
 <style scoped>
-.attendance-heading {
-  margin-bottom: 24px;
-}
 .filters {
-  align-items: end;
+  align-items: center;
   gap: 12px 16px;
   margin-bottom: 20px;
 }
-.filters .state-chip {
-  margin-block-end: 8px;
+.filters .date-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 .attendance-form {
   max-width: 42rem;
@@ -262,7 +261,16 @@ onUnmounted(() => { mounted = false; });
   padding: 0;
   border: 0;
 }
-.date-and-status,
+.date-and-status {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 8.25rem);
+  align-items: start;
+  gap: 12px;
+}
+.date-and-status :deep(.el-select__wrapper) { min-height: 40px; }
+@media (max-width: 700px), (pointer: coarse) {
+  .date-and-status :deep(.el-select__wrapper) { min-height: 44px; }
+}
 .identity-row {
   display: flex;
   flex-wrap: wrap;

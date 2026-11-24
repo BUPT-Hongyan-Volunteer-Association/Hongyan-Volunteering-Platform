@@ -115,7 +115,7 @@ async function reloadReceipts() {
 
 <template>
   <section :class="{ 'reading-area': !item }">
-    <div class="page-heading">
+    <div class="page-heading inline-actions">
       <h2>通知与回执</h2>
       <RouterLink v-if="!compose" class="button primary" :to="{ path: listPath, query: { ...listQuery, compose: '1' } }">发布通知</RouterLink>
     </div>
