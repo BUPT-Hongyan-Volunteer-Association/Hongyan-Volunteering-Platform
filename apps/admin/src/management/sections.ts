@@ -4,7 +4,7 @@ interface AdminSection {
   records: PreviewRecord[];
 }
 export const sections = {
-  corrections: { title: '错账修复组', records: [] },
+  corrections: { title: '错帐修复', records: [] },
   incidents: { title: '异常复核', records: [] },
   appeals: { title: '申诉与更正', records: [] },
   students: { title: '学生档案', records: [] },

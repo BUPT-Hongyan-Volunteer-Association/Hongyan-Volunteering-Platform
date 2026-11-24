@@ -8,6 +8,8 @@ import {
   type TimelineActivity,
   type TimelineItem,
 } from '@hongyan/contracts';
+import StatusFilter from '../StatusFilter.vue';
+import SegmentedControl from '../SegmentedControl.vue';
 import UiIcon from '../UiIcon.vue';
 import {
   activityTypes,
@@ -329,14 +331,14 @@ onUnmounted(() => {
         <span class="sample-label">北京时间</span>
       </div>
       <div v-if="!fullMobileDetail" class="view-actions">
-        <div class="segmented view-switch" role="group" aria-label="显示方式">
+        <SegmentedControl class="view-switch" aria-label="显示方式">
           <button :aria-pressed="!chart" @click="set('view', 'list')">
             <UiIcon name="List" />列表
           </button>
           <button :aria-pressed="chart" aria-label="时间轴" @click="set('view', 'chart')">
             <UiIcon name="Calendar" />日程
           </button>
-        </div>
+        </SegmentedControl>
         <button
           v-if="mobile"
           class="filter-toggle"
@@ -415,7 +417,9 @@ onUnmounted(() => {
               @update:model-value="set('revision', $event)"
             />
           </div>
-          <label class="tick"
+          <StatusFilter v-if="scope === 'all'" label="审核状态" :model-value="route.query.pending ? 'pending' : 'all'"
+            :options="{ all: '全部', pending: '待审核' }" @update:model-value="set('pending', $event === 'pending' ? '1' : '')" />
+          <label v-else class="tick"
             ><input
               type="checkbox"
               :checked="!!route.query.pending"
@@ -452,7 +456,7 @@ onUnmounted(() => {
         </div>
         <div class="scale-control">
           <span id="time-scale-label">时间刻度</span>
-          <div class="segmented scales" role="group" aria-labelledby="time-scale-label">
+          <SegmentedControl class="scales" aria-labelledby="time-scale-label">
             <button
               v-for="(label, key) in units"
               :key="key"
@@ -461,7 +465,7 @@ onUnmounted(() => {
             >
               {{ label }}
             </button>
-          </div>
+          </SegmentedControl>
         </div>
       </div>
     </template>
@@ -666,28 +670,6 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--line);
   padding-bottom: 16px;
   margin-bottom: 16px;
-}
-.segmented {
-  display: inline-flex;
-  border: 1px solid var(--field-line);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.segmented button {
-  min-width: 42px;
-  border: 0;
-  border-radius: 0;
-}
-.segmented button + button {
-  border-left: 1px solid var(--line);
-}
-.segmented button[aria-pressed='true'] {
-  color: white;
-  background: var(--brand);
-}
-.segmented button:focus-visible {
-  outline-offset: -3px;
-  outline: 2px solid var(--yellow);
 }
 .schedule-filters,
 .schedule-controls,

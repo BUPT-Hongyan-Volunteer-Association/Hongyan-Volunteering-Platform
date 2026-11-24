@@ -1,20 +1,25 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import {
   ApiError, createCommand, listActivityIncidents, listIncidentsForReview, listMyIncidents, reviewIncident, revokeIncident,
   type Incident,
 } from '@hongyan/contracts';
+import StatusFilter from './StatusFilter.vue';
 import Pager from './Pager.vue';
 import { beijing } from './hourDisplay';
 import { message, noAccess, usePageRead } from './usePageRead';
 
 const props = defineProps<{ mode: 'self' | 'organizer' | 'admin' }>();
 const emit = defineEmits<{ denied: [] }>();
-const route = useRoute(), page = ref(1), size = 15;
+const router = useRouter(), route = useRoute(), page = ref(1), size = 15;
 const studentId = computed(() => typeof route.query.student_id === 'string' ? route.query.student_id : undefined);
-const status = ref<Incident['status'] | 'all'>('all');
 const labels: Record<Incident['status'], string> = { pending: '待核实', confirmed: '已确认', revoked: '已撤销', rejected: '不成立' };
+const status = computed(() => {
+  const value = route.query.status;
+  return props.mode === 'admin' && typeof value === 'string' && Object.hasOwn(labels, value)
+    ? value as Incident['status'] : 'all';
+});
 const { data, loading, error, refresh } = usePageRead(
   () => [props.mode, route.params.id, studentId.value, page.value, status.value], async (signal) => {
     const query = { page: page.value, page_size: size };
@@ -55,11 +60,11 @@ async function decide(kind: 'confirmed' | 'rejected' | 'revoked') {
 }
 </script>
 <template>
-  <section class="incident-list">
-    <h2>{{ mode === 'self' ? '本人异常记录' : '异常记录' }}</h2>
-    <label v-if="mode === 'admin'">异常状态
-      <select v-model="status"><option value="all">全部</option><option v-for="(label, value) in labels" :key="value" :value="value">{{ label }}</option></select>
-    </label>
+  <section class="incident-list" :class="{ embedded: mode !== 'admin' }">
+    <h1 v-if="mode === 'admin'">异常记录</h1>
+    <h2 v-else>{{ mode === 'self' ? '本人异常记录' : '异常记录' }}</h2>
+    <StatusFilter v-if="mode === 'admin'" label="异常状态" :model-value="status" :options="{ all: '全部', ...labels }"
+      @update:model-value="router.push({ query: { ...route.query, status: $event === 'all' ? undefined : $event } })" />
     <p v-if="result" role="status">{{ result }}</p>
     <p v-if="error" role="alert">{{ error }} <button @click="refresh()">重读异常记录</button></p>
     <p v-else-if="loading" role="status">正在读取异常记录…</p>
@@ -70,8 +75,8 @@ async function decide(kind: 'confirmed' | 'rejected' | 'revoked') {
         <p>{{ row.facts }}</p>
         <p v-if="row.review_reason">核实意见：{{ row.review_reason }}</p>
         <div class="page-actions">
-          <RouterLink v-if="mode === 'self' && row.status === 'confirmed'" :to="{ path: '/mine/feedback', query: { target: row.id, kind: 'incident' } }">反馈这条异常</RouterLink>
-          <RouterLink v-if="mode === 'admin' && row.source_batch_id" :to="'/hours/' + row.source_batch_id">查看来源批次</RouterLink>
+          <RouterLink class="button" v-if="mode === 'self' && row.status === 'confirmed'" :to="{ path: '/mine/feedback', query: { target: row.id, kind: 'incident' } }">反馈这条异常</RouterLink>
+          <RouterLink class="button" v-if="mode === 'admin' && row.source_batch_id" :to="'/hours/' + row.source_batch_id">查看来源批次</RouterLink>
           <button v-if="mode === 'admin' && ['pending', 'confirmed'].includes(row.status)" :disabled="busy" @click="selected = row">
             {{ row.status === 'pending' ? '核实异常' : '处理撤销' }}
           </button>
@@ -93,7 +98,8 @@ async function decide(kind: 'confirmed' | 'rejected' | 'revoked') {
   </section>
 </template>
 <style scoped>
-.incident-list { overflow-wrap: anywhere; margin-block: 22px; }
+.incident-list { overflow-wrap: anywhere; }
+.incident-list.embedded { margin-block: 22px; }
 .incident-rows { list-style: none; padding: 0; }
 .incident-rows li { padding: 12px 0; border-block-start: 1px solid var(--line); }
 .incident-rows fieldset { min-width: 0; border: 1px solid var(--line); padding: 12px; }

@@ -198,7 +198,7 @@ export async function reviewGroup(tx: Tx, id: string, input: HourReviewDecision,
       });
     }
     await enqueueHourNotices(tx, 'hours_result', id, actor.account_id, [...recipients.values()].map(({ lines, ...recipient }) => ({
-      ...recipient, title: '时长错账修复结果', body: lines.length > 20
+      ...recipient, title: '时长错帐修复结果', body: lines.length > 20
         ? '你的 ' + lines.length + ' 条时长变更已生效，请查看我的时长。' : lines.join('\n'),
     })));
   }
