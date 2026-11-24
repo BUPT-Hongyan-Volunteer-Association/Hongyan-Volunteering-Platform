@@ -34,7 +34,9 @@
    | 学生与负责人端 | `pnpm dev:web` | `http://localhost:5173` |
    | 审核后台 | `pnpm dev:admin` | `http://localhost:5174` |
 
-学生 `0000000001`、负责人 `0000000002` 首登使用学号后六位，审核员 `demo.teacher` 使用上述密码。多角色体验可运行 `pnpm demo:open`，打开 `http://127.0.0.1:5180`。macOS 可双击 `一键启动.command` 一并启动服务。首次双击前在 `.local/demo.env` 设置同一 `DEMO_STAFF_PASSWORD`。
+学生 `0000000001`、负责人 `0000000002` 首登使用学号后六位，审核员 `demo.teacher` 使用上述密码。多角色体验可运行 `pnpm demo:open`，打开 `http://127.0.0.1:5180`。
+
+macOS 可双击 `一键启动.command` 一并启动服务。首次双击前在 `.local/demo.env` 设置同一 `DEMO_STAFF_PASSWORD`。脚本每次新启动 API 前都会重新生成接口和 Prisma 客户端，并向 `apps/api/.env` 配置的开发库应用待执行的迁移。服务已就绪时会直接复用。
 
 选择学生、负责人或审核员后，Chromium、Chrome 和 Edge 会将对应的独立窗口最大化至当前屏幕的可用桌面区域。标签栏和地址栏保持可见，调整窗口大小即可检查其他宽度下的布局。Firefox 和 WebKit 使用普通窗口，可手动调整大小。
 
