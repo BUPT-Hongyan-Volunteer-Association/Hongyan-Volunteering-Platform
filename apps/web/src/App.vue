@@ -126,9 +126,6 @@ const crumb = computed(() => {
   </AccountGate>
 </template>
 <style scoped>
-.workspace {
-  min-width: 0;
-}
 .management-links {
   margin-top: 16px;
   padding-top: 16px;

@@ -294,10 +294,6 @@ watch(
   font-size: 14px;
   color: var(--muted);
 }
-.entry-list a[aria-current] {
-  background: var(--brand-tint);
-  box-shadow: inset 3px 0 var(--brand);
-}
 .entry-list small {
   display: block;
   color: var(--muted);
