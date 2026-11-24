@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import './notices.css';
 import { computed } from 'vue';
 import PublishNotice from './PublishNotice.vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -227,7 +228,7 @@ async function reloadReceipts() {
             />
 
           </template>
-          <p v-if="!current.is_current" class="hint">
+          <p v-if="!current.is_current" class="notice-hint">
             这条通知已被后续版本替代，回执仅作为历史记录保留。
           </p>
         </section>
@@ -238,27 +239,12 @@ async function reloadReceipts() {
 </template>
 
 <style scoped>
-.notice-queue a {
-  flex-wrap: wrap;
-}
-.notice-queue a[aria-current] {
-  background: var(--brand-tint);
-  box-shadow: inset 3px 0 var(--brand);
-}
 .receipt-scroll {
   overflow-x: auto;
 }
-.notice-body {
-  white-space: pre-line;
-  line-height: 1.8;
-  margin: 16px 0;
-  /* 通知正文可能带长链接或长编号，必须允许在任意位置断行，否则会撑破页面。 */
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
 .receipt-summary {
   margin: 4px 0 12px;
-  color: var(--text-muted, #666);
+  color: #666;
 }
 .row-actions :deep(.platform-select) {
   --select-width: 11rem;
@@ -279,11 +265,7 @@ async function reloadReceipts() {
 .receipt-table td {
   text-align: left;
   padding: 8px 6px;
-  border-bottom: 1px solid var(--border, #e5e5e5);
+  border-bottom: 1px solid #e5e5e5;
   white-space: nowrap;
-}
-.hint {
-  color: var(--text-muted, #666);
-  margin-top: 12px;
 }
 </style>

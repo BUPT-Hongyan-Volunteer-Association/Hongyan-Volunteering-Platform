@@ -36,9 +36,6 @@ onUnmounted(() => media.removeEventListener('change', resize));
   </div>
 </template>
 <style scoped>
-.workspace {
-  min-width: 0;
-}
 .admin-rail {
   padding-top: 24px;
 }
@@ -66,6 +63,7 @@ onUnmounted(() => media.removeEventListener('change', resize));
   .shell-content {
     order: 2;
     width: 100%;
+    padding-bottom: 32px;
   }
   .admin-rail {
     order: 1;
@@ -88,9 +86,6 @@ onUnmounted(() => media.removeEventListener('change', resize));
     min-height: 44px;
     gap: 5px;
     font-size: 13px;
-  }
-  .shell-content {
-    padding-bottom: 32px;
   }
 }
 </style>

@@ -27,7 +27,6 @@ defineProps<{ selected: boolean }>();
     padding-right: clamp(16px, 2vw, 32px);
   }
   .has-detail > .record-detail-pane {
-    min-width: 0;
     padding-left: clamp(18px, 2.5vw, 40px);
     border-left: 1px solid var(--line);
   }

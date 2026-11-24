@@ -1,0 +1,14 @@
+.notice-queue > a {
+  flex-wrap: wrap;
+}
+.notice-body {
+  white-space: pre-line;
+  line-height: 1.8;
+  margin: 16px 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.notice-hint {
+  color: #666;
+  margin-top: 12px;
+}

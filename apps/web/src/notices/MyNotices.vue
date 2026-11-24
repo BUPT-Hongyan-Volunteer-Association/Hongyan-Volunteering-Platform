@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import './notices.css';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -269,7 +270,7 @@ onUnmounted(() => {
           {{ detailError }} <button @click="refreshDetail()">重新读取</button>
         </p>
         <p v-else-if="!detail" role="status">正在读取通知详情…</p>
-        <section v-else-if="selected" class="notice-detail">
+        <section v-else-if="selected">
           <h2>{{ selected.title }}</h2>
           <div class="meta-line">
             {{ localDateTime(selected.published_at) }} 发布 · 第
@@ -314,7 +315,7 @@ onUnmounted(() => {
               标记已读
             </button>
           </div>
-          <p v-if="!selected.is_current" class="hint">
+          <p v-if="!selected.is_current" class="notice-hint">
             这条通知已被同一活动的后续版本替代，可在列表查看最新通知。
           </p>
         </section>
@@ -330,14 +331,6 @@ onUnmounted(() => {
 
 <style scoped>
 .confirm-action { display: flex; justify-content: center; flex-basis: 100%; margin-block: 8px; }
-.notice-body {
-  white-space: pre-line;
-  line-height: 1.8;
-  margin: 16px 0;
-  /* 通知正文可能带长链接或长编号，必须允许在任意位置断行，否则会撑破页面。 */
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
 .row-actions {
   display: flex;
   justify-content: center;
@@ -357,10 +350,6 @@ onUnmounted(() => {
 .state-chip[data-tone='wait'] {
   color: #8a5a00;
 }
-.hint {
-  color: var(--text-muted, #666);
-  margin-top: 12px;
-}
 .inbox-tools {
   display: flex;
   align-items: center;
@@ -377,12 +366,5 @@ onUnmounted(() => {
 }
 .inbox-tools .search-field {
   width: min(100%, 220px);
-}
-.notice-queue a {
-  flex-wrap: wrap;
-}
-.notice-queue a[aria-current] {
-  background: var(--brand-tint);
-  box-shadow: inset 3px 0 var(--brand);
 }
 </style>
