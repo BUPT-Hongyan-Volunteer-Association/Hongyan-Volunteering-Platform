@@ -68,10 +68,10 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
   const teacherAccount = await db.account.findUniqueOrThrow({ where: { username: 'demo.teacher' } });
   const bobStudent = await db.student.findUniqueOrThrow({ where: { student_no: '0000000004' } });
 
-  await t.test('新实例启动只回收超时的导出任务', async () => {
+  await t.test('新实例保留运行中的任务，并在后续轮询时接管已超时任务', async () => {
     const running = await db.exportJob.create({
       data: {
-        actor_id: ownerAccount.id, type: 'admin_students',
+        actor_id: teacherAccount.id, type: 'admin_students',
         scope: { type: 'admin_students' }, status: 'running',
       },
     });
@@ -80,6 +80,10 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     try {
       await delay(300);
       assert.equal((await db.exportJob.findUniqueOrThrow({ where: { id: running.id } })).status, 'running');
+      await db.exportJob.update({
+        where: { id: running.id }, data: { updated_at: new Date(Date.now() - 31 * 60_000) },
+      });
+      assert.equal((await waitExport(teacher, running.id)).status, 'ready');
     } finally {
       await second.close();
       await db.exportJob.delete({ where: { id: running.id } });
@@ -414,6 +418,18 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     assert.equal(expired.status, 'expired');
     const expiredDownload = await owner.request('/exports/' + expiring.id + '/download');
     assert.equal(expiredDownload.status, 409);
+
+    for (const [resource, actor, code] of [
+      [myJob.id, bobStudent.account_id, 'not_found'],
+      [job.id, ownerAccount.id, 'not_found'],
+      [expiring.id, ownerAccount.id, 'invalid_state'],
+    ]) {
+      const events = result(await teacher.request('/admin/audit-events?resource_id=' + resource +
+        '&actor_id=' + actor), 200).items;
+      const denied = events.filter((event) => event.action === 'download');
+      assert.equal(denied.length, 1);
+      assert.deepEqual(JSON.parse(denied[0].after), { result: 'denied', error: code });
+    }
   });
 
   await t.test('后台审计按操作者、对象和时间查询，展示脱敏前后值', async () => {

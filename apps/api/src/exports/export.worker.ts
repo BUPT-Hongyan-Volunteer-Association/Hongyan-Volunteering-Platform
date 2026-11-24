@@ -17,12 +17,7 @@ export class ExportWorker implements OnApplicationBootstrap, OnModuleDestroy {
 
   constructor(private db: Database) {}
 
-  async onApplicationBootstrap() {
-    // 只回收超时的 running，避免滚动部署时干扰其他实例正在生成的任务。
-    await this.db.exportJob.updateMany({
-      where: { status: 'running', updated_at: { lt: new Date(Date.now() - staleMs) } },
-      data: { status: 'pending', version: { increment: 1 }, error_message: null },
-    });
+  onApplicationBootstrap() {
     this.timer = setInterval(() => this.wake(), pollMs);
     this.timer.unref();
     this.cleanupTimer = setInterval(() => void this.cleanup(), cleanupMs);
@@ -49,30 +44,33 @@ export class ExportWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private async drain() {
     while (!this.stopped) {
       const claim = await this.db.$transaction(async (tx) => {
-        const [row] = await tx.$queryRaw<{ id: string; version: number }[]>`
-          SELECT id, version FROM export_job WHERE status = 'pending'
+        const [row] = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id FROM export_job
+          WHERE status = 'pending' OR (status = 'running' AND updated_at < ${new Date(Date.now() - staleMs)})
           ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`;
         if (!row) return undefined;
         return tx.exportJob.update({
           where: { id: row.id },
           data: { status: 'running', version: { increment: 1 } },
+          select: { id: true, version: true, scope: true },
         });
       });
       if (!claim) return;
       try {
-        const content = await this.db.$transaction(async (tx) => {
-          const job = await tx.exportJob.findUniqueOrThrow({ where: { id: claim.id } });
-          const built = await exportContent(tx, exportedScope(job));
-          return { fileName: built.fileName, buffer: exportBuffer(built.sheet) };
-        }, { isolationLevel: 'RepeatableRead' });
+        const content = await this.db.$transaction(
+          (tx) => exportContent(tx, exportedScope(claim)),
+          { isolationLevel: 'RepeatableRead' },
+        );
+        const buffer = exportBuffer(content.sheet);
         await this.db.exportJob.updateMany({
           where: { id: claim.id, status: 'running', version: claim.version },
           data: {
             status: 'ready',
+            version: { increment: 1 },
             file_name: content.fileName,
             content_type: exportMime,
-            size: content.buffer.length,
-            contents: content.buffer,
+            size: buffer.length,
+            contents: buffer,
             expires_at: new Date(Date.now() + expiryMs),
             error_message: null,
           },
@@ -90,12 +88,11 @@ export class ExportWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private async cleanup() {
     try {
       await this.db.exportJob.updateMany({
-        where: { status: 'ready', expires_at: { lte: new Date() } },
-        data: { status: 'expired', contents: null },
-      });
-      await this.db.exportJob.updateMany({
-        where: { status: 'expired', contents: { not: null } },
-        data: { contents: null },
+        where: { OR: [
+          { status: 'ready', expires_at: { lte: new Date() } },
+          { status: 'expired', contents: { not: null } },
+        ] },
+        data: { status: 'expired', contents: null, version: { increment: 1 } },
       });
     } catch (error) {
       this.logger.error('清理过期导出文件失败', error instanceof Error ? error.stack : String(error));

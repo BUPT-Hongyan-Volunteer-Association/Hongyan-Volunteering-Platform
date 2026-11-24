@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { ExportInput } from '@hongyan/contracts/types';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
@@ -18,7 +18,6 @@ import { ExportWorker } from './export.worker.js';
 const snapshot = { isolationLevel: 'RepeatableRead' } as const;
 const jobMetaSelect = {
   id: true,
-  actor_id: true,
   version: true,
   status: true,
   scope: true,
@@ -56,8 +55,6 @@ function view(job: JobMeta): JobView {
 
 @Injectable()
 export class ExportService {
-  private readonly logger = new Logger(ExportService.name);
-
   constructor(
     private db: Database,
     private workflow: Workflow,
@@ -93,104 +90,54 @@ export class ExportService {
     return response;
   }
 
+  private async readJob(tx: Tx, req: SessionRequest, id: string) {
+    const job = await tx.exportJob.findFirst({
+      where: { id, actor_id: req.actor.account_id },
+      select: jobMetaSelect,
+    });
+    if (!job) return invisible();
+    await authorizeStoredScope(tx, req.actor, exportedScope(job));
+    if (job.status === 'ready' && job.expires_at && job.expires_at.getTime() <= Date.now())
+      job.status = 'expired';
+    return job;
+  }
+
   async get(req: SessionRequest, id: string) {
-    return envelope(await this.db.$transaction(async (tx) => {
-      const job = await tx.exportJob.findFirst({
-        where: { id, actor_id: req.actor.account_id },
-        select: jobMetaSelect,
-      });
-      if (!job) return invisible();
-      await authorizeStoredScope(tx, req.actor, exportedScope(job));
-      return view(await this.expireIfNeeded(tx, job));
-    }, snapshot));
+    return envelope(await this.db.$transaction(async (tx) => view(await this.readJob(tx, req, id)), snapshot));
   }
 
   async download(req: SessionRequest, id: string) {
-    let job: JobMeta | undefined;
-    let file: {
-      contents: Uint8Array | null;
-      file_name: string | null;
-      content_type: string | null;
-      expires_at: Date | null;
-    } | null | undefined;
-    try {
-      job = await this.db.$transaction(async (tx) => {
-        const found = await tx.exportJob.findFirst({
-          where: { id, actor_id: req.actor.account_id },
-          select: jobMetaSelect,
-        });
-        if (!found) invisible();
-        await authorizeStoredScope(tx, req.actor, exportedScope(found));
-        const current = await this.expireIfNeeded(tx, found);
-        if (current.status === 'expired') {
+    const event = { actor_id: req.actor.account_id, action: 'download', resource_type: 'export', resource_id: id };
+    const file = await this.db.$transaction(async (tx) => {
+      try {
+        const job = await this.readJob(tx, req, id);
+        if (job.status !== 'ready' && job.status !== 'expired') return wrongState();
+        const file = job.status === 'ready'
+          ? await tx.exportJob.findUniqueOrThrow({ where: { id }, select: { contents: true } })
+          : null;
+        if (!file?.contents || !job.expires_at || job.expires_at.getTime() <= Date.now())
           throw new BusinessError(409, 'invalid_state', '文件已过期，请重新导出');
-        }
-        if (current.status !== 'ready') return wrongState();
-        return current;
-      }, snapshot);
-      file = await this.db.exportJob.findUnique({
-        where: { id },
-        select: { contents: true, file_name: true, content_type: true, expires_at: true },
-      });
-      if (!file?.contents || !file.expires_at || file.expires_at.getTime() <= Date.now())
-        throw new BusinessError(409, 'invalid_state', '文件已过期，请重新导出');
-    } catch (error) {
-      await this.recordDownload(req, id, 'denied', error, job);
-      throw error;
-    }
-    await this.recordDownload(req, id, 'ready', undefined, job);
-    return {
-      buffer: Buffer.from(file!.contents!),
-      fileName: file!.file_name ?? '导出文件.xlsx',
-      contentType: file!.content_type ?? exportMime,
-    };
-  }
-
-  private async recordDownload(
-    req: SessionRequest,
-    id: string,
-    result: 'ready' | 'denied',
-    error?: unknown,
-    job?: JobMeta,
-  ) {
-    const failed =
-      error instanceof BusinessError
-        ? (error.getResponse() as { code?: string }).code ?? 'error'
-        : error
-          ? 'internal_error'
-          : undefined;
-    try {
-      await this.db.$transaction((tx) => audit(tx, {
-        actor_id: req.actor.account_id,
-        action: 'download',
-        resource_type: 'export',
-        resource_id: id,
-        reason: result === 'ready' ? '下载导出文件' : '下载被拒绝：' + (failed ?? 'unknown'),
-        after: {
-          result,
-          ...(failed && { error: failed }),
-          ...(job && {
-            scope: job.scope,
-            status: job.status,
-            file_name: job.file_name,
-            size: job.size,
-            expires_at: job.expires_at?.toISOString(),
-          }),
-        },
-      }));
-    } catch (auditError) {
-      this.logger.error('记录导出下载审计失败 ' + id,
-        auditError instanceof Error ? auditError.stack : String(auditError));
-    }
-  }
-
-  private async expireIfNeeded(tx: Tx, job: Pick<JobMeta, 'id' | 'status' | 'expires_at'>): Promise<JobMeta> {
-    if (job.status === 'ready' && job.expires_at && job.expires_at.getTime() <= Date.now())
-      return tx.exportJob.update({
-        where: { id: job.id },
-        data: { status: 'expired' },
-        select: jobMetaSelect,
-      });
-    return tx.exportJob.findUniqueOrThrow({ where: { id: job.id }, select: jobMetaSelect });
+        await audit(tx, {
+          ...event, reason: '下载导出文件',
+          after: { result: 'ready', scope: job.scope, status: job.status, file_name: job.file_name,
+            size: job.size, expires_at: job.expires_at.toISOString() },
+        });
+        return {
+          buffer: Buffer.from(file.contents),
+          fileName: job.file_name ?? '导出文件.xlsx',
+          contentType: job.content_type ?? exportMime,
+        };
+      } catch (error) {
+        if (!(error instanceof BusinessError)) throw error;
+        const { code } = error.getResponse() as { code: string };
+        await audit(tx, {
+          ...event, reason: '下载被拒绝：' + code, after: { result: 'denied', error: code },
+        });
+        // 提交拒绝访问的记录后，再将业务错误交给 HTTP 层。
+        return error;
+      }
+    }, snapshot);
+    if (file instanceof BusinessError) throw file;
+    return file;
   }
 }
