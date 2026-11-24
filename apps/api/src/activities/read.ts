@@ -6,6 +6,9 @@ import { slots } from './schedule.js';
 import { denied, invalid } from '../http.js';
 
 export const staff = (a: Actor) => a.roles.includes('reviewer') || a.roles.includes('tech_admin');
+export const eligibleOrganizer = (now: Date): Prisma.AccountWhereInput => ({
+  active: true, roles: { some: { role: 'organizer', OR: [{ expires_at: null }, { expires_at: { gt: now } }] } },
+});
 export function teamManagerScope(actor: Actor): Prisma.ActivityWhereInput {
   if (staff(actor)) return {};
   if (!actor.roles.includes('organizer')) denied();

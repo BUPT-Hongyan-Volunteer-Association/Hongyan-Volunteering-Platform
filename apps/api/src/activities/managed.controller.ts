@@ -6,13 +6,9 @@ import type { SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import { BusinessError, envelope, invalid, invisible } from '../http.js';
 import { activityPage } from './list.js';
-import { managedScope, staff, teamManagerScope } from './read.js';
+import { eligibleOrganizer, managedScope, staff, teamManagerScope } from './read.js';
 import { validate } from './validation.js';
 import { checkVersion, Workflow, type Tx } from './workflow.js';
-
-const eligible = (now: Date): Prisma.AccountWhereInput => ({
-  active: true, roles: { some: { role: 'organizer', OR: [{ expires_at: null }, { expires_at: { gt: now } }] } },
-});
 
 async function readTeam(db: Tx, where: Prisma.ActivityWhereInput) {
   const row = await db.activity.findFirst({
@@ -32,14 +28,13 @@ async function readTeam(db: Tx, where: Prisma.ActivityWhereInput) {
 
 async function staffTeam(tx: Tx, team: Awaited<ReturnType<typeof readTeam>>) {
   const owner = team.items.find(member => member.member_role === 'owner')!;
-  const account = await tx.account.findUniqueOrThrow({
-    where: { id: owner.account_id },
-    select: { active: true, roles: { where: { role: 'organizer' }, select: { expires_at: true } } },
+  const unavailable = await tx.account.findFirst({
+    where: { id: owner.account_id, NOT: eligibleOrganizer(new Date()) },
+    select: { active: true, roles: { where: { role: 'organizer' }, select: { role: true } } },
   });
-  const [grant] = account.roles;
-  const reason = !account.active ? 'account_disabled' : !grant ? 'role_missing'
-    : grant.expires_at && grant.expires_at <= new Date() ? 'role_expired' : undefined;
-  return reason ? { ...team, owner_unavailable_reason: reason } : team;
+  if (!unavailable) return team;
+  const reason = !unavailable.active ? 'account_disabled' : unavailable.roles.length ? 'role_expired' : 'role_missing';
+  return { ...team, owner_unavailable_reason: reason };
 }
 
 const teamSnapshot = (team: Awaited<ReturnType<typeof readTeam>>) => ({
@@ -84,7 +79,9 @@ export class ManagedController {
         },
       ],
     };
-    return envelope(await activityPage(this.db, where, scope, q));
+    return envelope(await activityPage(this.db, where, scope, q, {
+      showOwnerAvailability: staff(req.actor) && q.scope !== 'managed',
+    }));
   }
   @Get(':id/members') async members(
     @Req() req: SessionRequest,
@@ -104,7 +101,7 @@ export class ManagedController {
     return this.db.$transaction(async tx => {
       if (!await tx.activity.count({ where: { id, ...teamManagerScope(req.actor) } })) invisible();
       const match = await tx.student.findFirst({
-        where: { student_no: number, account: eligible(new Date()) },
+        where: { student_no: number, account: eligibleOrganizer(new Date()) },
         select: { account_id: true, student_no: true, account: { select: { display_name: true } } },
       });
       return envelope({ items: match ? [{ account_id: match.account_id, student_no: match.student_no,
@@ -124,7 +121,7 @@ export class ManagedController {
       const before = await readTeam(tx, { id });
       checkVersion(before.version, input.expected_version);
       if (before.items.some(member => member.account_id === input.account_id)) return before;
-      if (!await tx.account.count({ where: { id: input.account_id, ...eligible(new Date()) } }))
+      if (!await tx.account.count({ where: { id: input.account_id, ...eligibleOrganizer(new Date()) } }))
         invalid('account_id', '该账号当前没有有效的负责人资格，请重新核对');
       await tx.activityMember.create({ data: { activity_id: id, account_id: input.account_id, member_role: 'collaborator' } });
       return recordTeamChange(tx, id, before, actor.account_id, 'add_activity_member', reason);
@@ -162,7 +159,7 @@ export class ManagedController {
       const before = await readTeam(tx, { id });
       checkVersion(before.version, input.expected_version);
       if (!before.items.some(member => member.account_id === target && member.member_role === 'collaborator') ||
-          !await tx.account.count({ where: { id: target, ...eligible(new Date()) } }))
+          !await tx.account.count({ where: { id: target, ...eligibleOrganizer(new Date()) } }))
         invalid('target_account_id', '请选择本活动中仍有负责人资格的协作者');
       await switchOwner(tx, id, target);
       return recordTeamChange(tx, id, before, actor.account_id, 'transfer_activity_owner', reason);
@@ -201,7 +198,7 @@ export class AdminTeamController {
       await reauthorize();
       if (input.require_unavailable_owner && !('owner_unavailable_reason' in await staffTeam(tx, before)))
         throw new BusinessError(409, 'invalid_state', '现任主负责人资格已恢复，请重新核对');
-      if (qualify.length && await tx.account.count({ where: { id: { in: qualify }, ...eligible(new Date()) } }) !== qualify.length)
+      if (qualify.length && await tx.account.count({ where: { id: { in: qualify }, ...eligibleOrganizer(new Date()) } }) !== qualify.length)
         invalid('members', '新增成员和接任人均须具有有效负责人资格');
       if (!added.length && !removed.length && owner === previous) return staffTeam(tx, before);
       if (removed.length) await tx.activityMember.deleteMany({ where: { activity_id: id, account_id: { in: removed } } });

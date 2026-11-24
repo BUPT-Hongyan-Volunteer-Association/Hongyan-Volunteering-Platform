@@ -1,8 +1,8 @@
 import type { Activity as View } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Database } from '../database.js';
-import { invalid } from '../http.js';
-import { includeView, pagination, project, workingRevision } from './read.js';
+import { denied, invalid } from '../http.js';
+import { eligibleOrganizer, includeView, pagination, project, workingRevision } from './read.js';
 import { matchesCampus } from '@hongyan/contracts/activity';
 import { slots } from './schedule.js';
 
@@ -33,7 +33,7 @@ export async function activityPage(
   where: Prisma.ActivityWhereInput,
   scope: Scope,
   q: Query,
-  studentId?: string,
+  { studentId, showOwnerAvailability = false }: { studentId?: string; showOwnerAvailability?: boolean } = {},
 ) {
   const { page, page_size, skip } = pagination(q);
   const matches = contentFilter(q);
@@ -47,6 +47,13 @@ export async function activityPage(
   );
   const management = scope !== 'public';
   const now = new Date();
+  const availableOwner: Prisma.ActivityMemberWhereInput = { member_role: 'owner', account: eligibleOrganizer(now) };
+  if (q.owner_unavailable !== undefined) {
+    if (!showOwnerAvailability) denied();
+    if (!['true', 'false'].includes(q.owner_unavailable)) invalid('owner_unavailable', '待接管筛选值无效');
+    const members = q.owner_unavailable === 'true' ? { none: availableOwner } : { some: availableOwner };
+    where = { AND: [where, { members }] };
+  }
   return db.$transaction(
     async (tx) => {
       const items: View[] = [];
@@ -62,6 +69,7 @@ export async function activityPage(
           ...(cursor ? { cursor: { id: cursor }, skip: 1 } : { skip: derived ? 0 : skip }),
           include: {
             members: includeView.members,
+            _count: showOwnerAvailability && { select: { members: { where: availableOwner } } },
             reviews: management && {
               where: { status: 'pending' },
               select: { id: true, status: true },
@@ -102,7 +110,7 @@ export async function activityPage(
             total++;
             if (total <= skip || items.length === page_size) continue;
           }
-          items.push(view);
+          items.push(showOwnerAvailability ? { ...view, owner_unavailable: row._count.members === 0 } : view);
         }
         if (!derived || rows.length < take) break;
         cursor = rows[rows.length - 1].id;

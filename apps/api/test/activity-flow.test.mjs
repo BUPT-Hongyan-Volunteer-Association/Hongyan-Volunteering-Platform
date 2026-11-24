@@ -623,9 +623,26 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
         members: [...assignments, incoming], reason: '补入接任人' };
       const put = (body, key) => teacher.write('PUT', path, body, key);
       const where = { account_id_role: { account_id: oldId, role: 'organizer' } };
+      const list = '/organizer/activities?scope=all';
+      const pending = list + '&owner_unavailable=true';
+      const activityQuery = '&q=' + sample.activity_code;
+      assert.equal((await teacher.request(list + activityQuery)).data.items[0].owner_unavailable, false);
+      assert.equal((await teacher.request(list + '&owner_unavailable=unknown')).status, 422);
+      for (const [client, endpoint] of [[student, '/activities?q=' + sample.activity_code],
+        [other, '/organizer/activities?scope=managed' + activityQuery]]) {
+        const rows = (await client.request(endpoint)).data.items;
+        assert.ok(rows.some(activity => activity.id === sample.id));
+        assert.ok(rows.every(activity => !('owner_unavailable' in activity)));
+        assert.equal((await client.request(endpoint + '&owner_unavailable=true')).status, 403);
+      }
       assert.equal((await put(add)).status, 409);
       await db.roleGrant.update({ where, data: { expires_at: new Date(0) } });
       assert.equal((await teacher.request(read)).data.owner_unavailable_reason, 'role_expired');
+      const pages = await Promise.all([1, 2].map(page => teacher.request(pending + '&q=P2026-000&page_size=1&page=' + page)));
+      assert.deepEqual(pages.map(page => page.data.total), [2, 2]);
+      assert.deepEqual(pages.flatMap(page => page.data.items.map(row => [row.activity_code, row.owner_unavailable])),
+        [['P2026-0001', true], ['P2026-0002', true]]);
+      assert.equal((await teacher.request(list + '&owner_unavailable=false' + activityQuery)).data.total, 0);
       assert.equal((await other.request(read)).status, 403);
       assert.equal((await other.request('/me/hours')).status, 200);
       assert.equal((await owner.write('PUT', path, add)).status, 403);
@@ -647,6 +664,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.deepEqual(await put(repair, keys[winner]), outcomes[winner]);
       const after = (await teacher.request(read)).data;
       assert.equal(after.owner_unavailable_reason, undefined);
+      assert.equal((await teacher.request(pending + activityQuery)).data.total, 0);
       assert.deepEqual(after.items.filter(m => m.member_role === 'owner').map(m => m.account_id), [nextId]);
       assert.equal(after.items.find(m => m.account_id === oldId).member_role, 'collaborator');
       assert.equal((await owner.request(read)).status, 200);

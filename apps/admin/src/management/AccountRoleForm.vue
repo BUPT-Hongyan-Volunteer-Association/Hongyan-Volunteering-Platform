@@ -73,6 +73,7 @@ async function submit() {
       </template>
       <p v-else-if="role === 'organizer' && account.student_id">收回后，该账号将失去负责人管理权限，学生身份和历史记录保留。</p>
       <p v-else>收回后，此角色的授权将在下一次请求时失效，其他角色和历史记录保留。</p>
+      <p v-if="editing === 'remove' && role === 'organizer'">若其担任主负责人，请到「活动团队」筛选待接管活动，重新指定主负责人。账号启用并重新获授资格后，可按届时保留的成员身份继续参与活动。</p>
       <label>办理原因<textarea v-model="reason" rows="2" maxlength="2000" required /></label>
       <div class="page-actions">
         <button class="primary" :disabled="busy">{{ busy ? '正在办理…' : editing === 'remove' ? (role === 'organizer' ? '确认收回资格' : '确认收回' + title) : '保存' + title }}</button>

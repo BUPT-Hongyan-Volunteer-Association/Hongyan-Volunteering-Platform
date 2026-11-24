@@ -1635,11 +1635,16 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       await button(teacher, '查询账号').click();
       await button(teacher, '收回负责人资格').click();
       await teacher.getByLabel('办理原因').fill('负责人离任');
+      await visible(teacher.getByText(/若其担任主负责人，请到「活动团队」筛选待接管活动/));
       await button(teacher, '确认收回资格').click();
       await visible(teacher.getByText('已收回负责人资格，学生身份保留。'));
       await link(teacher, '活动团队').click();
+      await teacher.getByLabel('仅看待接管活动').check();
       await teacher.getByLabel('活动名称或编号').fill('P2026-0001');
       await button(teacher, '查询活动').click();
+      const teamRow = teacher.getByRole('listitem').filter({ has: link(teacher, '校园服务甲') });
+      await visible(teamRow.getByText('待接管', { exact: true }));
+      await visible(teamRow.getByText(/主负责人 同学乙/));
       await link(teacher, '校园服务甲').click();
       await visible(teacher.getByText('当前没有负责人角色'));
       await teacher.getByLabel('接任人学号').fill('0000000002');
@@ -1657,6 +1662,12 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
         const row = team.getByRole('row').filter({ has: teacher.getByRole('rowheader', { name, exact: true }) });
         await visible(row.getByText(role, { exact: true }));
       }
+      await link(teacher, '返回活动团队').click();
+      await visible(teacher.getByText('当前筛选范围内没有待接管活动。'));
+      assert.equal(await teacher.getByLabel('活动名称或编号').inputValue(), 'P2026-0001');
+      await teacher.getByLabel('仅看待接管活动').uncheck();
+      await visible(teamRow.getByText(/主负责人 同学甲/));
+      assert.equal(await teamRow.getByText('待接管', { exact: true }).count(), 0);
       await owner.goto(web + '/managed/' + first.id);
       await visible(owner.getByText('交接主负责人', { exact: true }));
       await joined.goto(web + '/mine');
@@ -1670,6 +1681,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       const extra = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 } });
       const second = await extra.newPage();
       second.setDefaultTimeout(8000);
+      const teams = await teacher.context().newPage();
+      teams.setDefaultTimeout(8000);
       const loginAgain = async page => {
         await page.getByLabel('账号', { exact: true }).fill('0000000002');
         await page.getByLabel('当前密码').fill(password);
@@ -1686,10 +1699,15 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
         await link(teacher, '核对同学甲的账号').click();
         await button(teacher, '停用账号').click();
         await visible(teacher.getByText('停用账号 · 同学甲（0000000002）'));
+        await visible(teacher.getByText(/重新启用后，如负责人资格仍有效/));
         await teacher.getByLabel('办理原因').fill('学生暂离试点');
         await fits(teacher);
         await button(teacher, '确认停用').click();
         await visible(teacher.getByText('学生账号已停用，所有旧会话已撤销。'));
+        await teams.goto(admin + '/manage/teams?q=P2026-0001&owner_unavailable=true');
+        await visible(teams.getByText('待接管', { exact: true }));
+        await link(teams, '校园服务甲').click();
+        await visible(teams.getByText('账号已停用', { exact: true }));
         for (const page of [owner, second]) {
           await page.goto(web + '/mine');
           await visible(button(page, '登录'));
@@ -1700,6 +1718,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
         await teacher.getByLabel('已核实该学生仍在学院核定试点范围内').check();
         await button(teacher, '确认启用').click();
         await visible(teacher.getByText('学生账号已恢复启用，原会话仍然失效。'));
+        await link(teams, '返回活动团队').click();
+        await visible(teams.getByText('当前筛选范围内没有待接管活动。'));
         await second.reload();
         await visible(button(second, '登录'));
         await loginAgain(owner);
@@ -1708,6 +1728,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
         assert.equal(await teacher.getByLabel('学号或姓名').inputValue(), '0000000002');
       } finally {
         await teacher.setViewportSize({ width: 1440, height: 900 });
+        await teams.close();
         await extra.close();
       }
     });

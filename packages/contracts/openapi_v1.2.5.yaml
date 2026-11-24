@@ -525,6 +525,11 @@ paths:
           type: string
           description: 仅managed/all允许。
           format: uuid
+      - name: owner_unavailable
+        in: query
+        schema:
+          type: boolean
+        description: 仅授权后台在 all 范围可用。true 仅看待接管活动，false 仅看主负责人有效的活动，省略时返回两者。筛选在分页前生效。
       - name: review_status
         in: query
         required: false
@@ -8299,6 +8304,10 @@ components:
         owner_account_id:
           type: string
           format: uuid
+        owner_unavailable:
+          type: boolean
+          readOnly: true
+          description: 仅后台 all 范围的活动管理列表返回。主负责人账号停用或负责人角色缺失、已到期时为 true。
         my_registration_status:
           type: string
           enum:

@@ -54,6 +54,7 @@ async function submit() {
       <legend>{{ action }}账号 · {{ account.display_name }}（{{ account.username }}）</legend>
       <p v-if="disabling">{{ self ? '你当前的会话也将退出。' : '' }}停用将撤销该账号的全部登录会话，角色和历史记录保留。</p>
       <p v-else>{{ account.credential_pending ? '该账号仍待发放登录凭证，启用后暂不可登录。' : '启用后需重新登录，原来的会话继续失效。' }}</p>
+      <p v-if="disabling">若其担任主负责人，请到「活动团队」筛选待接管活动，重新指定主负责人。重新启用后，如负责人资格仍有效，可按届时保留的成员身份继续参与活动。</p>
       <label v-if="needsVerification" class="verify"><input v-model="verified" type="checkbox" required />已核实该学生仍在学院核定试点范围内</label>
       <label>办理原因<textarea v-model="reason" required rows="2" :maxlength="account.student_id ? 500 : 2000" /></label>
       <div class="page-actions">

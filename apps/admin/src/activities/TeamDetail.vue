@@ -40,7 +40,7 @@ onUnmounted(() => { serial++; });
 </script>
 
 <template>
-  <RouterLink class="back-link" to="/manage/teams">返回活动团队</RouterLink>
+  <RouterLink class="back-link" :to="{ path: '/manage/teams', query: $route.query }">返回活动团队</RouterLink>
   <p v-if="notice" role="status">{{ notice }}</p>
   <p v-if="error" role="alert">{{ error }} <button @click="load">重试</button></p>
   <section v-else-if="activity && team && owner" class="team">
