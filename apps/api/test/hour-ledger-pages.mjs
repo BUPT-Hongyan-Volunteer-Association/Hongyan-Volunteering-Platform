@@ -219,7 +219,6 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   ]);
 
   // 跨两页勾选学生，导出所选学生汇总
-  const checkStudents = [];
   for (let index = 0; index < 22; index++) {
     const username = '0000008' + String(index).padStart(3, '0');
     const account = await db.account.create({
@@ -231,7 +230,6 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
       },
       include: { student: true },
     });
-    checkStudents.push(account);
     await seedApprovedHours(db, {
       student_id: account.student.id, activity_id: activity.id, service_date: new Date(day),
       hours: '1.0', version: 1, status: 'current', origin_schedule_revision: 1,
@@ -240,22 +238,11 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   }
   await owner.reload();
   await shown(text(owner, /筛选范围内累计/));
-  const firstStudent = owner.getByLabel(/^选择学生 /).first();
-  const firstLabel = await firstStudent.getAttribute('aria-label');
-  await firstStudent.check();
+  await owner.getByLabel(/^选择学生 /).first().check();
   await shown(text(owner, /已选 1 名学生/));
-  const pageTwo = owner.waitForResponse((response) =>
-    response.request().method() === 'GET' && response.url().includes('/hours')
-    && new URL(response.url()).searchParams.get('page') === '2');
   await button(owner, '下一页').click();
-  await pageTwo;
-  await owner.waitForFunction((previous) =>
-    [...document.querySelectorAll('input[aria-label^="选择学生 "]')]
-      .some((node) => node.getAttribute('aria-label') !== previous), firstLabel);
-  const secondLabel = (await owner.getByLabel(/^选择学生 /).evaluateAll((nodes) =>
-    nodes.map((node) => node.getAttribute('aria-label')))).find((label) => label && label !== firstLabel);
-  assert.ok(secondLabel);
-  await owner.getByLabel(secondLabel, { exact: true }).check();
+  await owner.getByRole('navigation', { name: '分页' }).getByText(/^第\s*2\s*\//).waitFor();
+  await owner.getByRole('checkbox', { name: /^选择学生 /, checked: false }).first().check();
   await shown(text(owner, /已选 2 名学生/));
   const summaryRequest = owner.waitForRequest((request) =>
     request.method() === 'POST' && request.url().endsWith('/api/v1/exports'));

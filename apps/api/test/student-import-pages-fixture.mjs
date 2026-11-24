@@ -216,14 +216,12 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   }
   await page.goto(admin + '/manage/students');
   await page.getByRole('table').waitFor();
-  const firstChoice = page.getByLabel(/^选择学生 /).first();
-  const firstChoiceLabel = await firstChoice.getAttribute('aria-label');
-  await firstChoice.check();
+  await page.getByLabel(/^选择学生 /).first().check();
   await button('下一页').click();
-  const secondChoiceLabel = (await page.getByLabel(/^选择学生 /).evaluateAll((nodes) =>
-    nodes.map((node) => node.getAttribute('aria-label')))).find((label) => label && label !== firstChoiceLabel);
-  assert.ok(secondChoiceLabel);
-  await page.getByLabel(secondChoiceLabel, { exact: true }).check();
+  await page.getByRole('navigation', { name: '分页' }).getByText(/^第\s*2\s*\//).waitFor();
+  const secondChoice = page.getByLabel(/^选择学生 /).first();
+  const secondChoiceLabel = await secondChoice.getAttribute('aria-label');
+  await secondChoice.check();
   await button(/^导出所选学生（2）$/).waitFor();
   const selectedDownload = page.waitForEvent('download');
   await button(/^导出所选学生（2）$/).click();
