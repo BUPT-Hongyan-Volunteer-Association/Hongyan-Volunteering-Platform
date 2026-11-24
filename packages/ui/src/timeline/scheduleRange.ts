@@ -200,7 +200,7 @@ export function createScheduleRange(read: (page: number) => Promise<Page>, optio
     const { item, slot } = options.selection();
     if (!item) return { kind: 'none' };
     const activity = rows.value.find((row) => row.activity_id === item);
-    // 匹配先于窗口判定：服务端只返回与窗口相交的分段，跨午夜段的键同样在响应里（设计 §2.2）。
+    // 匹配先于窗口判定：服务端只返回与窗口相交的分段，跨午夜段的键同样在响应里。
     const found =
       slot === undefined
         ? activity?.segments[0]
