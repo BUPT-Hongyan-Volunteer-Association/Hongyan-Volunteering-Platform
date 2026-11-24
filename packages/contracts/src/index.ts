@@ -48,6 +48,8 @@ export async function openSession() {
 export * from './generated/sdk.gen';
 export type * from './generated/types.gen';
 
+export const passwordRequirement = '至少 8 个字符，包含英文字母和数字。';
+
 export function writeHeaders() {
   if (!csrfToken) throw new Error('会话尚未建立，请刷新后重试');
   return { 'X-CSRF-Token': csrfToken };

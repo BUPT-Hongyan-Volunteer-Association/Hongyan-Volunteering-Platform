@@ -3335,6 +3335,46 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       assert.equal(await teacher.getByRole('link', { name: /^交接验收/ }).count(), 20);
       assert.ok(await teacher.getByLabel('仅看待接管活动').isChecked());
     });
+    await t.test('从我的账号管理核验原密码，沿用密码规则并轮换会话', async () => {
+      const username = '0000000004', replacement = 'A9' + randomUUID().slice(0, 6);
+      await link(helper, '我的').click();
+      await link(helper, '账号管理').click();
+      const current = helper.getByLabel('原密码'), next = helper.getByLabel('新密码');
+      const save = button(helper, '保存新密码');
+      await current.fill('填写错误的原密码');
+      await next.fill(replacement);
+      await save.click();
+      await visible(helper.getByRole('alert').filter({ hasText: '当前密码不正确' }));
+      await current.fill(password);
+      for (const weak of ['abc1234', 'abcdefgh', '12345678']) {
+        await next.fill(weak);
+        const response = helper.waitForResponse(r => r.url().endsWith('/auth/change-password'));
+        await save.click();
+        assert.equal((await response).status(), 422);
+      }
+      const oldSession = await signIn(browser, web, username, password, 1440, null);
+      try {
+        await next.fill(replacement);
+        // The password write succeeds even if fetching the rotated session token needs a retry.
+        await helper.route('**/api/v1/auth/csrf', route => route.abort(), { times: 1 });
+        await save.click();
+        await visible(helper.getByRole('status').filter({ hasText: '密码已更改。' }));
+        await button(helper, '重新连接').click();
+        await visible(save);
+        assert.equal(await current.inputValue(), '');
+        assert.equal(await next.inputValue(), '');
+        await oldSession.reload();
+        await visible(button(oldSession, '登录'));
+        await button(helper, '退出登录').click();
+        await helper.getByLabel('账号', { exact: true }).fill(username);
+        await helper.getByLabel('当前密码').fill(password);
+        await button(helper, '登录').click();
+        await visible(helper.getByText(loginFailureMessage, { exact: true }));
+        await helper.getByLabel('当前密码').fill(replacement);
+        await button(helper, '登录').click();
+        await visible(helper.getByRole('heading', { name: '账号管理' }));
+      } finally { await oldSession.context().close(); }
+    });
   } finally {
     try {
       await browser?.close();

@@ -7,6 +7,7 @@ import {
   login,
   logout,
   openSession,
+  passwordRequirement,
   writeHeaders,
   type Profile,
 } from '@hongyan/contracts';
@@ -228,7 +229,7 @@ onUnmounted(() => {
               placeholder="设置新密码"
               aria-describedby="pw-rule"
           /></span>
-          <small id="pw-rule">至少 8 个字符，包含英文字母和数字。</small>
+          <small id="pw-rule">{{ passwordRequirement }}</small>
         </label>
         <p v-if="message" role="alert">{{ message }}</p>
         <button class="primary auth-submit" :disabled="busy" :aria-busy="busy">

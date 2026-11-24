@@ -64,7 +64,7 @@ export const router = createRouter({
       meta: { organizer: true },
     },
     { path: '/mine', component: PersonalPage, meta: { profile: true, personal: true } },
-    { path: '/mine/settings', component: PersonalPage, meta: { profile: true, personal: true } },
+    { path: '/mine/settings', component: () => import('./AccountSettings.vue'), meta: { profile: true, personal: true } },
     {
       path: '/mine/example-activity',
       redirect: '/registrations',
