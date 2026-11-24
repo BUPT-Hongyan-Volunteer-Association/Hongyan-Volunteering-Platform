@@ -27,8 +27,11 @@ const shiftDay = (date, days) =>
     .toISOString()
     .slice(0, 10);
 
+const loginFailureMessage = '登录失败，请核对账号和密码。如果你刚办理过凭证重置，旧密码已失效，请联系办理老师确认发放进度。';
+const lostTeamMessage = '你已不在本活动团队，个人功能不受影响。';
 const link = (page, name) => page.getByRole('link', { name, exact: true });
 const button = (page, name) => page.getByRole('button', { name, exact: true });
+const accountSecurity = page => page.getByText('账号安全', { exact: true });
 const visible = (locator) => locator.first().waitFor({ state: 'visible' });
 
 async function publicSchedulePage(browserPage, date, q, page) {
@@ -67,18 +70,18 @@ async function pickOption(page, label, option) {
   await list.waitFor({ state: 'hidden' });
 }
 
-async function signIn(browser, origin, username, password, width) {
+async function signIn(browser, origin, username, password, width,
+  initialPassword = username.startsWith('000') ? username.slice(-6) : undefined) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width, height: 900 } });
   const page = await context.newPage();
   page.setDefaultTimeout(12000);
   await page.goto(origin);
   await page.getByLabel('账号', { exact: true }).fill(username);
-  const student = username.startsWith('000');
-  await page.getByLabel('当前密码').fill(student ? username.slice(-6) : password);
+  await page.getByLabel('当前密码').fill(initialPassword ?? password);
   await button(page, '登录').click();
-  if (student) {
+  if (initialPassword) {
     await page.getByLabel('新密码').fill(password);
-    await page.getByLabel('当前密码').fill(username.slice(-6));
+    await page.getByLabel('当前密码').fill(initialPassword);
     await button(page, '保存新密码').click();
   }
   await visible(button(page, '退出登录'));
@@ -132,7 +135,7 @@ async function fits(page) {
   );
 }
 
-test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, async (t) => {
+test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 }, async (t) => {
   const password = 'T1' + randomUUID();
   const adminPassword = 'A2' + randomUUID();
   await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: password, DEMO_ADMIN_PASSWORD: adminPassword });
@@ -162,6 +165,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
     browser = await launchBrowser({ headless: true });
     const student = await signIn(browser, web, '0000000001', password, 390);
     const owner = await signIn(browser, web, '0000000002', password, 390);
+    const joined = await signIn(browser, web, '0000000003', password, 1440);
     const helper = await signIn(browser, web, '0000000004', password, 390);
     const teacher = await signIn(browser, admin, 'demo.teacher', password, 1440);
     const tech = await signIn(browser, admin, 'demo.admin', adminPassword, 1440);
@@ -324,6 +328,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
           '通知失败队列',
         ]) {
           await nav.getByRole('link', { name: section, exact: true }).click();
+          if (section === '账号与角色') {
+            await visible(teacher.getByLabel('学生学号'));
+            await fits(teacher);
+            continue;
+          }
           if (section === '异常复核') {
             const title = teacher.getByRole('heading', { level: 1, name: '异常记录', exact: true });
             assert.equal(await title.evaluate((el) => getComputedStyle(el).fontSize), inboxTitleSize);
@@ -393,7 +402,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await checkStudentImportPages(teacher, admin, { fits, pickOption, db });
     });
 
-    await t.test('时间轴按真实安排绘制分段，当前线取自服务端时刻', async (t) => {
+    await t.test('时间轴按真实安排绘制分段，当前线取自服务端时刻', async () => {
       await student.setViewportSize({ width: 1440, height: 900 });
       await student.goto(web + '/schedule');
       const ongoing = student.locator('.chart tbody tr').filter({ hasText: '正在进行演示' });
@@ -402,19 +411,17 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       assert.equal(await student.getByRole('slider').count(), 0);
 
       // 同一进行中的活动，负责人只看到接口给出的状态时刻文字。
-      const organizer = await signIn(browser, web, '0000000003', password, 1440);
-      t.after(() => organizer.context().close());
-      const response = organizer.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/timeline');
-      await organizer.goto(web + '/managed-schedule?unit=day&view=chart');
+      const response = joined.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/timeline');
+      await joined.goto(web + '/managed-schedule?unit=day&view=chart');
       const { data } = await (await response).json();
-      await visible(organizer.locator('.chart tbody tr').filter({ hasText: '正在进行演示' }));
+      await visible(joined.locator('.chart tbody tr').filter({ hasText: '正在进行演示' }));
       const clockText = new Date(data.state_evaluated_at).toLocaleTimeString('en-GB', {
         timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit',
       });
-      assert.match(await organizer.locator('.view-caption').innerText(), /状态时刻/);
-      assert.ok((await organizer.locator('.view-caption').innerText()).includes(clockText));
-      assert.equal(await organizer.locator('.chart .now-line, .chart thead path[fill="#003399"]').count(), 0);
-      assert.equal(await organizer.getByRole('slider').count(), 0);
+      assert.match(await joined.locator('.view-caption').innerText(), /状态时刻/);
+      assert.ok((await joined.locator('.view-caption').innerText()).includes(clockText));
+      assert.equal(await joined.locator('.chart .now-line, .chart thead path[fill="#003399"]').count(), 0);
+      assert.equal(await joined.getByRole('slider').count(), 0);
 
       await student.getByLabel('进行中').check();
       await student.waitForURL((u) => u.searchParams.get('ongoing') === '1');
@@ -548,6 +555,54 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       assert.match(exportFile.suggestedFilename(), /通知回执/);
       await fits(owner);
       await fits(helper);
+    });
+
+    await t.test('协作者被移出后，旧窗口切换回执范围和处理退出申请均被拒绝', async (t) => {
+      const requests = await helper.context().newPage();
+      requests.setDefaultTimeout(8000);
+      t.after(() => requests.close());
+      const base = web + '/managed/' + first.id;
+      const registration = await db.registration.findFirstOrThrow({
+        where: { activity_id: first.id, status: 'accepted' },
+      });
+      const request = await db.exitRequest.create({
+        data: { registration_id: registration.id, reason: '旧窗口权限核对' },
+      });
+      t.after(() => db.exitRequest.delete({ where: { id: request.id } }));
+      await requests.goto(base + '/requests/' + request.id + '?kind=exit');
+      const approve = button(requests, '批准退出');
+      await visible(approve);
+      await visible(requests.getByText(request.reason, { exact: true }));
+      await helper.goto(base + '/notices');
+      await helper.getByRole('link', { name: /校园服务甲安排有调整/ }).first().click();
+      await visible(helper.locator('.receipt-summary'));
+      const { account_id } = await db.student.findUniqueOrThrow({ where: { student_no: '0000000004' } });
+      const member = await db.activityMember.delete({ where: { activity_id_account_id: { activity_id: first.id, account_id } } });
+      t.after(() => db.activityMember.create({ data: member }));
+      const [receipts] = await Promise.all([
+        helper.waitForResponse(response => new URL(response.url()).pathname.endsWith('/receipts') &&
+          response.request().method() === 'GET'),
+        pickOption(helper, '回执范围', '全部接收人'),
+      ]);
+      assert.equal(receipts.status(), 404);
+      const decisionPath = '/api/v1/organizer/exit-requests/' + request.id + '/decision';
+      const [decision] = await Promise.all([
+        requests.waitForResponse(response => new URL(response.url()).pathname === decisionPath &&
+          response.request().method() === 'POST'),
+        approve.click(),
+      ]);
+      assert.equal(decision.status(), 404);
+      for (const page of [helper, requests]) {
+        await visible(page.getByText(lostTeamMessage, { exact: true }));
+        assert.equal(await page.locator('.section-heading .state-chip').count(), 0);
+      }
+      assert.equal(await helper.locator('.notice-body').count(), 0);
+      assert.equal(await approve.count(), 0);
+      assert.equal(await requests.getByText(request.reason, { exact: true }).count(), 0);
+      const unchanged = await db.exitRequest.findUniqueOrThrow({ where: { id: request.id } });
+      assert.equal(unchanged.status, 'pending');
+      assert.equal(unchanged.version, request.version);
+      assert.equal((await db.registration.findUniqueOrThrow({ where: { id: registration.id } })).status, 'accepted');
     });
 
     await t.test('发布活动通知，收件箱去重提醒与筛选切换', async () => {
@@ -697,23 +752,201 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
         await visible(owner.getByRole('cell', { name: number, exact: true }));
     });
 
-    await t.test('名单勾选和账号示例不会发送业务写请求', async () => {
+    await t.test('名单勾选和账号身份核对不会发送业务写请求', async () => {
       const writes = [];
       const collect = (r) => {
         if (r.url().includes('/api/v1/') && r.method() !== 'GET') writes.push(r.method());
       };
-      for (const p of [owner, tech]) p.on('request', collect);
+      for (const p of [owner, teacher, tech]) p.on('request', collect);
       await owner.goto(web + '/managed/' + first.id + '/roster');
       await owner.getByLabel('选择本页').check();
       await visible(owner.getByText(/已选 5 人/));
-      await teacher.goto(admin + '/manage/accounts/staff-002');
-      await visible(teacher.getByText('未找到该示例记录。'));
-      await tech.goto(admin + '/manage/accounts/staff-002');
-      await pickOption(tech, '操作', '停用独立后台账号');
-      await button(tech, '预览操作').click();
-      await visible(tech.getByText(/停用独立后台账号尚未提交/));
+      const staff = await db.account.findUniqueOrThrow({ where: { username: 'demo.admin' } });
+      const numbers = ['0190000001', '0190000002'];
+      for (const username of numbers) await db.account.create({ data: {
+        username, display_name: '合成同名', password_hash: 'fixture',
+        roles: { create: { role: 'student' } }, student: { create: { student_no: username } },
+      } });
+      await teacher.goto(admin + '/');
+      await link(teacher, '账号与角色').click();
+      const input = teacher.getByLabel('学生学号');
+      const card = teacher.getByRole('region', { name: '账号核对结果' });
+      for (const number of numbers) {
+        await input.fill(number);
+        assert.equal(await card.count(), 0);
+        await button(teacher, '查询账号').click();
+        await visible(card.getByText(number, {exact:true}));
+        await visible(card.getByRole('heading', {name:'合成同名'}));
+      }
+      await input.fill('0999999999');
+      await button(teacher, '查询账号').click();
+      await visible(teacher.getByText('没有找到可查看的账号，请核对学号。'));
+      assert.equal(await card.count(), 0);
+      await teacher.goto(admin + '/manage/accounts/' + staff.id);
+      await visible(teacher.getByText('没有找到可查看的账号。'));
+      await tech.goto(admin + '/manage/accounts/' + staff.id);
+      await visible(tech.getByRole('heading', {name: staff.display_name}));
+      await visible(tech.getByText('技术管理员', {exact:true}));
+      await accountSecurity(tech).click();
+      await button(tech, '停用账号').click();
+      await visible(tech.getByText('停用账号 · ' + staff.display_name + '（' + staff.username + '）', { exact: true }));
+      assert.ok(await button(tech, '确认停用').isDisabled());
       assert.deepEqual(writes, []);
-      for (const p of [owner, tech]) p.off('request', collect);
+      for (const p of [owner, teacher, tech]) p.off('request', collect);
+    });
+    await t.test('技术管理员核对后建后台账号，老师保留学生建档入口', async () => {
+      await teacher.goto(admin + '/manage/accounts');
+      await visible(link(teacher, '导入学生名单建档'));
+      assert.equal(await teacher.getByText('创建后台账号', { exact: true }).count(), 0);
+      await tech.goto(admin + '/');
+      await link(tech, '账号与角色').click();
+      await tech.getByText('创建后台账号', { exact: true }).click();
+      await tech.getByLabel('新账号登录名').fill('faculty.demo');
+      await tech.getByLabel('姓名', { exact: true }).fill('合成教师');
+      await tech.getByLabel('后台角色').selectOption('reviewer');
+      await tech.getByLabel('创建原因').fill('合成验收');
+      await button(tech, '核对创建信息').click();
+      await visible(tech.getByRole('heading', { name: '核对后台账号' }));
+      assert.equal(await db.account.count({ where: { username: 'faculty.demo' } }), 0);
+      await button(tech, '确认创建').click();
+      await visible(tech.getByText('已创建 faculty.demo，待发放初始凭证。'));
+      await tech.getByLabel('筛选角色').selectOption('reviewer');
+      await tech.getByLabel('筛选账号状态').selectOption('active');
+      await link(tech, '合成教师 · faculty.demo').click();
+      await visible(tech.getByText('待发放，暂不可登录'));
+      await accountSecurity(tech).click();
+      await button(tech, '签发临时凭证').click();
+      const temporary = await tech.getByLabel('临时凭证', { exact: true }).inputValue();
+      await tech.getByLabel('签发原因').fill('本人已核验');
+      await tech.getByLabel('我已人工核验申请人本人，并核对上述账号').check();
+      await button(tech, '确认签发').click();
+      await visible(tech.getByText('临时凭证已签发，首次登录须修改密码。'));
+      const faculty = await signIn(browser, admin, 'faculty.demo', 'F9' + randomUUID(), 1440, temporary);
+      await visible(link(faculty, '账号与角色'));
+      await faculty.context().close();
+      await link(tech, '返回账号查询').click();
+      await tech.getByLabel('登录账号', { exact: true }).fill('faculty.demo');
+      await button(tech, '查询账号').click();
+      await visible(tech.getByRole('heading', { name: '合成教师' }));
+    });
+    await t.test('管理员办理限期技术角色、收回授权，并看到最后一名长期管理员保护提示', async () => {
+      await tech.goto(admin + '/manage/accounts');
+      await teacher.goto(admin + '/manage/accounts');
+      const lookup = async username => {
+        await tech.getByLabel('登录账号', { exact: true }).fill(username);
+        await button(tech, '查询账号').click();
+        await tech.getByLabel('要办理的角色').selectOption('tech_admin');
+      };
+      await lookup('demo.teacher');
+      await button(tech, '授予技术管理员角色').click();
+      await visible(tech.getByText('长期授权没有到期日。', { exact: false }));
+      await tech.getByLabel('限期授权').check();
+      await tech.getByLabel('到期时间（北京时间）').fill('2099-12-31T12:00');
+      await tech.getByLabel('办理原因').fill('代班期间维护账号');
+      await button(tech, '保存技术管理员角色').click();
+      await visible(tech.getByText('技术管理员角色已保存。'));
+      await button(tech, '调整有效期').click();
+      assert.equal(await tech.getByLabel('到期时间（北京时间）').inputValue(), '2099-12-31T12:00');
+      await button(tech, '取消').click();
+      await teacher.reload();
+      await visible(teacher.getByText('创建后台账号', { exact: true }));
+      const teacherAccount = await db.account.findUniqueOrThrow({ where: { username: 'demo.teacher' } });
+      await db.roleGrant.update({ where: { account_id_role: { account_id: teacherAccount.id, role: 'tech_admin' } },
+        data: { expires_at: new Date(0) } });
+      await lookup('demo.teacher');
+      await visible(tech.getByText(/已到期 · /));
+      await button(tech, '收回技术管理员角色').click();
+      await tech.getByLabel('办理原因').fill('代班结束');
+      await button(tech, '确认收回技术管理员角色').click();
+      await visible(tech.getByText('技术管理员角色已收回。'));
+      await teacher.reload();
+      await visible(teacher.getByLabel('学生学号'));
+      assert.equal(await teacher.getByText('创建后台账号', { exact: true }).count(), 0);
+      await lookup('demo.admin');
+      await button(tech, '调整有效期').click();
+      await tech.getByLabel('限期授权').check();
+      await tech.getByLabel('到期时间（北京时间）').fill('2099-12-31T12:00');
+      await tech.getByLabel('办理原因').fill('核对长期管理员保护');
+      await button(tech, '保存技术管理员角色').click();
+      await visible(tech.getByRole('alert').filter({ hasText: '须保留至少一个可登录' }));
+      await fits(tech);
+    });
+    await t.test('技术管理员停启独立账号，老师原窗口需重新登录', async () => {
+      const affected = await signIn(browser, admin, 'demo.dual', password, 390);
+      await tech.goto(admin + '/manage/accounts');
+      await tech.getByLabel('登录账号', { exact: true }).fill('demo.dual');
+      await button(tech, '查询账号').click();
+      await accountSecurity(tech).click();
+      await button(tech, '停用账号').click();
+      await visible(tech.getByText('停用账号 · 兼任审核员（demo.dual）'));
+      await tech.getByLabel('办理原因').fill('轮岗交接');
+      await button(tech, '确认停用').click();
+      await visible(tech.getByText('账号已停用，所有旧会话已撤销。'));
+      await affected.reload();
+      await visible(button(affected, '登录'));
+      await accountSecurity(tech).click();
+      await button(tech, '启用账号').click();
+      await tech.getByLabel('办理原因').fill('恢复履职');
+      await button(tech, '确认启用').click();
+      await visible(tech.getByText('账号已启用。'));
+      await affected.reload();
+      await visible(button(affected, '登录'));
+      await affected.getByLabel('账号', { exact: true }).fill('demo.dual');
+      await affected.getByLabel('当前密码').fill(password);
+      await button(affected, '登录').click();
+      await visible(button(affected, '退出登录'));
+      await tech.getByLabel('登录账号', { exact: true }).fill('demo.admin');
+      await button(tech, '查询账号').click();
+      await accountSecurity(tech).click();
+      await button(tech, '停用账号').click();
+      await tech.getByLabel('办理原因').fill('核对最后一个管理员');
+      await button(tech, '确认停用').click();
+      await visible(tech.getByRole('alert').filter({ hasText: '须保留至少一个可登录' }));
+      await affected.context().close();
+    });
+    await t.test('老师按身份卡授权与收回，学生原会话保留学生入口', async () => {
+      await teacher.goto(admin + '/manage/accounts');
+      const input = teacher.getByLabel('学生学号');
+      await input.fill('0000000001');
+      await button(teacher, '查询账号').click();
+      await button(teacher, '授予负责人资格').click();
+      await teacher.getByLabel('办理原因').fill('不应带到下个账号');
+      await input.fill('0190000002');
+      await button(teacher, '查询账号').click();
+      await button(teacher, '授予负责人资格').click();
+      assert.equal(await teacher.getByLabel('办理原因').inputValue(), '');
+      for (const width of [390, 1440]) {
+        await teacher.setViewportSize({ width, height: 900 });
+        await input.fill('0000000001');
+        await button(teacher, '查询账号').click();
+        const grant = button(teacher, '授予负责人资格');
+        await visible(grant);
+        const action = await grant.boundingBox();
+        const security = await accountSecurity(teacher).boundingBox();
+        assert.ok(action.y + action.height <= security.y);
+        assert.equal(await button(teacher, '重置登录凭证').isVisible(), false);
+        assert.equal(await button(teacher, '停用账号').isVisible(), false);
+        await fits(teacher);
+        await grant.click();
+        await teacher.getByLabel('限期授权').check();
+        await teacher.getByLabel('到期时间（北京时间）').fill('2099-06-30T23:59');
+        await teacher.getByLabel('办理原因').fill('合成志愿服务授权');
+        await button(teacher, '保存负责人资格').click();
+        await visible(teacher.getByText('负责人资格已保存，本次操作不会分配活动。'));
+        await visible(teacher.getByText(/有效至.*23:59/));
+        await visible(button(teacher, '调整有效期'));
+        await student.goto(web + '/managed');
+        await visible(student.getByRole('heading', {name:'我的管理活动'}));
+        await button(teacher, '收回负责人资格').click();
+        await visible(teacher.getByText(/学生身份和历史记录保留/));
+        await teacher.getByLabel('办理原因').fill('合成授权结束');
+        await button(teacher, '确认收回资格').click();
+        await visible(teacher.getByText('已收回负责人资格，学生身份保留。'));
+      }
+      await student.reload();
+      await visible(student.getByText('当前账号无活动管理权限。'));
+      await student.goto(web + '/mine');
+      await visible(button(student, '退出登录'));
     });
 
     await t.test('编辑中恢复焦点和网络后保留输入，后台核验失败时暂停保存', async () => {
@@ -1127,12 +1360,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       }
       await teacher.setViewportSize({ width: 1440, height: 900 });
       await teacher.goto(admin + '/schedule');
-      const ownerAccount = await db.account.findUniqueOrThrow({ where: { username: '0000000003' } });
       for (const [label, initial, choice, key, value] of [
         ['校区', '所有校区', '沙河校区', 'campus', '沙河校区'],
         ['活动状态', '所有状态', '已发布', 'status', 'published'],
         ['展示版本', '工作版本', '获批版本', 'revision', 'published'],
-        ['负责人', '所有负责人', '乙负责人', 'owner', ownerAccount.id],
+        ['负责人', '所有负责人', demo.pagedOwner.display_name, 'owner', demo.pagedOwner.id],
       ]) {
         const { trigger, list } = await openOptions(teacher, label);
         await assertAnchor(trigger, list);
@@ -1349,7 +1581,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await visible(teacher.locator('.schedule-list li').first());
       assert.equal(await teacher.locator('.schedule-list li').count(), 20);
       const { list } = await openOptions(teacher, '负责人');
-      await list.getByRole('option', { name: '乙负责人', exact: true }).click();
+      await list.getByRole('option', { name: demo.pagedOwner.display_name, exact: true }).click();
       await teacher.waitForURL((u) => u.searchParams.get('owner') === demo.pagedOwner.id);
       await visible(teacher.locator('.schedule-list li').first());
       assert.equal(await teacher.locator('.schedule-list li').count(), 1);
@@ -1742,7 +1974,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
         await visible(page.getByText('登录页面已过期，会话已更新，请再次登录。'));
         await page.getByLabel('当前密码').fill('wrong-password');
         await button(page, '登录').click();
-        await visible(page.getByText('账号或密码不正确'));
+        await visible(page.getByText(loginFailureMessage, { exact: true }));
         await page.getByLabel('当前密码').fill(password);
         await button(page, '登录').click();
         await visible(button(page, '退出登录'));
@@ -2835,6 +3067,329 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await student.setViewportSize({ width: 1440, height: 900 });
     });
 
+    await t.test('交接响应丢失后以原键重试，两个旧窗口分别看到实际接任人', async () => {
+      const stale = await owner.context().newPage();
+      stale.setDefaultTimeout(8000);
+      const endpoint = '/organizer/activities/' + first.id + '/transfer-owner';
+      async function prepare(page, name) {
+        await page.goto(web + '/managed/' + first.id);
+        await page.getByText('交接主负责人', { exact: true }).click();
+        const select = page.getByLabel('接任协作者');
+        await select.selectOption(await select.getByRole('option', { name }).getAttribute('value'));
+        await page.getByLabel('交接原因').fill('现场换班');
+      }
+      try {
+        await prepare(stale, '兼任审核员');
+        await prepare(owner, '同学丙');
+        let firstKey;
+        await owner.route('**' + endpoint, async route => {
+          firstKey = await route.request().headerValue('idempotency-key');
+          assert.equal((await route.fetch()).status(), 200);
+          await route.abort('failed');
+        }, { times: 1 });
+        await button(owner, '确认交接').click();
+        await visible(owner.getByRole('alert').filter({ hasText: '交接结果未确认' }));
+        const replay = owner.waitForResponse(response => response.url().endsWith(endpoint));
+        await button(owner, '重试交接').click();
+        const response = await replay;
+        assert.equal(response.status(), 404);
+        assert.ok(firstKey);
+        assert.equal(await response.request().headerValue('idempotency-key'), firstKey);
+        await visible(owner.getByRole('status').filter({ hasText: '主负责人已交接给同学丙。' }));
+        assert.equal(await owner.getByLabel('接任协作者').count(), 0);
+
+        await button(stale, '确认交接').click();
+        await visible(stale.getByRole('status').filter({ hasText: '已核对活动成员，当前主负责人是同学丙。' }));
+
+        await prepare(helper, '同学甲');
+        await button(helper, '确认交接').click();
+        await visible(helper.getByRole('status').filter({ hasText: '主负责人已交接给同学甲。' }));
+        await teacher.goto(admin + '/manage/audit');
+        await teacher.getByLabel('对象 ID').fill(first.id);
+        await button(teacher, '查询').click();
+        const audit = teacher.getByRole('table', { name: '审计记录' });
+        await visible(audit.getByRole('row').filter({ hasText: first.id }).filter({ hasText: 'transfer_activity_owner' }));
+      } finally {
+        await stale.close();
+      }
+    });
+    await t.test('主负责人添加协作者并交接，移除原负责人后旧会话失去活动权限', async () => {
+      async function addAfterQualificationRestored(page, studentNo, errorMessage) {
+        const reason = page.getByLabel('添加原因');
+        const submit = button(page, '确认添加协作者');
+        const limit = '现场引导'.repeat(125);
+        await reason.fill(limit + '甲');
+        assert.equal(await reason.inputValue(), limit);
+
+        // 核对成功后资格到期，提交时由真实接口返回字段校验错误。
+        const { account_id } = await db.student.findUniqueOrThrow({ where: { student_no: studentNo } });
+        const where = { account_id_role: { account_id, role: 'organizer' } };
+        const { expires_at } = await db.roleGrant.findUniqueOrThrow({ where });
+        await db.roleGrant.update({ where, data: { expires_at: new Date(0) } });
+        try {
+          const failed = page.waitForResponse(response => response.url().endsWith('/members')
+            && response.request().method() !== 'GET');
+          await submit.click();
+          assert.equal((await failed).status(), 422);
+          await visible(page.getByText(errorMessage, { exact: true }));
+          assert.equal(await reason.inputValue(), limit);
+        } finally {
+          await db.roleGrant.update({ where, data: { expires_at } });
+        }
+        await reason.fill('资格复核' + limit.slice(4));
+        await submit.click();
+      }
+
+      await joined.setViewportSize({ width: 390, height: 900 });
+      await joined.goto(web + '/managed/' + first.id);
+      await visible(joined.getByText('当前账号无法访问此活动。', { exact: true }));
+      await owner.goto(web + '/managed');
+      await link(owner, '校园服务甲').click();
+      await owner.getByText('添加协作者', {exact:true}).click();
+      const number = owner.getByLabel('协作者学号');
+      await number.fill('0000000003');
+      await button(owner, '查找负责人').click();
+      const card = owner.getByRole('region', {name:'候选人核对'});
+      await visible(card.getByText('同学乙 · 0000000003'));
+      await visible(card.getByText(/仅获得本活动的协作权限/));
+      await number.fill('0000000001');
+      assert.equal(await card.count(), 0);
+      await number.fill('0000000003');
+      await button(owner, '查找负责人').click();
+      await addAfterQualificationRestored(owner, '0000000003', '该账号当前没有有效的负责人资格，请重新核对');
+      await visible(owner.getByText('同学乙已加入本活动，身份为协作者。'));
+      await number.fill('0000000003');
+      await button(owner, '查找负责人').click();
+      await visible(owner.getByText('已是本活动协作者，无需重复添加。'));
+      await joined.reload();
+      await visible(joined.getByText(/你是本活动的协作者/));
+      assert.equal(await joined.getByText('添加协作者', {exact:true}).count(), 0);
+      await fits(joined);
+      await owner.getByText('交接主负责人', { exact: true }).click();
+      await owner.getByLabel('接任协作者').selectOption({ label: '同学乙 · 0000000003' });
+      await visible(owner.getByText(/你将保留协作者身份/));
+      await owner.getByLabel('交接原因').fill('现场换班');
+      await button(owner, '确认交接').click();
+      await visible(owner.getByRole('status').filter({ hasText: '主负责人已交接给同学乙。' }));
+      await visible(owner.getByText(/你是本活动的协作者/));
+      await joined.reload();
+      await visible(joined.getByText('交接主负责人', { exact: true }));
+      assert.equal(await owner.getByRole('button', { name: /移除协作者/ }).count(), 0);
+      await link(owner, '报名名单').click();
+      await visible(owner.locator('.status-filters'));
+      await visible(owner.getByRole('table').getByText(/名单测试/));
+      const remove = button(joined, '移除协作者 同学甲');
+      await remove.click();
+      const dialog = joined.getByRole('dialog', { name: '移除协作者' });
+      await visible(dialog.getByText(/校园服务甲.*同学甲.*0000000002/));
+      assert.equal(await button(joined, '确认移除').isDisabled(), true);
+      await button(joined, '取消').click();
+      await remove.click();
+      await joined.getByLabel('移除原因').fill('现场工作已交接');
+      await fits(joined);
+      await button(joined, '确认移除').click();
+      await visible(joined.getByText('已从本活动移除同学甲。'));
+      assert.equal(await remove.count(), 0);
+      await owner.getByRole('button', { name: /^已录取/ }).click();
+      await visible(owner.getByText(lostTeamMessage, { exact: true }));
+      assert.equal(await owner.locator('.status-filters').count(), 0);
+      assert.equal(await owner.getByRole('table').count(), 0);
+      assert.equal(await owner.getByText('协作者', { exact: true }).count(), 0);
+      await link(owner, '返回我的管理活动').click();
+      await visible(owner.getByRole('heading', { name: '我的管理活动' }));
+      await owner.goto(web + '/managed/' + first.id + '/attendance');
+      await visible(owner.getByText('当前账号无法访问此活动。', { exact: true }));
+      await link(owner, '我的').click();
+      await visible(owner.getByRole('heading', { name: '同学甲' }));
+      await link(owner, '我的时长').click();
+      await visible(owner.getByText(/共 \d+ 条记录/));
+      await link(teacher, '账号与角色').click();
+      await teacher.getByLabel('学生学号').fill('0000000003');
+      await button(teacher, '查询账号').click();
+      await button(teacher, '收回负责人资格').click();
+      await teacher.getByLabel('办理原因').fill('负责人离任');
+      await visible(teacher.getByText(/若其担任主负责人，请到「活动团队」筛选待接管活动/));
+      await button(teacher, '确认收回资格').click();
+      await visible(teacher.getByText('已收回负责人资格，学生身份保留。'));
+      await link(teacher, '活动团队').click();
+      await teacher.getByLabel('仅看待接管活动').check();
+      await teacher.getByLabel('活动名称或编号').fill('P2026-0001');
+      await button(teacher, '查询活动').click();
+      const teamRow = teacher.getByRole('listitem').filter({ has: link(teacher, '校园服务甲') });
+      await visible(teamRow.getByText('待接管', { exact: true }));
+      await visible(teamRow.getByText(/主负责人 同学乙/));
+      await link(teacher, '校园服务甲').click();
+      await visible(teacher.getByText('当前没有负责人角色'));
+      await teacher.getByLabel('接任人学号').fill('0000000002');
+      await button(teacher, '核对接任人').click();
+      await visible(teacher.getByText('同学甲 · 0000000002', { exact: true }));
+      await addAfterQualificationRestored(teacher, '0000000002', '新增成员和接任人均须具有有效负责人资格');
+      await visible(teacher.getByText('同学甲已加入活动，请核对交接信息并填写交接原因。'));
+      assert.equal(await teacher.getByLabel('交接原因').inputValue(), '');
+      await teacher.getByLabel('交接原因').fill('老师核对后办理');
+      await button(teacher, '确认重新指定').click();
+      await visible(teacher.getByText('同学甲已接任主负责人。'));
+      await visible(teacher.getByRole('heading', { name: '当前主负责人：同学甲' }));
+      const team = teacher.getByRole('table', { name: '活动成员' });
+      for (const [name, role] of [['同学甲', '主负责人'], ['同学乙', '协作者']]) {
+        const row = team.getByRole('row').filter({ has: teacher.getByRole('rowheader', { name, exact: true }) });
+        await visible(row.getByText(role, { exact: true }));
+      }
+      await button(teacher, '移除协作者 同学乙').click();
+      await teacher.getByLabel('移除原因').fill('离任交接完成');
+      await button(teacher, '确认移除').click();
+      await visible(teacher.getByText('已从本活动移除同学乙。'));
+      await link(teacher, '返回活动团队').click();
+      await visible(teacher.getByText('当前筛选范围内没有待接管活动。'));
+      assert.equal(await teacher.getByLabel('活动名称或编号').inputValue(), 'P2026-0001');
+      await teacher.getByLabel('仅看待接管活动').uncheck();
+      await visible(teamRow.getByText(/主负责人 同学甲/));
+      assert.equal(await teamRow.getByText('待接管', { exact: true }).count(), 0);
+      await owner.goto(web + '/managed/' + first.id);
+      await visible(owner.getByText('交接主负责人', { exact: true }));
+      await joined.goto(web + '/mine');
+      await visible(joined.getByRole('heading', { name: '同学乙' }));
+      assert.equal(await joined.getByRole('link', { name: '活动管理', exact: true }).count(), 0);
+    });
+    await t.test('老师从学生档案停用甲、核实后恢复，两个原学生窗口均须重新登录', async () => {
+      const extra = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 } });
+      const second = await extra.newPage();
+      second.setDefaultTimeout(8000);
+      const teams = await teacher.context().newPage();
+      teams.setDefaultTimeout(8000);
+      const loginAgain = async page => {
+        await page.getByLabel('账号', { exact: true }).fill('0000000002');
+        await page.getByLabel('当前密码').fill(password);
+        await button(page, '登录').click();
+        await visible(button(page, '退出登录'));
+      };
+      try {
+        await second.goto(web + '/mine');
+        await loginAgain(second);
+        await teacher.goto(admin + '/manage/students');
+        await teacher.setViewportSize({ width: 390, height: 844 });
+        await teacher.getByLabel('学号或姓名').fill('0000000002');
+        await button(teacher, '查询').click();
+        await link(teacher, '核对同学甲的账号').click();
+        await accountSecurity(teacher).click();
+        await button(teacher, '停用账号').click();
+        await visible(teacher.getByText('停用账号 · 同学甲（0000000002）'));
+        await visible(teacher.getByText(/重新启用后，如负责人资格仍有效/));
+        await teacher.getByLabel('办理原因').fill('学生暂离试点');
+        await fits(teacher);
+        await button(teacher, '确认停用').click();
+        await visible(teacher.getByText('学生账号已停用，所有旧会话已撤销。'));
+        await teams.goto(admin + '/manage/teams?q=P2026-0001&owner_unavailable=true');
+        await visible(teams.getByText('待接管', { exact: true }));
+        await link(teams, '校园服务甲').click();
+        await visible(teams.getByText('账号已停用', { exact: true }));
+        for (const page of [owner, second]) {
+          await page.goto(web + '/mine');
+          await visible(button(page, '登录'));
+        }
+        await accountSecurity(teacher).click();
+        await button(teacher, '启用账号').click();
+        await teacher.getByLabel('办理原因').fill('已核对本期名单');
+        assert.equal(await button(teacher, '确认启用').isDisabled(), true);
+        await teacher.getByLabel('已核实该学生仍在学院核定试点范围内').check();
+        await button(teacher, '确认启用').click();
+        await visible(teacher.getByText('学生账号已恢复启用，原会话仍然失效。'));
+        await link(teams, '返回活动团队').click();
+        await visible(teams.getByText('当前筛选范围内没有待接管活动。'));
+        await second.reload();
+        await visible(button(second, '登录'));
+        await loginAgain(owner);
+        await link(teacher, '返回学生档案').click();
+        await visible(link(teacher, '核对同学甲的账号'));
+        assert.equal(await teacher.getByLabel('学号或姓名').inputValue(), '0000000002');
+      } finally {
+        await teacher.setViewportSize({ width: 1440, height: 900 });
+        await teams.close();
+        await extra.close();
+      }
+    });
+
+    await t.test('老师核对姓名学号并确认本人后重置，负责人旧窗口退出', async () => {
+      await teacher.goto(admin + '/manage/accounts');
+      await teacher.getByLabel('学生学号').fill('0000000002');
+      await button(teacher, '查询账号').click();
+      await accountSecurity(teacher).click();
+      await button(teacher, '重置登录凭证').click();
+      await visible(teacher.getByText('重置登录凭证 · 同学甲（0000000002）'));
+      const confirmed = teacher.getByLabel('我已人工核验申请人本人，并核对上述账号');
+      await teacher.getByLabel('重置原因').fill('本人申请重置');
+      assert.equal(await button(teacher, '确认重置').isDisabled(), true);
+      await confirmed.check();
+      await button(teacher, '确认重置').click();
+      await visible(teacher.getByText('旧凭证和登录会话已失效，新凭证待发放。'));
+      await visible(teacher.getByText('待发放，暂不可登录'));
+      await owner.reload();
+      await visible(button(owner, '登录'));
+      await owner.getByLabel('账号', { exact: true }).fill('0000000002');
+      await owner.getByLabel('当前密码').fill(password);
+      await button(owner, '登录').click();
+      await visible(owner.getByText(loginFailureMessage, { exact: true }));
+    });
+    await t.test('接管末页最后一项后返回有效页码，保留待接管筛选', async () => {
+      await createScheduleDataset(db, { count: 21, codePrefix: 'TEAM-END-', titlePrefix: '交接验收',
+        date: firstDate, ownerUsername: '0000000002' });
+      await teacher.goto(admin + '/manage/teams?owner_unavailable=true&q=TEAM-END-&page=2');
+      await link(teacher, '交接验收 21').click();
+      await teacher.getByLabel('接任人学号').fill('0000000004');
+      await button(teacher, '核对接任人').click();
+      await teacher.getByLabel('添加原因').fill('接任协作');
+      await button(teacher, '确认添加协作者').click();
+      await teacher.getByLabel('交接原因').fill('办理交接');
+      await button(teacher, '确认重新指定').click();
+      await visible(teacher.getByRole('heading', { name: '当前主负责人：同学丙' }));
+      await link(teacher, '返回活动团队').click();
+      await visible(link(teacher, '交接验收 01'));
+      assert.equal(await teacher.getByRole('link', { name: /^交接验收/ }).count(), 20);
+      assert.ok(await teacher.getByLabel('仅看待接管活动').isChecked());
+    });
+    await t.test('从我的账号管理核验原密码，沿用密码规则并轮换会话', async () => {
+      const username = '0000000004', replacement = 'A9' + randomUUID().slice(0, 6);
+      await link(helper, '我的').click();
+      await link(helper, '账号管理').click();
+      const current = helper.getByLabel('原密码'), next = helper.getByLabel('新密码');
+      const save = button(helper, '保存新密码');
+      await current.fill('填写错误的原密码');
+      await next.fill(replacement);
+      await save.click();
+      await visible(helper.getByRole('alert').filter({ hasText: '当前密码不正确' }));
+      await current.fill(password);
+      for (const weak of ['abc1234', 'abcdefgh', '12345678']) {
+        await next.fill(weak);
+        const response = helper.waitForResponse(r => r.url().endsWith('/auth/change-password'));
+        await save.click();
+        assert.equal((await response).status(), 422);
+      }
+      const oldSession = await signIn(browser, web, username, password, 1440, null);
+      try {
+        await next.fill(replacement);
+        let csrfReads = 0;
+        const trackCsrf = request => { if (request.url().endsWith('/auth/csrf')) csrfReads++; };
+        helper.on('request', trackCsrf);
+        await save.click();
+        await visible(helper.getByRole('status').filter({ hasText: '密码已更改。' }));
+        helper.off('request', trackCsrf);
+        assert.equal(csrfReads, 0);
+        assert.equal(await current.inputValue(), '');
+        assert.equal(await next.inputValue(), '');
+        await oldSession.reload();
+        await visible(button(oldSession, '登录'));
+        const logout = helper.waitForResponse(response => response.url().endsWith('/auth/logout'));
+        await button(helper, '退出登录').click();
+        assert.equal((await logout).status(), 200);
+        await helper.getByLabel('账号', { exact: true }).fill(username);
+        await helper.getByLabel('当前密码').fill(password);
+        await button(helper, '登录').click();
+        await visible(helper.getByText(loginFailureMessage, { exact: true }));
+        await helper.getByLabel('当前密码').fill(replacement);
+        await button(helper, '登录').click();
+        await visible(helper.getByRole('heading', { name: '账号管理' }));
+      } finally { await oldSession.context().close(); }
+    });
   } finally {
     try {
       await browser?.close();

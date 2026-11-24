@@ -1,3 +1,4 @@
+import { studentView } from './student-profile.js';
 import { createHash } from 'node:crypto';
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import type { Prisma, StudentImportBatch } from '../generated/prisma/client.js';
@@ -62,35 +63,6 @@ function importView(batch: StudentImportBatch) {
     ...(batch.error_message && { error_message: batch.error_message }),
     created_at: batch.created_at.toISOString(),
     updated_at: batch.updated_at.toISOString(),
-  };
-}
-
-function studentView(student: {
-  id: string;
-  version: number;
-  student_no: string;
-  cohort: string | null;
-  grade: string | null;
-  class_name: string | null;
-  college: string | null;
-  created_at: Date;
-  updated_at: Date;
-  account_id: string;
-  account: { display_name: string; active: boolean };
-}) {
-  return {
-    id: student.id,
-    version: student.version,
-    created_at: student.created_at.toISOString(),
-    updated_at: student.updated_at.toISOString(),
-    student_no: student.student_no,
-    name: student.account.display_name,
-    ...(student.cohort && { cohort: student.cohort }),
-    ...(student.grade && { grade: student.grade }),
-    ...(student.class_name && { class_name: student.class_name }),
-    ...(student.college && { college: student.college }),
-    status: student.account.active ? ('active' as const) : ('inactive' as const),
-    account_id: student.account_id,
   };
 }
 

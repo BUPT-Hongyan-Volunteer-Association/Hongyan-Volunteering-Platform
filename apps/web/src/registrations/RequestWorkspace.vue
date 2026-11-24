@@ -23,7 +23,6 @@ const status = computed(() => {
 });
 const options = [{ value: 'all', label: '全部状态' }, ...Object.entries(requestStates).map(([value,label]) => ({value,label}))];
 const page = computed(() => pageNumber(route.query.request_page));
-const denied = () => emit('denied');
 async function read(kind: RequestKind, signal: AbortSignal, query: { request_id?: string; status?: ExitRequest['status']; page?: number; page_size?: number }) {
   const list = kind === 'exit' ? listExitRequests : listActivityRestorationRequests;
   return (await list({ path: { id: props.activityId }, query: { ...query, scope: 'managed' }, signal, throwOnError: true })).data.data;
@@ -67,14 +66,27 @@ watch(() => detail.value?.row.id, async id => {
 });
 const command = createCommand();
 let mounted = true, viewVersion = 0;
+let accessVersion = 0;
 onScopeDispose(() => { mounted = false; });
 const backgroundError = ref('');
+function denied() {
+  accessVersion++;
+  clearDetail();
+  clearList();
+  reason.value = '';
+  feedback.value = '';
+  problem.value = '';
+  backgroundError.value = '';
+  conflict.value = false;
+  emit('denied');
+}
 watch(() => props.requestId, () => {
   viewVersion++;
   reason.value = ''; feedback.value = ''; problem.value = ''; backgroundError.value = ''; conflict.value = false;
 }, { flush: 'sync' });
 async function reviewAgain() {
   const version = viewVersion;
+  backgroundError.value = '';
   await Promise.all([reloadDetail(), reloadList()]);
   if (mounted && viewVersion === version && detail.value) { conflict.value = false; problem.value = ''; }
 }
@@ -83,6 +95,7 @@ async function decide(decision: 'approved' | 'rejected') {
   if (!current || current.row.status !== 'pending' || busy.value || props.writesPaused || conflict.value) return;
   const {row, kind} = current;
   const version = viewVersion;
+  const accessAtSubmit = accessVersion;
   const body = { expected_version: row.version, decision, reason: reason.value.trim() };
   busy.value = true;
   feedback.value = ''; backgroundError.value = '';
@@ -93,7 +106,7 @@ async function decide(decision: 'approved' | 'rejected') {
       headers: command.headers(kind + '_decision', row.id, body), throwOnError: true,
     });
     command.confirmed();
-    if (!mounted) return;
+    if (!mounted || accessAtSubmit !== accessVersion) return;
     const outcome = requestKinds[kind] + requestStates[decision] + '。';
     if (viewVersion === version) {
       feedback.value = outcome;
@@ -104,8 +117,12 @@ async function decide(decision: 'approved' | 'rejected') {
       await reloadList();
     }
   } catch (e) {
-    if (!mounted) return;
-    if (noAccess(e)) { clearDetail(); clearList(); denied(); }
+    if (!mounted || accessAtSubmit !== accessVersion) return;
+    if (noAccess(e)) {
+      denied();
+      backgroundError.value = message(e);
+      return;
+    }
     if (viewVersion !== version) { backgroundError.value = row.student_name + '的' + requestKinds[kind] + '：' + message(e); return; }
     problem.value = message(e);
     conflict.value = e instanceof ApiError && e.status === 409;
@@ -116,7 +133,7 @@ async function decide(decision: 'approved' | 'rejected') {
   <section class="request-workspace">
     <h2>退出与恢复</h2>
     <p v-if="feedback" role="status">{{ feedback }}</p>
-    <p v-if="backgroundError" role="alert">{{ backgroundError }}</p>
+    <p v-if="backgroundError" role="alert">{{ backgroundError }} <button @click="reviewAgain">刷新复核</button></p>
     <RecordWorkspace :selected="!!requestId">
       <template #list>
         <nav class="section-nav" aria-label="申请类型">
@@ -124,7 +141,7 @@ async function decide(decision: 'approved' | 'rejected') {
             :aria-current="kind === k ? 'page' : undefined" :to="{ path: base, query: { ...listQuery, kind: k, request_page: undefined } }">{{ name }}</RouterLink>
         </nav>
         <div class="page-actions"><span>申请状态</span><UiSelect label="申请状态" :model-value="status" :options="options" @update:model-value="setStatus($event)" /></div>
-        <p v-if="listError" role="alert">{{ listError }} <button @click="reloadList()">重新读取申请</button></p>
+        <p v-if="listError" role="alert">{{ listError }} <button @click="reviewAgain">重新读取申请</button></p>
         <p v-else-if="loading" role="status">正在读取申请…</p>
         <p v-else-if="queue && !queue.total">暂无符合条件的{{ requestKinds[kind] }}。</p>
         <div v-else class="entry-list">
@@ -141,7 +158,7 @@ async function decide(decision: 'approved' | 'rejected') {
       <template #detail>
         <RouterLink class="back-link" :to="{path:base, query:listQuery}">返回申请列表</RouterLink>
         <p v-if="problem" role="alert">{{ problem }} <button v-if="conflict" @click="reviewAgain">刷新复核</button></p>
-        <p v-if="detailError" role="alert">{{ detailError }} <button @click="reloadDetail()">重新读取详情</button></p>
+        <p v-if="detailError" role="alert">{{ detailError }} <button @click="reviewAgain">重新读取详情</button></p>
         <p v-else-if="detailLoading" role="status">正在读取申请详情…</p>
         <template v-else-if="detail">
           <div class="page-title"><h3 ref="heading" tabindex="-1">{{ detail.row.student_name }}的{{ requestKinds[detail.kind] }}</h3>

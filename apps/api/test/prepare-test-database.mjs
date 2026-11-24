@@ -29,6 +29,6 @@ export async function prepareTestDatabase(t, seedEnvironment) {
   process.env.DATABASE_URL = url.href;
   execFileSync(process.execPath, [cli, 'migrate', 'deploy'], { stdio: 'pipe' });
   execFileSync(process.execPath, ['scripts/seed.mjs'], {
-    env: { ...process.env, ...seedEnvironment },
+    env: { ...process.env, DEMO_ADMIN_PASSWORD: randomUUID(), ...seedEnvironment },
   });
 }

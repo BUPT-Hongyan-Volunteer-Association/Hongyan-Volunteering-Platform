@@ -116,7 +116,7 @@ test('现场异常批量登记、撤销、版本与活动权限', async (t) => {
     assert.equal(restored.status, 'excused');
     assert.equal((await owner.write('PUT', single(p1), { expected_version: current.version, status: 'late' })).status, 409);
 
-    const unregistered_students = [{ student_no: '0000000003', student_name: '乙负责人' }];
+    const unregistered_students = [{ student_no: '0000000003', student_name: '同学乙' }];
     const manual = { service_date: extraDay, status: 'unregistered_participation', unregistered_students, reason: '现场临时替补' };
     assert.equal((await owner.write('POST', path, { ...manual, reason: '' })).status, 422);
     assert.equal((await owner.write('POST', path, { ...manual, unregistered_students: [

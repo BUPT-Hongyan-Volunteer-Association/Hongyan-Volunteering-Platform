@@ -1,4 +1,5 @@
 import { Database } from '../dist/database.js';
+import { permanentAdmins } from '../dist/auth/account-access.js';
 import { hashPassword } from '../dist/auth/password.js';
 
 const staffPassword = process.env.DEMO_STAFF_PASSWORD;
@@ -10,9 +11,9 @@ if (adminPassword && (adminPassword.length < 12 || adminPassword === staffPasswo
 const db = new Database();
 const people = [
   ['0000000001', '体验学生', ['student']],
-  ['0000000002', '甲负责人', ['student', 'organizer']],
-  ['0000000003', '乙负责人', ['student', 'organizer']],
-  ['0000000004', '活动协作者', ['student', 'organizer']],
+  ['0000000002', '同学甲', ['student', 'organizer']],
+  ['0000000003', '同学乙', ['student', 'organizer']],
+  ['0000000004', '同学丙', ['student', 'organizer']],
   ['demo.teacher', '独立审核员', ['reviewer']],
   ['demo.dual', '兼任审核员', ['reviewer', 'organizer']],
   ...(adminPassword ? [['demo.admin', '合成技术管理员', ['tech_admin']]] : []),
@@ -37,6 +38,9 @@ try {
         });
         ids.push(a.id);
       }
+      const admins = await tx.$queryRaw`SELECT EXISTS (SELECT 1 FROM (${permanentAdmins}) admins) AS available`;
+      if (!admins[0].available)
+        throw Error('建种需要至少一名可登录的长期技术管理员。首次建种请设置独立的 DEMO_ADMIN_PASSWORD；已有同名账号时请核对其状态。');
       for (const [i, code] of ['P2026-0001', 'P2026-0002'].entries()) {
         const start = Date.now() + 7 * 86400000;
         const iso = (t) => new Date(t).toISOString();

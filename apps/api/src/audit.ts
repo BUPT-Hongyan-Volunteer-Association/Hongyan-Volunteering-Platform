@@ -4,10 +4,10 @@ const sensitiveKey = /password|token|secret|session|credential|contents|attachme
 function redact(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redact);
   if (value && typeof value === 'object')
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [
-      key,
-      sensitiveKey.test(key) ? '[已脱敏]' : redact(item),
-    ]));
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => {
+      if (key === 'credential_pending' && typeof item === 'boolean') return [key, item];
+      return [key, sensitiveKey.test(key) ? '[已脱敏]' : redact(item)];
+    }));
   return value;
 }
 

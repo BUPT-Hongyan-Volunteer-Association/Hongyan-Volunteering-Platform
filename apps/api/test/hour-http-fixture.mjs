@@ -162,7 +162,8 @@ export async function checkHourHttp(db,{activityId,bytes,fixed,ownerId,legacyWor
   assert.match(overXml,/>5002</);
   assert.match(overXml,/超过 5000 条非空记录/);
   assert.deepEqual(await db.hourRecord.findMany(),before);
-  await db.activityMember.delete({where:{activity_id_account_id:{activity_id:activityId,account_id:ownerId}}});
+  const replacement = (await other.request('/me')).data.account_id;
+  await db.activityMember.update({where:{activity_id_account_id:{activity_id:activityId,account_id:ownerId}},data:{account_id:replacement}});
   assert.equal((await owner.raw(download)).status,404);
   await result(await upload(owner,bytes,key),404);
   await result(await retry(ready,retryKey),404);

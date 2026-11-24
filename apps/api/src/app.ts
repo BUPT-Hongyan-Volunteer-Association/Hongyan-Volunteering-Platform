@@ -15,6 +15,7 @@ import { CsrfController } from './auth/csrf.controller.js';
 import { SessionService } from './auth/session.service.js';
 
 import { AccountController } from './auth/account.controller.js';
+import { AdminAccountsController, StaffAccountsController } from './auth/admin-accounts.controller.js';
 import { SessionGuard, type SessionRequest } from './auth/session.guard.js';
 import { BusinessError } from './http.js';
 import { ReviewController } from './activities/review.controller.js';
@@ -27,7 +28,7 @@ import { PublicController } from './activities/public.controller.js';
 import { RecruitmentRequests } from './registrations/requests.controller.js';
 import { RegistrationController } from './registrations/registration.controller.js';
 import { AttendanceController } from './attendance/attendance.controller.js';
-import { ManagedController } from './activities/managed.controller.js';
+import { AdminTeamController, ManagedController } from './activities/managed.controller.js';
 import { NoticeController } from './notices/notice.controller.js';
 import { NoticeWorker } from './notices/notice.worker.js';
 import { HourBatchesController, HourUploadScope } from './hours/batches.controller.js';
@@ -90,7 +91,10 @@ class HttpErrorFilter implements ExceptionFilter {
   controllers: [
     CsrfController,
     AccountController,
+    AdminAccountsController,
+    StaffAccountsController,
     ManagedController,
+    AdminTeamController,
     PublicController,
     DraftController,
     TimelineController,

@@ -24,7 +24,7 @@ export class PublicController {
         registrations: { some: { student_id: studentId ?? { in: [] }, status: 'accepted' } },
       }),
     };
-    return envelope(await activityPage(this.db, where, 'public', q, studentId));
+    return envelope(await activityPage(this.db, where, 'public', q, { studentId }));
   }
   @Get(':id') async detail(
     @Req() req: SessionRequest,

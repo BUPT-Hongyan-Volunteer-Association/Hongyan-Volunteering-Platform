@@ -2,31 +2,16 @@
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import type { Profile } from '@hongyan/contracts';
 import PreviewRecords from '@hongyan/ui/PreviewRecords.vue';
-import type { PreviewRecord } from '@hongyan/ui/preview';
 import { sections, type SectionKey } from './sections';
-const props = defineProps<{ profile: Profile }>();
 const route = useRoute();
 const key = computed(() => route.params.section as SectionKey);
 const section = computed(() => sections[key.value]);
-const isAdmin = computed(() => props.profile.roles.includes('tech_admin'));
-const rows = computed<PreviewRecord[]>(() =>
-  section.value.records.filter(
-    (r) => key.value !== 'accounts' || isAdmin.value || r.id === 'student-0123',
-  ),
-);
 const message = ref('');
 const action = ref('');
 const reason = ref('');
 const actions = computed(() => {
   switch (key.value) {
-    case 'accounts':
-      return route.params.item === 'staff-002'
-        ? isAdmin.value
-          ? ['停用独立后台账号', '重置后台凭证']
-          : []
-        : ['授予负责人角色', '重置学生凭证'];
     case 'failures':
       return ['重试原事件'];
     default:
@@ -34,7 +19,7 @@ const actions = computed(() => {
   }
 });
 watch(
-  [key, () => route.params.item, isAdmin],
+  [key, () => route.params.item],
   () => {
     message.value = '';
     reason.value = '';
@@ -46,7 +31,7 @@ watch(
 <template>
   <PreviewRecords
     :title="section.title"
-    :records="rows"
+    :records="section.records"
     :show-id="true"
     :base="'/manage/' + key"
     :selected="String(route.params.item || '')"

@@ -14,6 +14,7 @@ import {
   workingRevision,
   workspaceScope,
   staff,
+  teamManagerScope,
   type LoadedActivity,
 } from './read.js';
 
@@ -117,12 +118,17 @@ export type Tx = Prisma.TransactionClient;
 export type Reauthorize = () => Promise<Actor>;
 export type Target =
   | { activityId: string }
+  | { teamId: string }
   | { activityIds: (tx: Tx) => Promise<string[]> }
   | { reviewId: string }
   | { requestId: string }
   | { registrationId: string }
   | null;
-async function targetActivityId(tx: Tx, target: Exclude<Target, { activityIds: unknown } | null>) {
+type Access = 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 'team' | 'tech' | 'export';
+type CommandArgs = [tx: Tx, row: LoadedActivity | null, actor: Actor, reauthorize: Reauthorize];
+type Write = () => Promise<unknown>;
+
+async function targetActivityId(tx: Tx, target: Exclude<Target, { activityIds: unknown } | { teamId: string } | null>) {
   if ('activityId' in target) return target.activityId;
   if ('requestId' in target) {
     const request = await tx.exitRequest.findUnique({ where: { id: target.requestId }, select: { registration: { select: { activity_id: true } } } });
@@ -145,12 +151,32 @@ async function targetActivityId(tx: Tx, target: Exclude<Target, { activityIds: u
 @Injectable()
 export class Workflow {
   constructor(private db: Database) {}
-  async run(
+  run(
     req: SessionRequest,
     target: Target,
-    // 'self' 用于本人资源操作（如通知已读/确认），'export' 用于非活动范围的幂等命令；均不做活动范围校验。
-    access: 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 'export',
-    execute: (tx: Tx, row: LoadedActivity | null, actor: Actor, reauthorize: Reauthorize) => Promise<unknown>,
+    // 'self' 用于本人资源操作（如通知已读/确认），不做活动范围校验。
+    access: Access,
+    execute: (...args: CommandArgs) => Promise<unknown>,
+    scope?: string,
+    commandInput?: unknown,
+  ) {
+    return this.runCommand(req, target, access, (...args) => () => execute(...args), scope, commandInput);
+  }
+
+  runAccount<T>(
+    req: SessionRequest, accountId: string, access: 'tech' | 'review',
+    checkAccess: (tx: Tx, actor: Actor) => Promise<T>,
+    execute: (tx: Tx, actor: Actor, checked: T) => Promise<unknown>,
+  ) {
+    return this.runCommand(req, { accountId }, access, async (tx, _row, actor) => {
+      const checked = await checkAccess(tx, actor);
+      return () => execute(tx, actor, checked);
+    });
+  }
+
+  private async runCommand(
+    req: SessionRequest, target: Target | { accountId: string }, access: Access,
+    prepare: (...args: CommandArgs) => Write | Promise<Write>,
     scope?: string,
     commandInput: unknown = req.body ?? {},
   ) {
@@ -168,7 +194,12 @@ export class Workflow {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${stable(identity)},0))`;
       let row: LoadedActivity | null = null;
       let ids: string[] | undefined;
-      if (target && 'activityIds' in target) {
+      if (target && 'accountId' in target) {
+        await tx.$queryRaw`SELECT id FROM account WHERE id IN (${target.accountId}::uuid, ${account_id}::uuid) ORDER BY id FOR UPDATE`;
+      } else if (target && 'teamId' in target) {
+        const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM activity WHERE id=${target.teamId}::uuid FOR UPDATE`;
+        if (!locked.length) invisible();
+      } else if (target && 'activityIds' in target) {
         ids = [...new Set(await target.activityIds(tx))];
         const locked = await tx.$queryRaw<{ id: string }[]>`
           SELECT id FROM activity WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR UPDATE`;
@@ -185,6 +216,8 @@ export class Workflow {
         row = await tx.activity.findUnique({ where: { id }, include: includeView });
         if (!row) invisible();
       }
+      if (access === 'tech' && !target)
+        await tx.$queryRaw`SELECT id FROM account WHERE id=${account_id}::uuid FOR UPDATE`;
       const reauthorize: Reauthorize = async () => {
         const now = new Date();
         const account = await tx.account.findFirst({
@@ -205,7 +238,11 @@ export class Workflow {
           invisible();
         if (access === 'self' && studentId(actor) !== account.student?.id) invisible();
         if (access === 'create' && !actor.roles.includes('organizer')) denied();
+        if (access === 'tech' && !actor.roles.includes('tech_admin')) denied();
         if (access === 'review' && !staff(actor)) denied();
+        if (access === 'team' && (!target || !('teamId' in target) || !await tx.activity.count({
+          where: { id: target.teamId, ...teamManagerScope(actor) },
+        }))) invisible();
         if (ids && access === 'manage' && await tx.activity.count({
           where: { id: { in: ids }, ...managedScope(actor) },
         }) !== ids.length) invisible();
@@ -216,6 +253,7 @@ export class Workflow {
         return actor;
       };
       const actor = await reauthorize();
+      const write = await prepare(tx, row, actor, reauthorize);
       const cached = await tx.commandReceipt.findUnique({
         where: { account_id_method_path_key: identity },
       });
@@ -224,7 +262,7 @@ export class Workflow {
           throw new BusinessError(409, 'conflict', '同一幂等键的请求内容已变化');
         return cached.response;
       }
-      const response = json(envelope(await execute(tx, row, actor, reauthorize)));
+      const response = json(envelope(await write()));
       await tx.commandReceipt.create({ data: { ...identity, digest, response } });
       return response;
     });

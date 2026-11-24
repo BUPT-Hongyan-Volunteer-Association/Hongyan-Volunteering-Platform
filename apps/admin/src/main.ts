@@ -27,6 +27,9 @@ const router = createRouter({
         { path: 'hours/:id?', component: () => import('./hours/HourReview.vue'), meta: { profile: true } },
         { path: 'reviews/:id?', component: ReviewPage, meta: { profile: true } },
         { path: 'manage/imports/:item?', component: StudentImports },
+        { path: 'manage/teams', component: () => import('./activities/TeamsPage.vue') },
+        { path: 'manage/teams/:id', component: () => import('./activities/TeamDetail.vue'), props: true },
+        { path: 'manage/accounts/:item?', component: () => import('./management/AccountLookup.vue'), meta: { profile: true } },
         { path: 'manage/students/:item?', component: StudentsPage },
         { path: 'manage/students/:item/hours', component: () => import('./hours/StudentHours.vue') },
         { path: 'manage/audit/:item?', component: AuditPage },
@@ -36,7 +39,6 @@ const router = createRouter({
         {
           path: 'manage/:section(' + previewSectionKeys.join('|') + ')/:item?',
           component: ManagementPage,
-          meta: { profile: true },
         },
       ],
     },

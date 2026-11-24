@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./ActivityMemberListView.vue": "./src/ActivityMemberListView.vue",
     "./SessionStatus.vue": "./src/SessionStatus.vue",
     "./theme.css": "./src/theme.css",
     "./AccountGate.vue": "./src/AccountGate.vue",

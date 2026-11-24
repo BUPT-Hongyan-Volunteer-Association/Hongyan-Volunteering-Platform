@@ -217,7 +217,7 @@ export async function timelinePage(
 
   // 日程本就需要扫描全部匹配项以计数。只对当前身份可见的日程字段取摘要，排除请求时刻。
   const digest = createHash('sha256');
-  const views = await activityViews(db, where, management ? revision : 'public', q, studentId, (a) => {
+  const views = await activityViews(db, where, management ? revision : 'public', q, { studentId }, (a) => {
     digest.update(JSON.stringify([
       a.id, a.activity_code, a.title, a.status, a.schedule_revision, a.revision_state, a.schedule,
       a.campus, a.location, a.capacity, a.registration_closes_at, a.registration_phase, a.is_ongoing,

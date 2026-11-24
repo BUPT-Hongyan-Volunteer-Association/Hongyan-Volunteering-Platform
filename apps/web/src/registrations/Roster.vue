@@ -24,6 +24,7 @@ import { useIdSelection } from '@hongyan/ui/useSelection';
 import { registrationLabels } from './labels';
 import Pager from '@hongyan/ui/Pager.vue';
 const props = defineProps<{ writesPaused: boolean }>();
+const emit = defineEmits<{ denied: [] }>();
 const route = useRoute(),
   q = ref(''),
   state = ref<Registration['status'] | ''>('submitted'),
@@ -94,17 +95,23 @@ async function load() {
   } catch (e) {
     if (turn !== serial) return;
     readError.value = e instanceof Error ? e.message : '名单读取失败';
-    if (noAccess(e)) {
-      conflicts.value = [];
-      selected.value.clear();
-      notice.value = '';
-      writeError.value = '';
-    }
+    if (noAccess(e)) discardRoster();
   }
 }
 const snapshots = shallowReactive(new Map<string, Registration>());
 const conflicts = ref<{ id: string; text: string }[]>([]);
 const batchReason = ref(''), singleReason = ref('');
+function discardRoster() {
+  serial++;
+  filterVersion++;
+  result.value = undefined;
+  inspected.value = undefined;
+  selected.value.clear();
+  conflicts.value = [];
+  notice.value = '';
+  writeError.value = '';
+  emit('denied');
+}
 watch(inspected, () => { singleReason.value = ''; }, { flush: 'sync' });
 watch(() => [...selected.value], ids => {
   if (!ids.length || ids.some(id => !snapshots.has(id))) batchReason.value = '';
@@ -155,12 +162,7 @@ async function decide(decision: Decision, single?: Registration) {
   } catch (e) {
     if (!mounted || activityId !== route.params.id) return;
     if (noAccess(e)) {
-      conflicts.value = [];
-      notice.value = '';
-      selected.value.clear();
-      inspected.value = undefined;
-      result.value = undefined;
-      serial++;
+      discardRoster();
       readError.value = e instanceof Error ? e.message : '名单不可见';
       return;
     }
@@ -251,14 +253,14 @@ onUnmounted(() => {
       @click="decide(key)">{{ key === 'waitlisted' ? '所选设为候补' : label + '所选' }}</button>
     <ExportButton
       :input="filterExportInput"
-      :disabled="saving || !!readError"
+      :disabled="saving || writesPaused || !result"
       create-label="导出筛选结果"
       download-label="下载名单文件"
       @recheck="load"
     />
     <ExportButton
       :input="selectedExportInput"
-      :disabled="!selected.size || saving"
+      :disabled="!selected.size || saving || writesPaused || !result"
       :create-label="'导出所选名单' + (selected.size ? '（' + selected.size + '）' : '')"
       download-label="下载所选名单"
       @recheck="load"

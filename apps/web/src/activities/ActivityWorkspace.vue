@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import UiSelect from '@hongyan/ui/UiSelect.vue';
+import ActivityMemberListView from '@hongyan/ui/ActivityMemberListView.vue';
+import TransferOwner from './TransferOwner.vue';
+import AddCollaborator from './AddCollaborator.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import { serviceTime } from '@hongyan/ui/activityDisplay';
@@ -9,7 +11,7 @@ import {
   getActivityMembers,
   getManagedActivity,
   type ManagedActivityDetail,
-  type ActivityMember,
+  type ActivityMemberList,
   type Profile,
 } from '@hongyan/contracts';
 
@@ -28,7 +30,6 @@ function showDetail(next: ManagedActivityDetail) {
   )
     detail.value = next;
 }
-const memberMessage = ref('');
 const sections = [
   ['roster', '报名名单'],
   ['notices', '通知与回执'],
@@ -36,45 +37,76 @@ const sections = [
   ['batches', '时长批次'],
   ['hours', '时长台账'],
 ];
-const deniedRefresh = ['organizer-section', 'activity-notices', 'activity-attendance', 'hour-batches', 'hour-batch', 'activity-hours',
-  'activity-hour-appeals', 'activity-hour-corrections', 'activity-hour-incidents'];
-const members = ref<ActivityMember[]>([]);
+const team = ref<ActivityMemberList>({ items: [], version: 0 });
+const members = computed(() => team.value.items);
+function applyTeam(id: string, next: ActivityMemberList) {
+  if (id === route.params.id && next.version >= team.value.version) team.value = next;
+}
 const error = ref('');
+const access = ref<'unknown' | 'member' | 'lost' | 'unavailable'>('unknown');
+const inaccessible = computed(() => access.value === 'lost' || access.value === 'unavailable');
+const backSchedule = computed(() => !inaccessible.value && scheduleReturn);
 const verifying = ref(false);
 const sourceQuery = computed(() => ({ page: route.query.page }));
 const self = computed(() => members.value.find((m) => m.account_id === props.profile.account_id));
+const transferTarget = ref('');
+const transferMessage = computed(() => {
+  if (!transferTarget.value || self.value?.member_role !== 'collaborator') return '';
+  const owner = members.value.find(member => member.member_role === 'owner');
+  if (!owner) return '';
+  return owner.account_id === transferTarget.value ? '主负责人已交接给' + owner.display_name + '。'
+    : '已核对活动成员，当前主负责人是' + owner.display_name + '。';
+});
 let generation = 0;
+function denyAccess() {
+  access.value = access.value === 'member' || access.value === 'lost' ? 'lost' : 'unavailable';
+  detail.value = undefined;
+  team.value = { items: [], version: 0 };
+  transferTarget.value = '';
+  window.dispatchEvent(new Event('hongyan-roles-changed'));
+}
 async function load(clear = true) {
   const turn = ++generation;
   verifying.value = true;
   if (clear) {
+    access.value = 'unknown';
+    transferTarget.value = '';
     detail.value = undefined;
-    members.value = [];
-    memberMessage.value = '';
+    team.value = { items: [], version: 0 };
   }
   error.value = '';
   try {
     const path = { id: String(route.params.id) };
-    const team = (await getActivityMembers({ path, throwOnError: true })).data.data.items;
-    if (!team.some((m) => m.account_id === props.profile.account_id)) {
-      if (turn !== generation) return;
-      members.value = [];
-      error.value = '当前账号不是该活动的管理成员。';
-      return;
+    const next = (await getActivityMembers({ path, throwOnError: true })).data.data;
+    if (turn !== generation) return false;
+    if (!next.items.some((m) => m.account_id === props.profile.account_id)) {
+      denyAccess();
+      return false;
     }
     const latest = (await getManagedActivity({ path, throwOnError: true })).data.data;
-    if (turn !== generation) return;
+    if (turn !== generation) return false;
     showDetail(latest);
-    members.value = team;
+    applyTeam(path.id, next);
+    access.value = 'member';
+    return true;
   } catch (e) {
-    if (turn !== generation) return;
-    if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) members.value = [];
-    error.value = e instanceof Error ? e.message : '活动读取失败';
+    if (turn === generation) {
+      if (e instanceof ApiError && (e.status === 403 || e.status === 404)) {
+        denyAccess();
+      } else {
+        if (e instanceof ApiError && e.status === 401) {
+          detail.value = undefined;
+          team.value = { items: [], version: 0 };
+        }
+        error.value = e instanceof Error ? e.message : '活动读取失败';
+      }
+    }
+    return false;
   } finally {
     if (turn === generation) verifying.value = false;
   }
 }
-const refresh = () => void load(false);
+const refresh = () => load(false);
 watch([() => route.params.id, () => props.profile.account_id], () => load(), { immediate: true });
 onMounted(() => window.addEventListener('focus', refresh));
 onUnmounted(() => {
@@ -83,11 +115,13 @@ onUnmounted(() => {
 });
 </script>
 <template>
-  <RouterLink class="back-link" :to="scheduleReturn || { path: '/managed', query: sourceQuery }"
-    ><UiIcon name="ArrowLeft" />{{ scheduleReturn ? '返回日程' : '返回我的管理活动' }}</RouterLink
+  <RouterLink class="back-link" :to="backSchedule || { path: '/managed', query: sourceQuery }"
+    ><UiIcon name="ArrowLeft" />{{ backSchedule ? '返回日程' : '返回我的管理活动' }}</RouterLink
   >
   <p v-if="error" role="alert">{{ error }} <button @click="refresh">重试</button></p>
-  <p v-if="!self && !error" role="status">正在核验活动成员…</p>
+  <p v-else-if="inaccessible" class="notice" role="alert">{{ access === 'lost'
+    ? '你已不在本活动团队，个人功能不受影响。' : '当前账号无法访问此活动。' }}</p>
+  <p v-else-if="!self" role="status">正在核验活动成员…</p>
   <template v-if="self && activity">
     <header class="section-heading">
       <h1>{{ activity.title }}</h1>
@@ -119,7 +153,7 @@ onUnmounted(() => {
     <RouterView v-if="route.name !== 'managed-overview'" v-slot="{ Component }">
       <component
         :is="Component"
-        v-on="deniedRefresh.includes(String(route.name)) ? { denied: refresh } : {}"
+        @denied="refresh"
         v-bind="
           route.name === 'activity-hour-incidents'
             ? {}
@@ -133,50 +167,19 @@ onUnmounted(() => {
     </RouterView>
     <section v-else class="reading-area">
       <h2>活动成员</h2>
-      <ul class="member-list">
-        <li v-for="m in members" :key="m.account_id">
-          <span class="item-icon"><UiIcon name="User" /></span><strong>{{ m.display_name }}</strong
-          ><span class="state-chip neutral">{{
-            m.member_role === 'owner' ? '主负责人' : '协作者'
-          }}</span>
-        </li>
-      </ul>
-      <details v-if="self.member_role === 'owner'">
-        <summary>管理成员（预览）</summary>
-        <form
-          class="preview-form"
-          @submit.prevent="memberMessage = '示例操作尚待接入，活动成员未变更。'"
-        >
-          <label
-            >操作<UiSelect
-              label="操作"
-              :options="
-                members.length > 1 ? ['添加协作者', '移除协作者', '转移主负责人'] : ['添加协作者']
-              "
-          /></label>
-          <label>成员学号<input required pattern="[0-9]{10}" maxlength="10" /></label
-          ><label>原因<input required /></label><button>预览成员变更</button>
-        </form>
-        <p v-if="memberMessage" role="status">{{ memberMessage }}</p>
-      </details>
+      <p v-if="transferMessage" class="notice" role="status">{{ transferMessage }}</p>
+      <ActivityMemberListView :key="activity.id + self.member_role" :activity="activity" :team="team"
+        :can-manage="self.member_role === 'owner'" :paused="verifying || !!error" @saved="applyTeam" @refresh="refresh" />
+      <AddCollaborator v-if="self.member_role === 'owner'" :key="activity.id" :activity="activity"
+        :team="team" :paused="verifying || !!error" @saved="applyTeam" @refresh="refresh" />
+      <TransferOwner v-if="self.member_role === 'owner'" :key="activity.id + team.version" :activity="activity"
+        :team="team" :paused="verifying || !!error" @target="transferTarget = $event" @saved="applyTeam" @refresh="refresh" />
+      <p v-else>你是本活动的协作者。成员变更由主负责人或授权后台办理。</p>
     </section>
   </template>
 </template>
 
 <style scoped>
-.member-list {
-  display: grid;
-  list-style: none;
-  padding: 0;
-  border-top: 1px solid var(--line);
-}
-.member-list li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
-}
 @media (max-width: 700px) {
   .workspace-tools {
     width: 100%;

@@ -2,11 +2,12 @@
 import { onMounted, onUnmounted, ref } from 'vue';
 import {
   ApiError,
-  changePassword,
+  changeOwnPassword,
   getProfile,
   login,
   logout,
   openSession,
+  passwordRequirement,
   writeHeaders,
   type Profile,
 } from '@hongyan/contracts';
@@ -47,20 +48,14 @@ async function submit(action: 'login' | 'change' | 'logout') {
   busy.value = true;
   message.value = '';
   try {
-    const headers = writeHeaders();
     if (action === 'login')
       await login({
-        headers,
+        headers: writeHeaders(),
         body: { username: username.value, password: password.value },
         throwOnError: true,
       });
-    if (action === 'change')
-      await changePassword({
-        headers,
-        body: { current_password: password.value, new_password: next.value },
-        throwOnError: true,
-      });
-    if (action === 'logout') await logout({ headers, throwOnError: true });
+    if (action === 'change') await changeOwnPassword(password.value, next.value);
+    if (action === 'logout') await logout({ headers: writeHeaders(), throwOnError: true });
     showPassword.value = false;
     password.value = '';
     next.value = '';
@@ -69,6 +64,8 @@ async function submit(action: 'login' | 'change' | 'logout') {
     if (action === 'login' && e instanceof ApiError && e.body?.code === 'unauthorized') {
       await restore();
       if (stage.value === 'login') message.value = '登录页面已过期，会话已更新，请再次登录。';
+    } else if (action === 'login' && e instanceof ApiError && e.body?.code === 'invalid_credentials') {
+      message.value = '登录失败，请核对账号和密码。如果你刚办理过凭证重置，旧密码已失效，请联系办理老师确认发放进度。';
     } else {
       if (e instanceof ApiError && e.status === 401 && action !== 'login') await restore();
       message.value = e instanceof Error ? e.message : '请求失败';
@@ -92,11 +89,13 @@ async function refreshIdentity() {
 }
 onMounted(() => {
   window.addEventListener('focus', refreshIdentity);
+  window.addEventListener('hongyan-roles-changed', refreshIdentity);
   window.addEventListener('hongyan-session-expired', expired);
   void restore();
 });
 onUnmounted(() => {
   window.removeEventListener('focus', refreshIdentity);
+  window.removeEventListener('hongyan-roles-changed', refreshIdentity);
   window.removeEventListener('hongyan-session-expired', expired);
 });
 </script>
@@ -224,7 +223,7 @@ onUnmounted(() => {
               placeholder="设置新密码"
               aria-describedby="pw-rule"
           /></span>
-          <small id="pw-rule">至少 8 个字符，包含英文字母和数字。</small>
+          <small id="pw-rule">{{ passwordRequirement }}</small>
         </label>
         <p v-if="message" role="alert">{{ message }}</p>
         <button class="primary auth-submit" :disabled="busy" :aria-busy="busy">

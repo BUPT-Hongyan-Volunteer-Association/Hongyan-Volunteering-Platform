@@ -56,6 +56,7 @@ const {
     }
     return { page: data.data, selected };
   },
+  () => emit('denied'),
 );
 const current = computed(() => listing.value?.selected);
 const followUp = computed({
@@ -99,7 +100,10 @@ const {
       pending: pending ? rows.data.data.total : (count?.data.data.total ?? 0),
     };
   },
-  () => void refresh(),
+  () => {
+    emit('denied');
+    void refresh(false);
+  },
 );
 const receipts = computed(() => receiptPage.value?.rows);
 const receiptExportInput = computed<ExportInput>(() => ({
@@ -187,12 +191,11 @@ async function reloadReceipts() {
               ]"
             />
             <button :disabled="loading" @click="reloadReceipts">刷新回执</button>
-          <ExportButton
-            v-if="current"
-            :input="receiptExportInput"
-            :disabled="loading"
-            @recheck="refreshReceipts"
-          />
+            <ExportButton
+              :input="receiptExportInput"
+              :disabled="loading || writesPaused || !!receiptError"
+              @recheck="refreshReceipts"
+            />
           </div>
           <p v-if="receiptError" role="alert">{{ receiptError }}</p>
           <p v-else-if="!receipts" role="status">正在读取回执…</p>

@@ -36,7 +36,7 @@ const crumb = computed(() => {
   if (route.path === '/managed/new') return '新建活动';
   if (route.path.startsWith('/managed/')) return '活动工作区';
   if (route.path === '/managed') return '我的管理活动';
-  if (route.path === '/mine/settings') return '账号设置';
+  if (route.path === '/mine/settings') return '账号管理';
   if (route.path.startsWith('/mine/hours')) return '我的时长';
   if (route.path.startsWith('/mine/feedback')) return '本人记录与反馈';
   return studentNav.find((item) => isCurrent(item.to))?.label || '我的';
