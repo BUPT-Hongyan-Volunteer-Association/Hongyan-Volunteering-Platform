@@ -2451,7 +2451,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await visible(detail.getByRole('heading', { name: expected[0] }));
       assert.deepEqual([...requested].sort((a, b) => a - b), [1, 2], '刷新重读已加载的两页');
 
-      // 侧栏不保留已失效的段：同日改时刻后所选时段键消失，活动仍在列表里（§2.2 第 3 种）。
+      // 侧栏不保留已失效的段：同日改时刻后所选时段键消失，活动仍在列表里。
       await db.activityRevision.update({
         where: {
           activity_id_revision: { activity_id: server[0].items[0].activity_id, revision: 1 },

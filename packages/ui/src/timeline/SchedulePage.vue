@@ -163,7 +163,7 @@ function applySelection() {
   clearSelection();
 }
 
-/** 选中活动不在已加载范围且还有更多页时，按 §1.6 补读到它或范围耗尽。 */
+/** 选中活动不在已加载范围且还有更多页时，逐页补读，找到该活动或读完即停。 */
 function needsBackfill() {
   const item = typeof route.query.item === 'string' ? route.query.item : undefined;
   return !!item && !rows.value.some((row) => row.activity_id === item) && hasMore.value;
@@ -235,7 +235,7 @@ function set(key: string, value: string) {
 const valueOf = (event: Event) => (event.target as HTMLInputElement).value;
 let opener: Element | null = null;
 async function choose(r: TimelineActivity, s: TimelineItem) {
-  // 切换条件期间旧行仍在画面上，但不能据此改地址栏（DESIGN.md「切换期间…禁止交互」）。
+  // 切换条件时忽略旧行的点击，避免把失效选段写回 URL。
   if (switching.value > 0) return;
   selectionMessage.value = '';
   opener = document.activeElement;
