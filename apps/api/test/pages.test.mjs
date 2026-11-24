@@ -1549,6 +1549,32 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
         worker: api.get(NoticeWorker), fits, pickOption, capture, holdResponse, settleRender });
     });
     await t.test('主负责人添加协作者并交接，移除原负责人后旧会话失去活动权限', async () => {
+      async function addAfterQualificationRestored(page, studentNo, errorMessage) {
+        const reason = page.getByLabel('添加原因');
+        const submit = button(page, '确认添加协作者');
+        const limit = '现场引导'.repeat(125);
+        await reason.fill(limit + '甲');
+        assert.equal(await reason.inputValue(), limit);
+
+        // 核对成功后资格到期，提交时由真实接口返回字段校验错误。
+        const { account_id } = await db.student.findUniqueOrThrow({ where: { student_no: studentNo } });
+        const where = { account_id_role: { account_id, role: 'organizer' } };
+        const { expires_at } = await db.roleGrant.findUniqueOrThrow({ where });
+        await db.roleGrant.update({ where, data: { expires_at: new Date(0) } });
+        try {
+          const failed = page.waitForResponse(response => response.url().endsWith('/members')
+            && response.request().method() !== 'GET');
+          await submit.click();
+          assert.equal((await failed).status(), 422);
+          await visible(page.getByText(errorMessage, { exact: true }));
+          assert.equal(await reason.inputValue(), limit);
+        } finally {
+          await db.roleGrant.update({ where, data: { expires_at } });
+        }
+        await reason.fill('资格复核' + limit.slice(4));
+        await submit.click();
+      }
+
       const joined = await signIn(browser, web, '0000000003', password, 390);
       await joined.goto(web + '/managed/' + first.id);
       await visible(joined.getByRole('alert'));
@@ -1565,8 +1591,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       assert.equal(await card.count(), 0);
       await number.fill('0000000003');
       await button(owner, '查找负责人').click();
-      await owner.getByLabel('添加原因').fill('活动引导');
-      await button(owner, '确认添加协作者').click();
+      await addAfterQualificationRestored(owner, '0000000003', '该账号当前没有有效的负责人资格，请重新核对');
       await visible(owner.getByText('同学乙已加入本活动，身份为协作者。'));
       await number.fill('0000000003');
       await button(owner, '查找负责人').click();
@@ -1620,8 +1645,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       await teacher.getByLabel('接任人学号').fill('0000000002');
       await button(teacher, '核对接任人').click();
       await visible(teacher.getByText('同学甲 · 0000000002', { exact: true }));
-      await teacher.getByLabel('添加原因').fill('补充接任协作者');
-      await button(teacher, '确认添加协作者').click();
+      await addAfterQualificationRestored(teacher, '0000000002', '新增成员和接任人均须具有有效负责人资格');
       await visible(teacher.getByText('同学甲已加入活动，请核对交接信息并填写交接原因。'));
       assert.equal(await teacher.getByLabel('交接原因').inputValue(), '');
       await teacher.getByLabel('交接原因').fill('老师核对后办理');

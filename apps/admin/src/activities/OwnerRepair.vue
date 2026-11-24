@@ -49,7 +49,9 @@ async function submit() {
     emit('saved', id, data.data, transfer ? name + '已接任主负责人。' : name + '已加入活动，请核对交接信息并填写交接原因。');
   } catch (e) {
     if (turn !== serial) return;
-    if (e instanceof ApiError && [401, 403, 404, 409, 422].includes(e.status ?? 0)) {
+    if (e instanceof ApiError && e.status === 422) {
+      message.value = e.message;
+    } else if (e instanceof ApiError && [401, 403, 404, 409].includes(e.status ?? 0)) {
       emit('refresh', e.status === 409 ? e.message + '，请重新核对后办理。' : e.message);
     } else message.value = '提交结果未确认，请重试。';
   } finally { saving.value = false; }

@@ -21,7 +21,9 @@ function clear() {
 }
 
 function failure(error: unknown) {
-  if (error instanceof ApiError && [401, 403, 404, 409, 422].includes(error.status ?? 0)) {
+  if (error instanceof ApiError && error.status === 422) {
+    notice.value = error.message;
+  } else if (error instanceof ApiError && [401, 403, 404, 409].includes(error.status ?? 0)) {
     clear();
     notice.value = error.status === 409 ? '团队已变化，请重新查找并核对。' : error.message;
     emit('refresh');
@@ -77,7 +79,7 @@ async function add() {
       <p v-if="member">已是本活动{{ member.member_role === 'owner' ? '主负责人' : '协作者' }}，无需重复添加。</p>
       <form v-else @submit.prevent="add">
         <p>将加入「{{ activity.title }}」（{{ activity.activity_code }}），仅获得本活动的协作权限。</p>
-        <label>添加原因<input v-model="reason" required maxlength="2000" :disabled="saving" /></label>
+        <label>添加原因（最多 500 字）<input v-model="reason" required maxlength="500" :disabled="saving" /></label>
         <button class="primary" :disabled="saving || paused">{{ saving ? '正在添加…' : '确认添加协作者' }}</button>
       </form>
     </section>
