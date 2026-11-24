@@ -131,7 +131,7 @@ paths:
     post:
       operationId: change_password
       summary: 设置或修改密码
-      description: 允许受限首登会话调用。核验当前凭证，修改后递增账号版本、撤销旧会话，并随当前会话一起返回新的 CSRF 令牌。
+      description: 首次登录和已登录用户自助改密共用此接口。服务端核验当前密码，成功后递增账号版本、撤销旧会话，并通过 Set-Cookie 和 X-CSRF-Token 响应头向当前浏览器发放新会话及其 CSRF 令牌。原密码错误或新密码不符合要求时返回 422。
       tags:
       - 账号
       x-requirement: FR06
@@ -168,7 +168,7 @@ paths:
           description: 成功
           headers:
             X-CSRF-Token:
-              description: 当前浏览器后续写请求使用的新会话令牌。
+              description: 当前浏览器后续写请求使用的 CSRF 令牌，与本次签发的会话 Cookie 配套。
               required: true
               schema:
                 type: string
@@ -1201,7 +1201,7 @@ paths:
     post:
       operationId: add_activity_member
       summary: 添加活动协作成员
-      description: 仅该活动当前owner或reviewer、tech_admin执行。协作成员不能增删成员或转移主负责人。新增成员及转移目标必须有有效organizer角色。操作需expected_version并记录原因、前后成员与操作者，下一请求立即使用新权限。仅添加collaborator，不发放全局角色。账号已在团队中时返回当前集合，不重复增加。
+      description: 当前主负责人或授权后台可添加协作者。新成员须账号启用、已持有登录凭证且 organizer 角色有效。校验团队版本并记录原因、操作者和变更前后成员。下一请求使用新权限。目标已在团队中时返回当前集合。
       tags:
       - 活动
       x-requirement: FR06
@@ -1265,7 +1265,7 @@ paths:
     put:
       operationId: set_activity_members
       summary: 分配活动负责人
-      description: 后台完整维护活动团队，校验expected_version并保留审计。始终恰有一个owner。新增人员和新owner必须具有有效organizer角色。更换owner时旧owner保留为collaborator，随后才能单独移除。既有成员角色失效即无管理权，后台可修复主负责人归属。该接口不授予全局角色。
+      description: 授权后台可维护正常团队或接管失效团队。expected_version 使用当前团队版本。新增成员及接任人须账号启用、持有登录凭证且 organizer 角色有效。更换唯一主负责人时，接任人须是本活动现有协作者，原主负责人转为协作者，后续可单独移除。变更只作用于本活动，并记录审计。
       tags:
       - 活动
       x-requirement: FR06
@@ -4219,7 +4219,7 @@ paths:
     put:
       operationId: set_account_roles
       summary: 发放或回收角色
-      description: reviewer只能修改普通学生账号的organizer角色，不能修改含reviewer/tech_admin角色的目标。tech_admin管理全部角色。事务后至少有一个启用且tech_admin无到期日的技术管理员，不能靠设未来到期规避此约束。角色到期与回收在下一请求生效，审计保留原因和前后值。
+      description: 以账号摘要的 roles_version 核验 expected_version。reviewer 仅可调整普通学生的 organizer 授权。含 reviewer 或 tech_admin 授权记录的账号由 tech_admin 管理，包括清理已到期的授权。学生原有身份保留。操作后须保留至少一个启用、可登录且 tech_admin 角色无到期日的账号。到期或回收在下一请求生效，审计保留原因和变更前后值。
       tags:
       - 账号
       x-requirement: FR06
@@ -4283,7 +4283,7 @@ paths:
     post:
       operationId: create_staff_account
       summary: 建立老师或技术账号
-      description: 独立后台账号，不依赖学生档案。高权限初始凭证经独立安全通道发放。不使用学号后六位。
+      description: 技术管理员创建独立的老师或技术账号。创建时凭证待发放，技术管理员核验本人后通过 reset_password 签发临时凭证，经独立安全渠道交付，领取者首次登录须设置新密码。
       tags:
       - 账号
       x-requirement: FR06
@@ -4339,7 +4339,7 @@ paths:
     post:
       operationId: reset_password
       summary: 核验本人后重置或签发临时凭证
-      description: 省略 temporary_password 时撤销旧凭证并进入待发放状态。仅待发放时可提交新生成的独立强临时凭证，签发后首次登录须更换密码。两步均人工核验本人、记录原因并撤销旧会话，重置发放方式仍待学院确认，不返回旧密码。reviewer仅可重置学生档案关联且无reviewer/tech_admin角色的学生或负责人账号，tech_admin才能重置老师及技术账号。不能通过重置最后一个可用技术管理员使其无人可恢复，须先落实另一可用技术管理员或独立恢复通道。
+      description: 省略 temporary_password 时重置既有凭证，账号随即进入待发放状态。仅在待发放状态下可提交办理端生成的临时凭证，领取者首次登录须更换密码。两步均须人工核验本人、填写原因和提交账号当前 version，成功后版本加一并撤销旧会话。凭证交付渠道由学院确认。reviewer 仅可办理关联学生档案且没有 reviewer 或 tech_admin 授权记录的账号，老师及技术账号由 tech_admin 办理。重置后系统须保留至少一个启用、可登录且 tech_admin 角色无到期日的账号。
       tags:
       - 账号
       x-requirement: FR06
@@ -5547,7 +5547,7 @@ paths:
     delete:
       operationId: remove_activity_member
       summary: 移除活动协作成员
-      description: 仅该活动当前owner或reviewer、tech_admin执行。协作成员不能增删成员或转移主负责人。新增成员及转移目标必须有有效organizer角色。操作需expected_version并记录原因、前后成员与操作者，下一请求立即使用新权限。不得直接移除owner，必须先转移。移除后仅失去该活动管理权限，学生身份、全局负责人角色和历史记录保留。
+      description: 当前主负责人或授权后台可移除协作者，移除现任主负责人前须先交接。校验团队版本并记录原因、操作者和变更前后成员。移除在下一请求生效，学生身份、全局角色和历史记录保留。
       tags:
       - 活动
       x-requirement: FR06
@@ -5618,7 +5618,7 @@ paths:
       operationId: transfer_activity_owner
       summary: 转移活动主负责人
       description: |
-        仅该活动当前owner或reviewer、tech_admin执行。协作成员不能增删成员或转移主负责人。新增成员及转移目标必须有有效organizer角色。操作需expected_version并记录原因、前后成员与操作者，下一请求立即使用新权限。目标必须是当前活动的另一名有效collaborator。事务内将目标设为owner，原owner改为collaborator并保留。始终恰有一个owner。
+        当前主负责人或授权后台可将活动交给本活动另一名协作者。接任人须账号启用、持有登录凭证且 organizer 角色有效。事务内校验团队版本，将接任人设为唯一主负责人，卸任者转为协作者，并记录原因、操作者和变更前后成员。下一请求使用新权限。
         结果未知时使用原幂等键及原请求体重试。服务端先核验当前权限，再读取回执。原主负责人交接后仅有协作者权限时，重试返回 404，不会再次交接或写入审计。客户端须重新读取活动成员，以当前主负责人核对结果；单凭 404 无法判断交接是否成功。
       tags:
       - 活动
@@ -5683,7 +5683,7 @@ paths:
     get:
       operationId: find_activity_member_candidate
       summary: 按学号查找可添加的协作负责人
-      description: 仅本活动owner或后台可用。按完整学号精确查找当前有效organizer，仅返回添加所需的account_id、student_no、display_name，不开放全院学生列表、参与记录或异常历史。无匹配返回空items。
+      description: 当前主负责人或授权后台按完整十位学号精确查找，同时核验账号启用、持有登录凭证和 organizer 角色有效。仅返回 account_id、student_no、display_name。无匹配时 items 为空。
       tags:
       - 活动
       x-requirement: FR06
@@ -7821,7 +7821,7 @@ components:
           minLength: 1
         new_password:
           type: string
-          description: 至少8字符，至少包含一个英文字母和一个数字。不要求同时包含大小写或特殊符号。
+          description: 至少 8 个字符，同时包含英文字母和数字。字母大小写均可，特殊符号可选。首次用初始密码或临时凭证登录时，新密码还须与当前凭证不同。
           format: password
           minLength: 8
           pattern: ^(?=.*[A-Za-z])(?=.*[0-9]).{8,}$
@@ -8597,7 +8597,7 @@ components:
       - expected_version
       - members
       - reason
-      description: 仅后台使用。成员不得重复，始终恰有一个owner。更换owner必须保留旧owner为collaborator，移除另行操作。
+      description: 仅后台使用。每个账号最多出现一次，且恰有一个 owner。接任人须是当前团队的 collaborator。交接后原 owner 保留为 collaborator，可在下一次操作中移除。
     historical_activity_input:
       type: object
       properties:
@@ -12012,9 +12012,11 @@ components:
         version:
           type: integer
           minimum: 1
+          description: 账号状态及凭证版本。改密、重置或签发均会递增。办理后台账号启停或凭证操作时传入 expected_version。
         roles_version:
           type: integer
           minimum: 1
+          description: 独立的角色授权版本，办理角色变更时传入 expected_version。
         username:
           type: string
         display_name:
