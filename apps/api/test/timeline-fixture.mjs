@@ -4,11 +4,12 @@ export const atTime = (date, time) => date + 'T' + time + ':00+08:00';
 
 /**
  * 独立编号前缀与独立日期窗口的日程数据集：同日同时段、按编号升序，正好 `count` 项。
+ * `extra` 追加显式编码与安排的尾项（跨午夜分段、结果集移入项等），编码须排在 `count` 项之后。
  * 一次写入活动、版本与负责人，深分页的 1001 项也能在数秒内就绪。
  */
 export async function createScheduleDataset(
   db,
-  { codePrefix, titlePrefix, date, count, ownerUsername = '0000000003' },
+  { codePrefix, titlePrefix, date, count, ownerUsername = '0000000003', extra = [] },
 ) {
   const source = await db.activity.findUniqueOrThrow({ where: { activity_code: 'P2026-0001' } });
   const template = (
@@ -27,27 +28,35 @@ export async function createScheduleDataset(
     starts_at: atTime(date, '10:00'),
     ends_at: atTime(date, '12:00'),
   };
+  const entries = [
+    ...codes.map((code) => ({
+      code,
+      title: titlePrefix + ' ' + code.slice(codePrefix.length),
+      schedule,
+    })),
+    ...extra,
+  ];
   await db.activity.createMany({
-    data: codes.map((activity_code) => ({
-      activity_code,
+    data: entries.map((entry) => ({
+      activity_code: entry.code,
       status: 'published',
       working_revision: 1,
       published_revision: 1,
     })),
   });
   const rows = await db.activity.findMany({
-    where: { activity_code: { in: codes } },
+    where: { activity_code: { in: entries.map((entry) => entry.code) } },
     select: { id: true, activity_code: true },
   });
   const ids = new Map(rows.map((row) => [row.activity_code, row.id]));
   await db.activityRevision.createMany({
-    data: codes.map((code) => ({
-      activity_id: ids.get(code),
+    data: entries.map((entry) => ({
+      activity_id: ids.get(entry.code),
       revision: 1,
       revision_state: 'approved',
       approved_at: new Date(),
       created_by: owner.id,
-      content: { ...template, title: titlePrefix + ' ' + code.slice(codePrefix.length), schedule },
+      content: { ...template, title: entry.title, schedule: entry.schedule },
     })),
   });
   await db.activityMember.createMany({
@@ -58,6 +67,30 @@ export async function createScheduleDataset(
     })),
   });
   return { date, codePrefix, codes, count };
+}
+
+/** 把一项活动挪到窗口外的某日同时段：只改这一项的获批版本，其余项与 `total` 由服务端跟随。 */
+export async function moveActivityTo(
+  db,
+  { activityCode, date, startsAt = '10:00', endsAt = '12:00' },
+) {
+  const activity = await db.activity.findUniqueOrThrow({ where: { activity_code: activityCode } });
+  const revision = await db.activityRevision.findFirstOrThrow({
+    where: { activity_id: activity.id, revision: 1 },
+  });
+  return db.activityRevision.update({
+    where: { activity_id_revision: { activity_id: activity.id, revision: 1 } },
+    data: {
+      content: {
+        ...revision.content,
+        schedule: {
+          schedule_type: 'continuous',
+          starts_at: atTime(date, startsAt),
+          ends_at: atTime(date, endsAt),
+        },
+      },
+    },
+  });
 }
 
 /** 报名关系预置：直接写关系表，绕开尚未合入的真实报名入口。 */

@@ -9,10 +9,14 @@ export type RangeIntent =
   | { kind: 'retry' }
   | { kind: 'focus'; activityId: string };
 
+/** 重试之外的一轮读取：重试沿用上一轮的意图与目标页号，不自成一类轮次。 */
+type RoundIntent = Exclude<RangeIntent, { kind: 'retry' }>;
+
 export type RangeOutcome =
   | { status: 'ok' }
   | { status: 'aborted' }
-  | { status: 'failed'; failedPage: number; forbidden: boolean }
+  | { status: 'failed'; forbidden: true }
+  | { status: 'failed'; forbidden: false; failedPage: number }
   | { status: 'unstable' };
 
 export type SelectionState =
@@ -48,19 +52,109 @@ export interface ScheduleRange {
 const ABORT = Symbol('schedule-range-abort');
 const UNSTABLE = Symbol('schedule-range-unstable');
 
-class PageFailure extends Error {
-  readonly page: number;
-  readonly reason: unknown;
+/** 读页失败的事实：权限收回单独成项，普通失败取最小失败页号，两者互不覆盖。 */
+type ReadFailure = { forbidden: true } | { forbidden: false; page: number };
 
-  constructor(page: number, reason: unknown) {
+class PageFailure extends Error {
+  readonly failure: ReadFailure;
+
+  constructor(failure: ReadFailure) {
     super('日程页读取失败');
-    this.page = page;
-    this.reason = reason;
+    this.failure = failure;
   }
 }
 
 const forbidden = (cause: unknown) =>
   typeof cause === 'object' && cause !== null && (cause as { status?: number }).status === 403;
+
+const pageNumbers = (from: number, to: number) =>
+  Array.from({ length: Math.max(0, to - from + 1) }, (_, index) => from + index);
+
+/**
+ * 按页号升序领取，最多 `maxInFlight` 个在途，返回前按页号升序排好——排序只在这一处。
+ * 失败事实两个互相独立：任一页 403 记权限收回，其余失败取最小失败页号。
+ */
+async function readPages(
+  numbers: number[],
+  read: (page: number) => Promise<TimelineActivityPage>,
+  maxInFlight: number,
+): Promise<TimelineActivityPage[]> {
+  const wanted = [...numbers];
+  const results: TimelineActivityPage[] = [];
+  let index = 0;
+  let stopped = false;
+  let revoked = false;
+  let failedPage: number | undefined;
+  const worker = async () => {
+    while (!stopped && index < wanted.length) {
+      const page = wanted[index];
+      index += 1;
+      try {
+        results.push(await read(page));
+      } catch (error) {
+        stopped = true;
+        if (error === ABORT) throw error;
+        if (forbidden(error)) revoked = true;
+        else if (failedPage === undefined || page < failedPage) failedPage = page;
+        return;
+      }
+    }
+  };
+  const settled = await Promise.allSettled(
+    Array.from({ length: Math.min(wanted.length, maxInFlight) }, worker),
+  );
+  if (settled.some((result) => result.status === 'rejected' && result.reason === ABORT))
+    throw ABORT;
+  if (revoked) throw new PageFailure({ forbidden: true });
+  if (failedPage !== undefined) throw new PageFailure({ forbidden: false, page: failedPage });
+  return results.sort((a, b) => a.page - b.page);
+}
+
+/**
+ * 跨页一致性判据（设计 §1.3）：页号与页大小对齐、同页状态时刻一致、非末页满页、按
+ * (activity_code, id) 严格递增、覆盖全集时活动数等于 total、已加载范围不超过覆盖所需页数。
+ * 按给定顺序读，不再排序；不成立即 false——覆盖页数超出与空页都只作不成立信号，截断不是这里的事。
+ */
+function consistent(input: TimelineActivityPage[], pageSize: number): boolean {
+  if (!input.length) return false;
+  const expected = input[0].total;
+  for (const [position, page] of input.entries()) {
+    if (page.total !== expected) return false;
+    if (page.page !== position + 1) return false;
+    if (page.page_size !== pageSize) return false;
+    if (!page.items.every((item) => item.state_evaluated_at === page.state_evaluated_at))
+      return false;
+    // partial 页只能出现在结果末页：还有后续页时本页必须是满页。
+    if (page.page * pageSize < expected && page.items.length !== pageSize) return false;
+  }
+  const all = input.flatMap((page) => page.items);
+  if (input.length * pageSize >= expected && all.length !== expected) return false;
+  if (input.length > 1 && (input.length - 1) * pageSize >= expected) return false;
+  for (let i = 1; i < all.length; i += 1) {
+    const previous = all[i - 1];
+    const current = all[i];
+    if (previous.activity_code > current.activity_code) return false;
+    if (previous.activity_code === current.activity_code && previous.activity_id >= current.activity_id)
+      return false;
+  }
+  return true;
+}
+
+/** 第 2 页及以后读到空页：范围在读取期间收缩，按该页的 total 算出新的目标页号（设计 §1.6）。 */
+function shrunkTarget(input: TimelineActivityPage[], pageSize: number): number | undefined {
+  const empty = input.find((page) => page.page > 1 && page.items.length === 0);
+  if (!empty) return undefined;
+  return Math.max(1, Math.ceil(empty.total / pageSize));
+}
+
+/** 跨轮头部复核：`total` 与活动身份序列（各活动的 `activity_id` 顺序）与已提交的第 1 页一致（设计 §1.3）。 */
+function sameHead(committed: TimelineActivityPage, fresh: TimelineActivityPage): boolean {
+  return (
+    committed.total === fresh.total &&
+    committed.items.length === fresh.items.length &&
+    committed.items.every((item, index) => item.activity_id === fresh.items[index].activity_id)
+  );
+}
 
 /**
  * 日程的读取与合并模型：页集合、跨页校验、重校准、查询代际与在途闸门。
@@ -91,7 +185,7 @@ export function createScheduleRange(
   let inFlight = 0;
   const waiting: (() => void)[] = [];
   let active: Promise<RangeOutcome> | undefined;
-  let lastFailure: { intent: RangeIntent; failedPage: number } | undefined;
+  let lastFailure: { intent: RoundIntent; targetPage: number } | undefined;
 
   function acquire() {
     if (inFlight < options.maxInFlight) {
@@ -123,238 +217,177 @@ export function createScheduleRange(
     }
   }
 
-  /** 按页号升序领取，最多 `maxInFlight` 个在途；任一页失败即停止补页并回报最小失败页号。 */
-  async function readPages(numbers: number[], gen: number): Promise<TimelineActivityPage[]> {
-    const wanted = [...numbers];
-    const results: TimelineActivityPage[] = [];
-    let index = 0;
-    let stopped = false;
-    let failure: PageFailure | undefined;
-    const worker = async () => {
-      while (!stopped && index < wanted.length) {
-        const page = wanted[index];
-        index += 1;
-        try {
-          results.push(await fetchPage(page, gen));
-        } catch (error) {
-          stopped = true;
-          if (error === ABORT) throw error;
-          if (!failure || page < failure.page) failure = new PageFailure(page, error);
-          return;
-        }
-      }
-    };
-    const settled = await Promise.allSettled(
-      Array.from({ length: Math.min(wanted.length, options.maxInFlight) }, worker),
-    );
-    if (settled.some((result) => result.status === 'rejected' && result.reason === ABORT))
-      throw ABORT;
-    if (failure) throw failure;
-    return results.sort((a, b) => a.page - b.page);
+  /** 本轮读页：代际固定在发起时刻，发起前与响应后各查一次（设计 §1.4）。 */
+  const readerFor = (gen: number) => (page: number) => fetchPage(page, gen);
+
+  /** 提交页集合受代际约束：旧轮即使已返回，也不得写入新代际（设计 §1.4）。 */
+  function commit(next: TimelineActivityPage[], gen: number) {
+    if (gen !== generation) throw ABORT;
+    pages.value = next;
+  }
+
+  /** 本轮目标页号：初次读取到第 1 页、刷新到已加载末页、加载更多到下一页、补读到范围末页（设计 §1.5）。 */
+  function roundTarget(intent: RoundIntent): number {
+    const last = pages.value.at(-1)?.page ?? 0;
+    if (intent.kind === 'initial') return 1;
+    if (intent.kind === 'more') return last + 1;
+    if (intent.kind === 'refresh') return Math.max(1, last);
+    return Math.max(1, Math.ceil((pages.value[0]?.total ?? 0) / options.pageSize));
   }
 
   /**
-   * 跨页一致性：页号与页大小对齐、同页状态时刻一致、非末页满页、按 (activity_code, id) 严格递增、
-   * 覆盖全集时活动数等于 total、页集合内各页 total 相等。成立时返回可提交的页集合（必要时截断）。
+   * 一条接受路径：候选页集合通过判据即提交；不成立（或已判不成立）就从第 1 页整段重读到
+   * 本轮目标页号再判一次，一轮内最多两次整段读取（设计 §1.3、§1.6）。整段重读读到空页说明
+   * 范围在读取期间收缩，目标页号按新 total 重算，下一次整段读取按新目标页号重来。两次仍不
+   * 成立即未稳定。`rangeReads` = 本轮已花掉的整段读取次数：候选本身已是整段读取时传 1。
    */
-  function consistent(input: TimelineActivityPage[]): TimelineActivityPage[] | undefined {
-    if (!input.length) return undefined;
-    const sorted = [...input].sort((a, b) => a.page - b.page);
-    if (sorted[0].page !== 1) return undefined;
-    const expected = sorted[0].total;
-    if (!sorted.every((page) => page.total === expected)) return undefined;
-    const needed = Math.max(1, Math.ceil(expected / options.pageSize));
-    const kept = sorted.slice(0, Math.min(sorted.length, needed));
-    for (const [position, page] of kept.entries()) {
-      if (page.page !== position + 1) return undefined;
-      if (page.page_size !== options.pageSize) return undefined;
-      if (!page.items.every((item) => item.state_evaluated_at === page.state_evaluated_at))
-        return undefined;
-      // partial 页只能出现在结果末页：还有后续页时本页必须是满页。
-      if (page.page * options.pageSize < expected && page.items.length !== options.pageSize)
-        return undefined;
-    }
-    const all = kept.flatMap((page) => page.items);
-    if (kept.length * options.pageSize >= expected && all.length !== expected) return undefined;
-    for (let i = 1; i < all.length; i += 1) {
-      const previous = all[i - 1];
-      const current = all[i];
-      if (previous.activity_code > current.activity_code) return undefined;
-      if (previous.activity_code === current.activity_code && previous.activity_id >= current.activity_id)
-        return undefined;
-    }
-    return kept;
-  }
-
-  const pageNumbers = (from: number, to: number) =>
-    Array.from({ length: Math.max(0, to - from + 1) }, (_, index) => from + index);
-
-  /** 取回目标页并整轮校验；不成立即从第 1 页整段重读一次，仍不成立判为未稳定。 */
-  async function settle(
-    numbers: number[],
-    prefix: TimelineActivityPage[],
+  async function accept(
+    candidate: TimelineActivityPage[] | undefined,
+    targetPage: number,
     gen: number,
+    rangeReads: number,
   ): Promise<void> {
-    const first = consistent([...prefix, ...(await readPages(numbers, gen))]);
-    if (first) {
-      pages.value = first;
+    if (candidate && consistent(candidate, options.pageSize)) {
+      commit(candidate, gen);
       return;
     }
-    const top = Math.max(...numbers, ...prefix.map((page) => page.page));
-    const second = consistent(await readPages(pageNumbers(1, top), gen));
-    if (second) {
-      pages.value = second;
-      return;
+    let target = targetPage;
+    let used = rangeReads;
+    while (used < 2) {
+      used += 1;
+      const reread = await readPages(pageNumbers(1, target), readerFor(gen), options.maxInFlight);
+      if (consistent(reread, options.pageSize)) {
+        commit(reread, gen);
+        return;
+      }
+      target = shrunkTarget(reread, options.pageSize) ?? target;
     }
     throw UNSTABLE;
   }
 
+  /** 初次读取：页集合与失败记录由 `run` 在发起时清空，这里只取第 1 页交给接受路径（候选即整段读取）。 */
   async function initialPass(gen: number): Promise<void> {
-    pages.value = [];
-    await settle([1], [], gen);
+    await accept(await readPages([1], readerFor(gen), options.maxInFlight), 1, gen, 1);
   }
 
-  async function refreshPass(gen: number, resumeFrom?: number): Promise<void> {
+  /** 刷新：重读已加载的全部页号并整轮替换；页集合为空时按初次读取执行。 */
+  async function refreshPass(gen: number): Promise<void> {
     const committed = pages.value;
     // 页集合为空（初次进入失败或权限收回清空）时刷新按初次读取执行，与 morePass 对称：
     // 否则刷新会空转成功，把「无权查看」冲成「该条件下没有活动」。
     if (!committed.length) return initialPass(gen);
     const numbers = committed.map((page) => page.page);
-    if (resumeFrom !== undefined && resumeFrom > 1) {
-      await settle(
-        numbers.filter((number) => number >= resumeFrom),
-        committed.filter((page) => page.page < resumeFrom),
-        gen,
-      );
-      return;
-    }
-    await settle(numbers, [], gen);
-  }
-
-  async function morePass(gen: number, resumeFrom?: number): Promise<void> {
-    const committed = pages.value;
-    if (!committed.length) return initialPass(gen);
-    const next = committed[committed.length - 1].page + 1;
-    if (resumeFrom !== undefined && resumeFrom < next) {
-      await settle(
-        pageNumbers(resumeFrom, next),
-        committed.filter((page) => page.page < resumeFrom),
-        gen,
-      );
-      return;
-    }
-    await settle([next], committed, gen);
+    const fresh = await readPages(numbers, readerFor(gen), options.maxInFlight);
+    await accept(fresh, numbers[numbers.length - 1], gen, 1);
   }
 
   /**
-   * 选中补读：从第 N+1 页升序取页，页预算为范围页数，四条早停。
-   * 读到空页说明范围在读取期间收缩：按该页 total 截断页集合，不把它当作「还有下一页」；
-   * 截断不成立时（已加载行越过新范围）整段重读，不提交旧页集合。
+   * 加载更多：先在闸门内重读第 1 页复核已加载范围的头部，通过后再取第 N+1 页；
+   * 复核不一致即整段重读到 N+1。新页为空说明范围收缩，目标页号按该页 total 重算（设计 §1.3、§1.6）。
+   */
+  async function morePass(gen: number): Promise<void> {
+    const committed = pages.value;
+    if (!committed.length) return initialPass(gen);
+    const next = committed[committed.length - 1].page + 1;
+    const [head] = await readPages([1], readerFor(gen), options.maxInFlight);
+    if (!sameHead(committed[0], head)) return accept(undefined, next, gen, 0);
+    const [added] = await readPages([next], readerFor(gen), options.maxInFlight);
+    const target = added.items.length
+      ? next
+      : Math.max(1, Math.ceil(added.total / options.pageSize));
+    await accept([...committed, added], target, gen, 0);
+  }
+
+  /**
+   * 选中补读：先复核头部，再从第 N+1 页升序取页，页预算为范围页数。找到所选活动即停，
+   * 读到空页或范围耗尽也停；提交与整段重读都归接受路径（设计 §1.6）。
    */
   async function focusPass(activityId: string, gen: number): Promise<void> {
     const { item, slot } = options.selection();
     if (item !== activityId) return;
-    if (slot !== undefined && outsideWindow(slot)) return;
+    // 早停只判「开始时刻不早于窗口结束」：开始时刻早于窗口首的分段仍可能与窗口相交（设计 §1.6）。
+    if (slot !== undefined && pastWindowEnd(slot)) return;
     const committed = pages.value;
     if (committed.some((page) => page.items.some((row) => row.activity_id === activityId))) return;
-    const budget = Math.max(1, Math.ceil((committed[0]?.total ?? 0) / options.pageSize));
+    const [head] = await readPages([1], readerFor(gen), options.maxInFlight);
+    const budget = Math.max(1, Math.ceil(head.total / options.pageSize));
+    // 没有已提交的头部可比时按不一致处置：整段重读到范围末页。
+    if (!committed.length || !sameHead(committed[0], head)) return accept(undefined, budget, gen, 0);
     const collected = [...committed];
-    let number = (committed[committed.length - 1]?.page ?? 0) + 1;
-    let truncated: TimelineActivityPage[] | undefined;
-    let shrunkTo: number | undefined;
+    let number = committed[committed.length - 1].page + 1;
+    let target = budget;
     while (number <= budget) {
-      const [page] = await readPages([number], gen);
+      const [page] = await readPages([number], readerFor(gen), options.maxInFlight);
+      collected.push(page);
       if (page.items.length === 0) {
-        const limit = Math.max(1, Math.ceil(page.total / options.pageSize));
-        shrunkTo = limit;
-        truncated = consistent(
-          collected
-            .filter((row) => row.page <= limit)
-            .map((row) => ({ ...row, total: page.total })),
-        );
+        target = Math.max(1, Math.ceil(page.total / options.pageSize));
         break;
       }
-      collected.push(page);
       if (page.items.some((row) => row.activity_id === activityId)) break;
       if (!(page.page * options.pageSize < page.total)) break;
       number += 1;
     }
-    if (truncated) {
-      pages.value = truncated;
-      return;
-    }
-    // 空页说明范围在补读期间收缩。旧页集合按新 total 截断不成立（已加载行越过新范围）时，
-    // 它自身仍「自洽」，提交它会把越界行报成成功；整段重读，由新快照判定。
-    if (shrunkTo !== undefined) {
-      const reread = consistent(await readPages(pageNumbers(1, shrunkTo), gen));
-      if (reread) {
-        pages.value = reread;
-        return;
-      }
-      throw UNSTABLE;
-    }
-    const kept = consistent(collected);
-    if (kept) {
-      pages.value = kept;
-      return;
-    }
-    const top = Math.max(...collected.map((page) => page.page));
-    const second = consistent(await readPages(pageNumbers(1, top), gen));
-    if (second) {
-      pages.value = second;
-      return;
-    }
-    throw UNSTABLE;
+    await accept(collected, target, gen, 0);
   }
 
   async function execute(
-    intent: RangeIntent,
-    resumeFrom: number | undefined,
+    intent: RoundIntent,
+    retryTarget: number | undefined,
     gen: number,
   ): Promise<RangeOutcome> {
     running.value = true;
+    const targetPage = retryTarget ?? roundTarget(intent);
     try {
-      if (intent.kind === 'initial') await initialPass(gen);
-      else if (intent.kind === 'refresh') await refreshPass(gen, resumeFrom);
-      else if (intent.kind === 'more') await morePass(gen, resumeFrom);
-      else if (intent.kind === 'focus') await focusPass(intent.activityId, gen);
+      // 重试 = 从第 1 页整段重读到本轮目标页号，不与上一次显示的页拼接（设计 §1.5）。
+      if (retryTarget !== undefined) await accept(undefined, targetPage, gen, 0);
+      else if (intent.kind === 'initial') await initialPass(gen);
+      else if (intent.kind === 'refresh') await refreshPass(gen);
+      else if (intent.kind === 'more') await morePass(gen);
+      else await focusPass(intent.activityId, gen);
       lastFailure = undefined;
       return { status: 'ok' };
     } catch (error) {
-      if (error === ABORT) return { status: 'aborted' };
-      if (error === UNSTABLE) {
-        lastFailure = { intent, failedPage: 1 };
-        return { status: 'unstable' };
-      }
-      const failedPage = error instanceof PageFailure ? error.page : 1;
-      lastFailure = { intent, failedPage };
-      if (error instanceof PageFailure && forbidden(error.reason)) {
-        pages.value = [];
-        return { status: 'failed', failedPage, forbidden: true };
-      }
-      return { status: 'failed', failedPage, forbidden: false };
+      // 代际已变：这一轮的响应不得写入新代际，失败记录也不留（设计 §1.4）。
+      if (error === ABORT || gen !== generation) return { status: 'aborted' };
+      lastFailure = { intent, targetPage };
+      if (error === UNSTABLE) return { status: 'unstable' };
+      // 读页之外的意外错误按第 1 页的普通失败上报：它没有页号事实，也不掩盖权限收回。
+      const failure: ReadFailure =
+        error instanceof PageFailure ? error.failure : { forbidden: false, page: 1 };
+      if (!failure.forbidden)
+        return { status: 'failed', forbidden: false, failedPage: failure.page };
+      // 403 不留重试目标与旧结果：重新读取走初次读取（设计 §1.5）。
+      pages.value = [];
+      lastFailure = undefined;
+      return { status: 'failed', forbidden: true };
     } finally {
       if (gen === generation) running.value = false;
     }
   }
 
   async function run(intent: RangeIntent): Promise<RangeOutcome> {
-    let target = intent;
-    let resumeFrom: number | undefined;
+    let target: RoundIntent;
+    let retryTarget: number | undefined;
     if (intent.kind === 'retry') {
-      if (!lastFailure) return { status: 'ok' };
+      // 重试不看失败页号：起点由上一轮的目标页号决定（设计 §1.5）。
+      // 没有失败记录就没有可重试的目标：这一轮什么都没读，按「没有发生」上报，页面不动文案与选中。
+      if (!lastFailure) return { status: 'aborted' };
       target = lastFailure.intent;
-      resumeFrom = lastFailure.failedPage;
+      retryTarget = lastFailure.targetPage;
+    } else target = intent;
+    // 初次读取在发起的那一刻推进代际并清空页集合与失败记录，不等在途轮次收尾（设计 §1.2）。
+    if (intent.kind === 'initial') {
+      cancel();
+      pages.value = [];
+      lastFailure = undefined;
     }
-    // 初次读取推进代际：旧轮在发起下一次请求前与每次响应后即刻停止。
-    if (intent.kind === 'initial') cancel();
     // 代际在发起时定下，不在轮到执行时重取：排队期间被后续条件切换取代的轮次执行时直接中止。
     const gen = generation;
     const previous = active;
     // 先登记本轮再等前一轮：后到的 initial 排在本轮之后，不会与前一轮同时起跑。
     const pass = (async () => {
       if (previous) await previous;
-      return execute(target, resumeFrom, gen);
+      return execute(target, retryTarget, gen);
     })();
     active = pass;
     try {
@@ -373,32 +406,43 @@ export function createScheduleRange(
     generation += 1;
   }
 
-  function slotStart(key: string) {
+  /** 时段键的开始时刻与窗口首尾，一处取好给两条窗内／窗外判据共用。 */
+  function windowBounds(key: string) {
     const parts = key.split('/');
     const start = parts.length === 3 ? Date.parse(parts[2]) : NaN;
-    return Number.isFinite(start) ? start : undefined;
+    const { from, to } = options.window();
+    const fromAt = Date.parse(from);
+    const toAt = Date.parse(to);
+    // 取不到时刻时按「在窗内」处置：错判成窗外的代价是把仍在结果里的时段说成已移出（§2.2 三种说明全误报），错判成窗内只走正常分支。
+    if (!Number.isFinite(start) || !Number.isFinite(fromAt) || !Number.isFinite(toAt)) return;
+    return { start, fromAt, toAt };
   }
 
+  /** 窗口判定：开始时刻早于窗口首，或落在窗口结束及以后（设计 §2.2 第 2 种）。 */
   function outsideWindow(slot: string) {
-    const start = slotStart(slot);
-    if (start === undefined) return false;
-    const { from, to } = options.window();
-    const startOfWindow = Date.parse(from);
-    const endOfWindow = Date.parse(to);
-    if (!Number.isFinite(startOfWindow) || !Number.isFinite(endOfWindow)) return false;
-    return start < startOfWindow || start >= endOfWindow;
+    const bounds = windowBounds(slot);
+    return !!bounds && (bounds.start < bounds.fromAt || bounds.start >= bounds.toAt);
+  }
+
+  /** 补读早停只判窗口结束：开始时刻早于窗口首的分段仍可能与窗口相交（设计 §1.6）。 */
+  function pastWindowEnd(slot: string) {
+    const bounds = windowBounds(slot);
+    return !!bounds && bounds.start >= bounds.toAt;
   }
 
   const selection = computed<SelectionState>(() => {
     const { item, slot } = options.selection();
     if (!item) return { kind: 'none' };
-    // 窗口判定先于活动查找：窗口外的时段键说明是窗口移动，活动是否已加载不改变这个结论（设计 §1.6）。
-    if (slot !== undefined && outsideWindow(slot)) return { kind: 'window-moved' };
     const activity = rows.value.find((row) => row.activity_id === item);
+    // 匹配先于窗口判定：服务端只返回与窗口相交的分段，跨午夜段的键同样在响应里（设计 §2.2）。
+    const found =
+      slot === undefined
+        ? activity?.segments[0]
+        : activity?.segments.find((segment) => segment.occurrence_key === slot);
+    if (activity && found) return { kind: 'kept', activity, slot: found };
+    if (slot !== undefined && outsideWindow(slot)) return { kind: 'window-moved' };
     if (!activity || !activity.segments.length) return { kind: 'activity-missing' };
-    if (slot === undefined) return { kind: 'kept', activity, slot: activity.segments[0] };
-    const found = activity.segments.find((segment) => segment.occurrence_key === slot);
-    return found ? { kind: 'kept', activity, slot: found } : { kind: 'schedule-updated' };
+    return { kind: 'schedule-updated' };
   });
 
   return {
