@@ -1,4 +1,6 @@
-import type { Activity } from './generated/types.gen.js';
+import type { Activity, Registration } from './generated/types.gen.js';
+
+export const activeRegistrationStatuses: Registration['status'][] = ['submitted', 'waitlisted', 'accepted'];
 
 export const campuses = ['沙河校区', '西土城校区', '沙河及西土城校区'];
 export function campusName(value?: string) {

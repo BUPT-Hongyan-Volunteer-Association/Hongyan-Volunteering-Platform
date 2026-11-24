@@ -164,6 +164,9 @@ onUnmounted(() => { mounted = false; });
       <h2 id="attendance-heading">现场人员记录</h2>
       <button v-if="!visibleForm" class="primary" :disabled="writesPaused || accessLost" @click="openForm()">登记异常</button>
     </header>
+    <div class="page-actions">
+      <RouterLink class="button" :to="{ path: '/managed/' + path.id + '/incidents', query: { page: $route.query.page } }">异常记录</RouterLink>
+    </div>
 
     <form v-if="visibleForm" class="attendance-form" @submit.prevent="save()">
       <h3>{{ editing ? '修改记录' : '批量登记' }}</h3>

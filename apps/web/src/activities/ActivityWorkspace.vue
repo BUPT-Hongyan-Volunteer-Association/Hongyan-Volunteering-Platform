@@ -28,25 +28,15 @@ function showDetail(next: ManagedActivityDetail) {
   )
     detail.value = next;
 }
-const more = ref<HTMLDetailsElement>();
-watch(
-  () => route.fullPath,
-  () => {
-    if (more.value) more.value.open = false;
-  },
-);
 const memberMessage = ref('');
 const sections = [
+  ['roster', '报名名单'],
   ['notices', '通知与回执'],
   ['attendance', '现场人员记录'],
   ['batches', '时长批次'],
   ['hours', '时长台账'],
-  ['appeals', '漏记反馈'],
-  ['corrections', '错账修复组'],
-  ['incidents', '异常记录'],
-  ['requests', '退出与恢复'],
 ];
-const deniedRefresh = ['activity-attendance', 'hour-batches', 'hour-batch', 'activity-hours',
+const deniedRefresh = ['activity-notices', 'activity-attendance', 'hour-batches', 'hour-batch', 'activity-hours',
   'activity-hour-appeals', 'activity-hour-corrections', 'activity-hour-incidents'];
 const members = ref<ActivityMember[]>([]);
 const error = ref('');
@@ -117,36 +107,21 @@ onUnmounted(() => {
       ><span><UiIcon name="Clock" />{{ serviceTime(activity) }}</span>
     </p>
     <nav class="section-nav" aria-label="活动工作区">
-      <RouterLink :to="{ path: base + '/roster', query: sourceQuery }">报名名单</RouterLink>
       <RouterLink
-        v-for="[path, label] in sections.slice(0, 4)"
+        v-for="[path, label] in sections"
         :key="path"
-        :class="{ current: (route.params.area ?? route.meta.area) === path }"
+        :class="{ current: route.meta.area === path }"
+        :aria-current="route.meta.area === path ? 'page' : undefined"
         :to="{ path: base + '/' + path, query: sourceQuery }"
         >{{ label }}</RouterLink
       >
-      <details class="more" ref="more">
-        <summary
-          :class="{ current: sections.slice(4).some(([path]) => (route.params.area ?? route.meta.area) === path) }"
-        >
-          更多
-        </summary>
-        <div class="more-menu">
-          <RouterLink
-            v-for="[path, label] in sections.slice(4)"
-            :key="path"
-            :to="{ path: base + '/' + path, query: sourceQuery }"
-            >{{ label }}</RouterLink
-          >
-        </div>
-      </details>
     </nav>
     <RouterView v-if="route.name !== 'managed-overview'" v-slot="{ Component }">
       <component
         :is="Component"
         v-on="deniedRefresh.includes(String(route.name)) ? { denied: refresh } : {}"
         v-bind="
-          ['organizer-section', 'activity-notices', 'activity-hour-incidents'].includes(String(route.name))
+          ['organizer-section', 'activity-hour-incidents'].includes(String(route.name))
             ? {}
             : route.name === 'activity-edit'
               ? { writesPaused: verifying || !!error, snapshot: detail, onLoaded: showDetail }
@@ -225,35 +200,7 @@ onUnmounted(() => {
   border-radius: 6px;
   text-decoration: none;
 }
-.more {
-  position: relative;
-  margin-left: auto;
-}
-.more summary {
-  padding: 10px;
-  cursor: pointer;
-  color: var(--brand);
-  min-height: 44px;
-}
-.more-menu {
-  position: absolute;
-  right: 0;
-  z-index: 4;
-  min-width: 140px;
-  border: 1px solid var(--line);
-  background: white;
-  border-radius: 6px;
-  padding: 4px 12px;
-  box-shadow: 0 6px 18px #17243a14;
-}
 .section-nav {
   margin-bottom: 16px;
-}
-.more-menu a {
-  color: var(--ink);
-}
-.more summary.current {
-  box-shadow: inset 0 -2px var(--brand);
-  font-weight: 650;
 }
 </style>
