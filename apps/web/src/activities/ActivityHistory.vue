@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import {
-  ApiError,
   getActivityRevision,
   listActivityRevisions,
   type ActivityRevision,
@@ -10,8 +9,10 @@ import {
 import ActivitySnapshot from '@hongyan/ui/ActivitySnapshot.vue';
 import Pager from '@hongyan/ui/Pager.vue';
 import { revisionLabels } from '@hongyan/ui/activityDisplay';
+import { noAccess } from '@hongyan/ui/usePageRead';
 
 const props = defineProps<{ id: string }>();
+const emit = defineEmits<{ denied: [] }>();
 const history = ref<ActivityRevisionPage>();
 const viewed = ref<ActivityRevision>();
 const page = ref(1),
@@ -34,7 +35,9 @@ async function loadPage(next: number) {
     });
     if (turn === request) history.value = data.data;
   } catch (e) {
-    if (turn === request) error.value = e instanceof Error ? e.message : '版本历史读取失败';
+    if (turn !== request) return;
+    error.value = e instanceof Error ? e.message : '版本历史读取失败';
+    if (noAccess(e)) emit('denied');
   } finally {
     if (turn === request) loading.value = false;
   }
@@ -51,7 +54,10 @@ async function inspect(revision: number) {
     if (turn === request) viewed.value = data.data;
   } catch (e) {
     if (turn !== request) return;
-    if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) history.value = undefined;
+    if (noAccess(e)) {
+      history.value = undefined;
+      emit('denied');
+    }
     error.value = e instanceof Error ? e.message : '版本读取失败';
   }
 }

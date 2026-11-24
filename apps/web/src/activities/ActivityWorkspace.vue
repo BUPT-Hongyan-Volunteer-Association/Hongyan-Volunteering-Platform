@@ -35,6 +35,8 @@ watch(
   () => route.fullPath,
   () => {
     if (more.value) more.value.open = false;
+    // 退出与恢复目前是本地示例，切换列表、记录或筛选时没有业务请求可复核权限。
+    if (route.name === 'organizer-section' && activity.value?.id === route.params.id) void refresh();
   },
 );
 const sections = [
@@ -47,14 +49,15 @@ const sections = [
   ['incidents', '异常记录'],
   ['requests', '退出与恢复'],
 ];
-const deniedRefresh = ['roster', 'activity-attendance', 'hour-batches', 'hour-batch', 'activity-hours',
-  'activity-hour-appeals', 'activity-hour-corrections', 'activity-hour-incidents'];
 const team = ref<ActivityMemberList>({ items: [], version: 0 });
 const members = computed(() => team.value.items);
 function applyTeam(id: string, next: ActivityMemberList) {
   if (id === route.params.id && next.version >= team.value.version) team.value = next;
 }
 const error = ref('');
+const access = ref<'unknown' | 'member' | 'lost' | 'unavailable'>('unknown');
+const inaccessible = computed(() => access.value === 'lost' || access.value === 'unavailable');
+const backSchedule = computed(() => !inaccessible.value && scheduleReturn);
 const verifying = ref(false);
 const sourceQuery = computed(() => ({ page: route.query.page }));
 const self = computed(() => members.value.find((m) => m.account_id === props.profile.account_id));
@@ -67,10 +70,17 @@ const transferMessage = computed(() => {
     : '已核对活动成员，当前主负责人是' + owner.display_name + '。';
 });
 let generation = 0;
+function denyAccess() {
+  access.value = access.value === 'member' || access.value === 'lost' ? 'lost' : 'unavailable';
+  detail.value = undefined;
+  team.value = { items: [], version: 0 };
+  transferTarget.value = '';
+}
 async function load(clear = true) {
   const turn = ++generation;
   verifying.value = true;
   if (clear) {
+    access.value = 'unknown';
     transferTarget.value = '';
     detail.value = undefined;
     team.value = { items: [], version: 0 };
@@ -79,25 +89,35 @@ async function load(clear = true) {
   try {
     const path = { id: String(route.params.id) };
     const next = (await getActivityMembers({ path, throwOnError: true })).data.data;
+    if (turn !== generation) return false;
     if (!next.items.some((m) => m.account_id === props.profile.account_id)) {
-      if (turn !== generation) return;
-      team.value = { items: [], version: 0 };
-      error.value = '当前账号不是该活动的管理成员。';
-      return;
+      denyAccess();
+      return false;
     }
     const latest = (await getManagedActivity({ path, throwOnError: true })).data.data;
-    if (turn !== generation) return;
+    if (turn !== generation) return false;
     showDetail(latest);
     applyTeam(path.id, next);
+    access.value = 'member';
+    return true;
   } catch (e) {
-    if (turn !== generation) return;
-    if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) team.value = { items: [], version: 0 };
-    error.value = e instanceof Error ? e.message : '活动读取失败';
+    if (turn === generation) {
+      if (e instanceof ApiError && (e.status === 403 || e.status === 404)) {
+        denyAccess();
+      } else {
+        if (e instanceof ApiError && e.status === 401) {
+          detail.value = undefined;
+          team.value = { items: [], version: 0 };
+        }
+        error.value = e instanceof Error ? e.message : '活动读取失败';
+      }
+    }
+    return false;
   } finally {
     if (turn === generation) verifying.value = false;
   }
 }
-const refresh = () => void load(false);
+const refresh = () => load(false);
 watch([() => route.params.id, () => props.profile.account_id], () => load(), { immediate: true });
 onMounted(() => window.addEventListener('focus', refresh));
 onUnmounted(() => {
@@ -106,11 +126,13 @@ onUnmounted(() => {
 });
 </script>
 <template>
-  <RouterLink class="back-link" :to="scheduleReturn || { path: '/managed', query: sourceQuery }"
-    ><UiIcon name="ArrowLeft" />{{ scheduleReturn ? '返回日程' : '返回我的管理活动' }}</RouterLink
+  <RouterLink class="back-link" :to="backSchedule || { path: '/managed', query: sourceQuery }"
+    ><UiIcon name="ArrowLeft" />{{ backSchedule ? '返回日程' : '返回我的管理活动' }}</RouterLink
   >
   <p v-if="error" role="alert">{{ error }} <button @click="refresh">重试</button></p>
-  <p v-if="!self && !error" role="status">正在核验活动成员…</p>
+  <p v-else-if="inaccessible" class="notice" role="alert">{{ access === 'lost'
+    ? '你已不在本活动团队，个人功能不受影响。' : '当前账号无法访问此活动。' }}</p>
+  <p v-else-if="!self" role="status">正在核验活动成员…</p>
   <template v-if="self && activity">
     <header class="section-heading">
       <h1>{{ activity.title }}</h1>
@@ -157,9 +179,10 @@ onUnmounted(() => {
     <RouterView v-if="route.name !== 'managed-overview'" v-slot="{ Component }">
       <component
         :is="Component"
-        v-on="deniedRefresh.includes(String(route.name)) ? { denied: refresh } : {}"
+        v-on="route.name === 'organizer-section' ? {} : { denied: refresh }"
         v-bind="
-          ['organizer-section', 'activity-notices', 'activity-hour-incidents'].includes(String(route.name))
+          route.name === 'organizer-section' ? { verifyAccess: refresh } :
+          ['activity-notices', 'activity-hour-incidents'].includes(String(route.name))
             ? {}
             : route.name === 'activity-edit'
               ? { writesPaused: verifying || !!error, snapshot: detail, onLoaded: showDetail }

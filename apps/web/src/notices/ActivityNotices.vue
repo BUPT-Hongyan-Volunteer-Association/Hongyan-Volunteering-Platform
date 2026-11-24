@@ -9,6 +9,7 @@ import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { localDateTime } from '@hongyan/ui/activityDisplay';
 import { pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 
+const emit = defineEmits<{ denied: [] }>();
 const route = useRoute(),
   router = useRouter();
 const activityId = computed(() => String(route.params.id));
@@ -56,6 +57,7 @@ const {
     }
     return { page: data.data, selected };
   },
+  () => emit('denied'),
 );
 const current = computed(() => listing.value?.selected);
 const {
@@ -91,7 +93,7 @@ const {
       pending: pending ? rows.data.data.total : (count?.data.data.total ?? 0),
     };
   },
-  () => void refresh(),
+  () => void refresh(false),
 );
 const receipts = computed(() => receiptPage.value?.rows);
 async function reloadReceipts() {

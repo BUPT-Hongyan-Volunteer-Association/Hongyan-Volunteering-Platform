@@ -14,6 +14,7 @@ import { checkStudentImportPages } from './student-import-pages-fixture.mjs';
 import { checkLedgerPages } from './hour-ledger-pages.mjs';
 
 const loginFailureMessage = '登录失败，请核对账号和密码。如果你刚办理过凭证重置，旧密码已失效，请联系办理老师确认发放进度。';
+const lostTeamMessage = '你已不在本活动团队，个人功能不受影响。';
 const link = (page, name) => page.getByRole('link', { name, exact: true });
 const button = (page, name) => page.getByRole('button', { name, exact: true });
 const visible = (locator) => locator.first().waitFor({ state: 'visible' });
@@ -442,6 +443,29 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       await visible(receipt.getByText('已确认', { exact: true }));
       await fits(owner);
       await fits(helper);
+    });
+
+    await t.test('协作者在旧窗口切换回执范围或预览退出申请时，工作区重新核对成员', async (t) => {
+      const requests = await helper.context().newPage();
+      requests.setDefaultTimeout(8000);
+      t.after(() => requests.close());
+      const base = web + '/managed/' + first.id;
+      await requests.goto(base + '/requests/exit-01');
+      await visible(button(requests, '预览处理决定'));
+      await helper.goto(base + '/notices');
+      await helper.getByRole('link', { name: /校园服务甲安排有调整/ }).first().click();
+      await visible(helper.locator('.receipt-summary'));
+      const { account_id } = await db.student.findUniqueOrThrow({ where: { student_no: '0000000004' } });
+      const member = await db.activityMember.delete({ where: { activity_id_account_id: { activity_id: first.id, account_id } } });
+      t.after(() => db.activityMember.create({ data: member }));
+      await pickOption(helper, '回执范围', '全部接收人');
+      await button(requests, '预览处理决定').click();
+      for (const page of [helper, requests]) {
+        await visible(page.getByText(lostTeamMessage, { exact: true }));
+        assert.equal(await page.locator('.section-heading .state-chip').count(), 0);
+      }
+      assert.equal(await helper.locator('.notice-body').count(), 0);
+      assert.equal(await button(requests, '预览处理决定').count(), 0);
     });
 
     // Persist the roster fixture in this disposable DB. The browser uses the normal API.
@@ -1618,7 +1642,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
 
       const joined = await signIn(browser, web, '0000000003', password, 390);
       await joined.goto(web + '/managed/' + first.id);
-      await visible(joined.getByRole('alert'));
+      await visible(joined.getByText('当前账号无法访问此活动。', { exact: true }));
       await owner.goto(web + '/managed');
       await link(owner, '校园服务甲').click();
       await owner.getByText('添加协作者', {exact:true}).click();
@@ -1653,6 +1677,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       assert.equal(await owner.getByRole('button', { name: /移除协作者/ }).count(), 0);
       await link(owner, '报名名单').click();
       await visible(owner.locator('.status-filters'));
+      await visible(owner.getByRole('table').getByText(/名单测试/));
       const remove = button(joined, '移除协作者 同学甲');
       await remove.click();
       const dialog = joined.getByRole('dialog', { name: '移除协作者' });
@@ -1665,13 +1690,19 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       await button(joined, '确认移除').click();
       await visible(joined.getByText('已从本活动移除同学甲。'));
       assert.equal(await remove.count(), 0);
-      await owner.reload();
-      await visible(owner.getByRole('alert').filter({ hasText: '记录不存在或不可见' }));
+      await owner.getByRole('button', { name: /^已录取/ }).click();
+      await visible(owner.getByText(lostTeamMessage, { exact: true }));
       assert.equal(await owner.locator('.status-filters').count(), 0);
+      assert.equal(await owner.getByRole('table').count(), 0);
+      assert.equal(await owner.getByText('协作者', { exact: true }).count(), 0);
+      await link(owner, '返回我的管理活动').click();
+      await visible(owner.getByRole('heading', { name: '我的管理活动' }));
       await owner.goto(web + '/managed/' + first.id + '/attendance');
-      await visible(owner.getByRole('alert').filter({ hasText: '记录不存在或不可见' }));
-      await owner.goto(web + '/mine');
+      await visible(owner.getByText('当前账号无法访问此活动。', { exact: true }));
+      await link(owner, '我的').click();
       await visible(owner.getByRole('heading', { name: '同学甲' }));
+      await link(owner, '我的时长').click();
+      await visible(owner.getByText(/共 \d+ 条记录/));
       await link(teacher, '账号与角色').click();
       await teacher.getByLabel('学生学号').fill('0000000003');
       await button(teacher, '查询账号').click();

@@ -19,6 +19,7 @@ import {
 } from '@hongyan/contracts';
 
 import UiIcon from '@hongyan/ui/UiIcon.vue';
+import { noAccess } from '@hongyan/ui/usePageRead';
 import ActivityHistory from './ActivityHistory.vue';
 import { fieldGroups, activityFields as fields } from '@hongyan/ui/activityFields';
 import {
@@ -29,7 +30,7 @@ import {
 } from '@hongyan/ui/activityDisplay';
 
 const props = defineProps<{ writesPaused?: boolean; snapshot?: ManagedActivityDetail }>();
-const emit = defineEmits<{ loaded: [detail: ManagedActivityDetail] }>();
+const emit = defineEmits<{ loaded: [detail: ManagedActivityDetail]; denied: [] }>();
 const route = useRoute(),
   router = useRouter(),
   id = computed(() => String(route.params.id ?? ''));
@@ -195,6 +196,7 @@ async function load(preserve = false, snapshot?: ManagedActivityDetail) {
     if (n === serial) {
       detail.value = undefined;
       readError.value = e instanceof Error ? e.message : '读取失败';
+      if (noAccess(e)) emit('denied');
     }
   } finally {
     if (n === serial) loading.value = false;
@@ -337,6 +339,7 @@ async function run(action: 'save' | 'submit' | 'withdraw') {
   } catch (e) {
     if (id.value === target) {
       report(e);
+      if (target && noAccess(e)) emit('denied');
       if (Object.keys(fieldErrors.value).length) {
         await nextTick();
         // The fieldset becomes interactive when the request finishes.
@@ -631,7 +634,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
         撤回送审
       </button>
     </div>
-    <ActivityHistory v-if="detail" :id="detail.activity.id" :key="detail.activity.id" />
+    <ActivityHistory v-if="detail" :id="detail.activity.id" :key="detail.activity.id" @denied="emit('denied')" />
   </template>
 </template>
 <style scoped>
