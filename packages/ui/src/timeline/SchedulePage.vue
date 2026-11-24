@@ -8,6 +8,8 @@ import {
   type TimelineActivity,
   type TimelineItem,
 } from '@hongyan/contracts';
+import StatusFilter from '../StatusFilter.vue';
+import SegmentedControl from '../SegmentedControl.vue';
 import UiIcon from '../UiIcon.vue';
 import {
   activityTypes,
@@ -161,7 +163,7 @@ function applySelection() {
   clearSelection();
 }
 
-/** 选中活动不在已加载范围且还有更多页时，按 §1.6 补读到它或范围耗尽。 */
+/** 选中活动不在已加载范围且还有更多页时，逐页补读，找到该活动或读完即停。 */
 function needsBackfill() {
   const item = typeof route.query.item === 'string' ? route.query.item : undefined;
   return !!item && !rows.value.some((row) => row.activity_id === item) && hasMore.value;
@@ -233,7 +235,7 @@ function set(key: string, value: string) {
 const valueOf = (event: Event) => (event.target as HTMLInputElement).value;
 let opener: Element | null = null;
 async function choose(r: TimelineActivity, s: TimelineItem) {
-  // 切换条件期间旧行仍在画面上，但不能据此改地址栏（DESIGN.md「切换期间…禁止交互」）。
+  // 切换条件时忽略旧行的点击，避免把失效选段写回 URL。
   if (switching.value > 0) return;
   selectionMessage.value = '';
   opener = document.activeElement;
@@ -329,14 +331,14 @@ onUnmounted(() => {
         <span class="sample-label">北京时间</span>
       </div>
       <div v-if="!fullMobileDetail" class="view-actions">
-        <div class="segmented view-switch" role="group" aria-label="显示方式">
+        <SegmentedControl class="view-switch" aria-label="显示方式">
           <button :aria-pressed="!chart" @click="set('view', 'list')">
             <UiIcon name="List" />列表
           </button>
           <button :aria-pressed="chart" aria-label="时间轴" @click="set('view', 'chart')">
             <UiIcon name="Calendar" />日程
           </button>
-        </div>
+        </SegmentedControl>
         <button
           v-if="mobile"
           class="filter-toggle"
@@ -415,7 +417,9 @@ onUnmounted(() => {
               @update:model-value="set('revision', $event)"
             />
           </div>
-          <label class="tick"
+          <StatusFilter v-if="scope === 'all'" label="审核状态" :model-value="route.query.pending ? 'pending' : 'all'"
+            :options="{ all: '全部', pending: '待审核' }" @update:model-value="set('pending', $event === 'pending' ? '1' : '')" />
+          <label v-else class="tick"
             ><input
               type="checkbox"
               :checked="!!route.query.pending"
@@ -452,7 +456,7 @@ onUnmounted(() => {
         </div>
         <div class="scale-control">
           <span id="time-scale-label">时间刻度</span>
-          <div class="segmented scales" role="group" aria-labelledby="time-scale-label">
+          <SegmentedControl class="scales" aria-labelledby="time-scale-label">
             <button
               v-for="(label, key) in units"
               :key="key"
@@ -461,7 +465,7 @@ onUnmounted(() => {
             >
               {{ label }}
             </button>
-          </div>
+          </SegmentedControl>
         </div>
       </div>
     </template>
@@ -668,28 +672,6 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--line);
   padding-bottom: 16px;
   margin-bottom: 16px;
-}
-.segmented {
-  display: inline-flex;
-  border: 1px solid var(--field-line);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.segmented button {
-  min-width: 42px;
-  border: 0;
-  border-radius: 0;
-}
-.segmented button + button {
-  border-left: 1px solid var(--line);
-}
-.segmented button[aria-pressed='true'] {
-  color: white;
-  background: var(--brand);
-}
-.segmented button:focus-visible {
-  outline-offset: -3px;
-  outline: 2px solid var(--yellow);
 }
 .schedule-filters,
 .schedule-controls,

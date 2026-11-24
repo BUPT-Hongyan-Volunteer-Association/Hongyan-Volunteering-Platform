@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Pager from '@hongyan/ui/Pager.vue';
+import StatusFilter from '@hongyan/ui/StatusFilter.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import ExportButton from '@hongyan/ui/ExportButton.vue';
 import { useIdSelection } from '@hongyan/ui/useSelection';
@@ -26,11 +27,6 @@ const page = computed(() => {
 const status = computed(
   () => String(route.query.status ?? 'all') as 'all' | 'active' | 'inactive',
 );
-const statusOptions = [
-  { value: 'all', label: '全部状态' },
-  { value: 'active', label: '启用' },
-  { value: 'inactive', label: '停用' },
-] as const;
 const selectedGrade = computed(() => String(route.query.grade ?? 'all'));
 const {
   selected,
@@ -153,9 +149,8 @@ function goPage(next: number) {
     <label class="filter-select">年级
       <UiSelect :model-value="selectedGrade" label="年级" :options="gradeChoices" @update:model-value="setFilter('grade', $event)" />
     </label>
-    <label class="filter-select">账号状态
-      <UiSelect :model-value="status" label="账号状态" :options="statusOptions" @update:model-value="setFilter('status', $event)" />
-    </label>
+    <StatusFilter label="账号状态" :model-value="status" :options="{ all: '全部', active: '启用', inactive: '停用' }"
+      @update:model-value="setFilter('status', $event)" />
     <button class="primary" type="submit">查询</button>
   </form>
   <p v-if="error" role="alert">{{ error }} <button type="button" @click="load">重试读取</button></p>
@@ -209,7 +204,7 @@ function goPage(next: number) {
               <RouterLink class="account-link" :to="{ path: '/manage/accounts/' + student.account_id, query: { students: route.fullPath } }"
                 :aria-label="'核对' + student.name + '的账号'">核对账号</RouterLink>
             </td>
-            <td><RouterLink :to="{ path: '/manage/students/' + student.id + '/hours', query: { name: student.name } }">查看时长</RouterLink></td>
+            <td><RouterLink class="button compact" :to="{ path: '/manage/students/' + student.id + '/hours', query: { name: student.name } }">查看时长</RouterLink></td>
           </tr>
         </tbody>
       </table>

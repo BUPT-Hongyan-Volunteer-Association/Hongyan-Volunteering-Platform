@@ -185,7 +185,7 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
     await shown(text(page, '筛选范围内累计 ' + total + ' 小时'));
   }
 
-  await link(teacher, '错账修复组').click();
+  await link(teacher, '错帐修复').click();
   await link(teacher, new RegExp(groupId.slice(0, 8))).click();
   await shown(text(teacher, /目标账/));
   await button(teacher, '批准整组').click();
@@ -302,7 +302,7 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   await button(teacher, '核实原表第7行').click();
   await teacher.getByLabel('不成立', { exact: true }).check();
   await teacher.getByLabel('第7行意见').fill('复核为误报。');
-  await teacher.getByLabel('只看待核实行').check();
+  await button(teacher.getByRole('group', { name: '原表行范围' }), '待核实行').click();
   await button(teacher, '核实原表第2行').click();
   assert.equal(await teacher.getByLabel('第2行意见').inputValue(), '核实属实，相关情况已登记。');
   await shown(text(teacher, '全批 6 行 · 预计差额 +12.0 小时'));

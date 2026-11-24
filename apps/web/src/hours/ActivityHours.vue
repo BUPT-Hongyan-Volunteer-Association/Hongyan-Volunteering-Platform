@@ -47,13 +47,13 @@ async function submit() {
     <template #links>
       <div class="page-actions ledger-tools">
         <RouterLink class="button" :to="{ path: base + '/appeals', query: { page: route.query.page } }">漏记反馈</RouterLink>
-        <RouterLink class="button" :to="{ path: base + '/corrections', query: { page: route.query.page } }">错账修复组</RouterLink>
+        <RouterLink class="button" :to="{ path: base + '/corrections', query: { page: route.query.page } }">错帐修复</RouterLink>
       </div>
     </template>
     <template #actions="{ row }">
       <div v-if="row.status === 'current'" class="page-actions">
         <button :disabled="writesPaused || sending" @click="record = row">申请撤销</button>
-        <RouterLink :to="{ path: base + '/corrections', query: { new: '1', source_date: row.service_date, source_record: row.id } }">错账修复</RouterLink>
+        <RouterLink class="button" :to="{ path: base + '/corrections', query: { new: '1', source_date: row.service_date, source_record: row.id } }">申请错帐修复</RouterLink>
       </div>
     </template>
   </HourLedger>

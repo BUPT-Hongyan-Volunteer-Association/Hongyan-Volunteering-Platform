@@ -94,7 +94,7 @@ async function submit() {
 </script>
 <template>
   <section class="correction-write">
-    <h2>提交错账修复组</h2>
+    <h2>提交错帐修复</h2>
     <form class="pair-form" @submit.prevent="add">
       <fieldset :disabled="busy || disabled || items.length >= 100">
         <legend>添加一对源账与目标</legend>

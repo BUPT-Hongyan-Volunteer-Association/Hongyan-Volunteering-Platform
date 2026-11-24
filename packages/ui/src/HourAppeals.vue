@@ -5,6 +5,7 @@ import {
   ApiError, createCommand, decideAppeal, listActivityHourAppeals, listActivityHourBatches, listActivityHourCorrectionGroups,
   listAppeals, listMyAppeals, type Appeal, type AppealDecision,
 } from '@hongyan/contracts';
+import StatusFilter from './StatusFilter.vue';
 import Pager from './Pager.vue';
 import RecordWorkspace from './RecordWorkspace.vue';
 import { beijing } from './hourDisplay';
@@ -49,7 +50,7 @@ function setQuery(field: string, value: string) {
 }
 
 const actions: Record<string, string> = {
-  correct_hours: '同一笔时长已更正', void_hours: '整笔时长已撤销', rekey_hours: '错账修复组已批准',
+  correct_hours: '同一笔时长已更正', void_hours: '整笔时长已撤销', rekey_hours: '错帐修复已批准',
   add_missing_hours: '漏记时长已补记', revoke_incident: '异常已正式撤销',
 };
 const action = ref<AppealDecision['resolution_action']>('none');
@@ -124,11 +125,8 @@ async function decide(decision: AppealDecision['decision']) {
   <RecordWorkspace :selected="!!id" class="hour-appeals">
     <template #list>
       <div class="page-actions" v-if="mode !== 'self'">
-        <label>反馈状态
-          <select :value="status ?? 'all'" @change="setQuery('appeal_status', ($event.target as HTMLSelectElement).value)">
-            <option value="all">全部</option><option v-for="(label, value) in statuses" :value="value" :key="value">{{ label }}</option>
-          </select>
-        </label>
+        <StatusFilter label="反馈状态" :model-value="status ?? 'all'" :options="{ all: '全部', ...statuses }"
+          @update:model-value="setQuery('appeal_status', $event)" />
       </div>
       <p v-if="listError" role="alert">{{ listError }} <button @click="loadList()">重读反馈</button></p>
       <p v-else-if="loading && !items" role="status">正在读取反馈…</p>
@@ -178,7 +176,7 @@ async function decide(decision: AppealDecision['decision']) {
             </select>
           </label>
           <label v-if="action === 'add_missing_hours'">结果来源
-            <select v-model="originKind"><option value="batch">时长批次</option><option value="group">错账修复组</option></select>
+            <select v-model="originKind"><option value="batch">时长批次</option><option value="group">错帐修复</option></select>
           </label>
           <label v-if="origin">已批准的结果
             <select v-model="originId"><option value="">选择批准记录</option>
@@ -188,7 +186,7 @@ async function decide(decision: AppealDecision['decision']) {
           <p v-if="originsError" role="alert">{{ originsError }} <button @click="loadOrigins()">重读批准记录</button></p>
           <p v-else-if="origin && origins && !origins.items.length">本页没有符合条件的已批准结果。</p>
           <Pager v-if="origin && origins && origins.total > originSize" :page="originPage" :size="originSize" :total="origins.total" @change="originPage = $event" />
-          <RouterLink v-if="action === 'revoke_incident'" :to="{ path: '/manage/incidents', query: { student_id: selected.student_id } }">进入异常复核</RouterLink>
+          <RouterLink class="button" v-if="action === 'revoke_incident'" :to="{ path: '/manage/incidents', query: { student_id: selected.student_id } }">进入异常复核</RouterLink>
           <label>处理意见
             <textarea v-model="reason" rows="2" maxlength="3000" placeholder="受理、驳回的说明将向学生展示" />
           </label>
