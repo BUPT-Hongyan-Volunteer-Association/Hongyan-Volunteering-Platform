@@ -10,7 +10,7 @@ export function managedAccountScope(actor: Actor): Prisma.AccountWhereInput {
   };
 }
 
-const permanentAdmins = Prisma.sql`
+export const permanentAdmins = Prisma.sql`
   SELECT a.id FROM account a JOIN role_grant g ON g.account_id = a.id
   WHERE a.active AND a.password_hash ~ '^[^:]+:[0-9a-fA-F]{128}$'
     AND g.role = 'tech_admin' AND g.expires_at IS NULL`;

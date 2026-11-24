@@ -59,7 +59,7 @@ async function submit() {
 <template>
   <div v-if="!editing" class="page-actions">
     <button class="primary" @click="open('grant')">{{ active ? '调整有效期' : '授予' + title }}</button>
-    <button v-if="active" @click="open('remove')">收回{{ title }}</button>
+    <button v-if="grant" @click="open('remove')">收回{{ title }}</button>
   </div>
   <form v-else class="grant-form" @submit.prevent="submit">
     <fieldset :disabled="busy || stale">

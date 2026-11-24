@@ -4332,8 +4332,8 @@ paths:
   /admin/accounts/{id}/password-reset:
     post:
       operationId: reset_password
-      summary: 核对本人后重置账号凭证
-      description: 人工核验本人、记录原因并撤销旧会话，重置发放方式仍待学院确认，不返回旧密码。reviewer仅可重置学生档案关联且无reviewer/tech_admin角色的学生或负责人账号，tech_admin才能重置老师及技术账号。不能通过重置最后一个可用技术管理员使其无人可恢复，须先落实另一可用技术管理员或独立恢复通道。
+      summary: 核验本人后重置或签发临时凭证
+      description: 省略 temporary_password 时撤销旧凭证并进入待发放状态。仅待发放时可提交新生成的独立强临时凭证，签发后首次登录须更换密码。两步均人工核验本人、记录原因并撤销旧会话，重置发放方式仍待学院确认，不返回旧密码。reviewer仅可重置学生档案关联且无reviewer/tech_admin角色的学生或负责人账号，tech_admin才能重置老师及技术账号。不能通过重置最后一个可用技术管理员使其无人可恢复，须先落实另一可用技术管理员或独立恢复通道。
       tags:
       - 账号
       x-requirement: FR06
@@ -4392,7 +4392,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/reason_action'
+              $ref: '#/components/schemas/credential_reset'
   /organizer/activities/{id}/incidents:
     post:
       operationId: report_incident
@@ -8333,7 +8333,7 @@ components:
         owner_unavailable:
           type: boolean
           readOnly: true
-          description: 仅后台 all 范围的活动管理列表返回。主负责人账号停用或负责人角色缺失、已到期时为 true。
+          description: 仅后台 all 范围的活动管理列表返回。主负责人账号停用、凭证待发放或负责人角色缺失、已到期时为 true。
         my_registration_status:
           type: string
           enum:
@@ -8473,6 +8473,27 @@ components:
       additionalProperties: false
       required:
       - expected_version
+    credential_reset:
+      type: object
+      properties:
+        expected_version:
+          type: integer
+          minimum: 1
+        temporary_password:
+          type: string
+          writeOnly: true
+          minLength: 24
+          maxLength: 128
+          pattern: '^(?=.*[a-zA-Z])(?=.*[0-9])[!-~]+$'
+          description: 办理端安全随机生成，仅在签发待领取凭证时提交。
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+      additionalProperties: false
+      required:
+      - expected_version
+      - reason
     reason_action:
       type: object
       properties:
@@ -10946,7 +10967,7 @@ components:
       properties:
         owner_unavailable_reason:
           type: string
-          enum: [account_disabled, role_missing, role_expired]
+          enum: [account_disabled, credential_pending, role_missing, role_expired]
           description: 授权后台核对现任主负责人时返回的失效原因，仅在归属需要修复时提供。
         items:
           type: array
@@ -11985,6 +12006,9 @@ components:
         version:
           type: integer
           minimum: 1
+        roles_version:
+          type: integer
+          minimum: 1
         username:
           type: string
         display_name:
@@ -12012,6 +12036,7 @@ components:
       required:
       - account_id
       - version
+      - roles_version
       - username
       - display_name
       - status

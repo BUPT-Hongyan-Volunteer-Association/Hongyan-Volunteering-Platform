@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue';
 import { ApiError, createCommand, findActivityMemberCandidate, setActivityMembers,
-  type Activity, type ActivityMemberCandidate, type ActivityMemberList } from '@hongyan/contracts';
+  type Activity, type ActivityMemberList } from '@hongyan/contracts';
 
 const props = defineProps<{ activity: Activity; team: ActivityMemberList }>();
 const emit = defineEmits<{ saved: [string, ActivityMemberList, string]; refresh: [string] }>();
 const number = ref(''), reason = ref(''), message = ref('');
-const match = ref<ActivityMemberCandidate>(), looking = ref(false), saving = ref(false);
+const match = ref<Pick<ActivityMemberList['items'][number], 'account_id' | 'display_name' | 'student_no'>>(), looking = ref(false), saving = ref(false);
 const member = computed(() => props.team.items.find(m => m.account_id === match.value?.account_id));
+const collaborators = computed(() => props.team.items.filter(person => person.member_role === 'collaborator'));
+function chooseCollaborator(id: string) {
+  clear();
+  number.value = '';
+  match.value = collaborators.value.find(person => person.account_id === id);
+}
 const command = createCommand();
 let serial = 0;
 function clear() {
@@ -39,13 +45,14 @@ async function submit() {
   if (transfer) {
     for (const person of members) person.member_role = person.account_id === target ? 'owner' : 'collaborator';
   } else members.push({ account_id: target, member_role: 'collaborator' });
-  const body = { require_unavailable_owner: true, expected_version: props.team.version, members, reason: reason.value.trim() };
+  const body = { require_unavailable_owner: !!props.team.owner_unavailable_reason, expected_version: props.team.version, members, reason: reason.value.trim() };
   saving.value = true;
   try {
     const { data } = await setActivityMembers({ path: { id }, body, headers: command.headers('set_activity_members', id, body), throwOnError: true });
     if (turn !== serial) return;
     command.confirmed();
     reason.value = message.value = '';
+    if (transfer) { match.value = undefined; number.value = ''; }
     emit('saved', id, data.data, transfer ? name + '已接任主负责人。' : name + '已加入活动，请核对交接信息并填写交接原因。');
   } catch (e) {
     if (turn !== serial) return;
@@ -60,13 +67,19 @@ async function submit() {
 
 <template>
   <section class="repair">
-    <h2>重新指定主负责人</h2>
+    <h2>{{ team.owner_unavailable_reason ? '重新指定主负责人' : '添加协作者或交接主负责人' }}</h2>
     <form @submit.prevent="lookup">
       <label>接任人学号<input v-model="number" autocomplete="off" inputmode="numeric" :disabled="saving" @input="clear" /></label>
       <button :disabled="looking || saving">{{ looking ? '正在核对…' : '核对接任人' }}</button>
     </form>
+    <label v-if="collaborators.length">从现有协作者中选择
+      <select :value="member?.account_id ?? ''" :disabled="saving" @change="chooseCollaborator(($event.target as HTMLSelectElement).value)">
+        <option value="">请选择协作者</option>
+        <option v-for="person in collaborators" :key="person.account_id" :value="person.account_id">{{ person.display_name }} {{ person.student_no }}</option>
+      </select>
+    </label>
     <div v-if="match" class="candidate">
-      <strong>{{ match.display_name }} · {{ match.student_no }}</strong>
+      <strong>{{ match.display_name }}<template v-if="match.student_no"> · {{ match.student_no }}</template></strong>
       <p v-if="member?.member_role === 'owner'">该学生已是主负责人，请刷新查看最新资格。</p>
       <form v-else @submit.prevent="submit">
         <p>{{ member ? '确认后，该协作者将接任主负责人，原主负责人保留为协作者。' : '该学生尚未加入本活动，请先添加为协作者。' }}</p>

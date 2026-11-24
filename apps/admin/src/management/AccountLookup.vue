@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { ApiError, getAccount, getAccountRoles, listAccounts, type AccountSummary, type AccountRoles, type Profile, type RoleGrant } from '@hongyan/contracts';
+import { ApiError, getAccount, listAccounts, type AccountSummary, type AccountRoles, type Profile, type RoleGrant } from '@hongyan/contracts';
 import { localDateTime } from '@hongyan/ui/activityDisplay';
+import AccountDirectory from './AccountDirectory.vue';
 import AccountRoleForm from './AccountRoleForm.vue';
 
 import CredentialResetForm from './CredentialResetForm.vue';
@@ -15,7 +16,10 @@ const route = useRoute();
 const number = ref('');
 const managedRole = ref<'organizer' | 'reviewer' | 'tech_admin'>('organizer');
 const account = ref<AccountSummary>();
-const roleState = ref<AccountRoles>();
+const roleState = computed(() => account.value && {
+  account_id: account.value.account_id, version: account.value.roles_version, roles: account.value.roles,
+});
+const directoryRevision = ref(0);
 const now = ref(Date.now());
 const clock = window.setInterval(() => { now.value = Date.now(); }, 1000);
 onUnmounted(() => { clearInterval(clock); serial++; });
@@ -28,7 +32,6 @@ let serial = 0;
 function reset() {
   serial++;
   account.value = undefined;
-  roleState.value = undefined;
   managedRole.value = 'organizer';
   message.value = '';
   busy.value = false;
@@ -53,12 +56,9 @@ async function lookup(notice = '') {
       ? (await getAccount({ path: { id: detailId.value }, throwOnError: true })).data.data
       : (await listAccounts({ query: { ...(technical.value ? { username } : { q: username }), page_size: 1 }, throwOnError: true })).data.data.items[0];
     if (serial !== current) return;
-    const roles = match && (await getAccountRoles({ path: { id:match.account_id }, throwOnError:true })).data.data;
-    if (serial !== current) return;
-    roleState.value = roles;
     account.value = match;
-    if (technical.value && roles) {
-      const assigned = roles.roles.map(grant => grant.role);
+    if (technical.value && match) {
+      const assigned = match.roles.map(grant => grant.role);
       if (assigned.includes('tech_admin')) managedRole.value = 'tech_admin';
       else if (assigned.includes('reviewer')) managedRole.value = 'reviewer';
     }
@@ -91,16 +91,18 @@ function studentStatusSaved(id: string, status: 'active' | 'inactive') {
 
 function statusSaved(next: AccountSummary) {
   if (account.value?.account_id !== next.account_id || account.value.version > next.version) return;
-  account.value = next;
+  const current = account.value;
+  account.value = current.roles_version > next.roles_version
+    ? { ...next, roles_version: current.roles_version, roles: current.roles } : next;
   message.value = next.status === 'active' ? '账号已启用。' : '账号已停用，所有旧会话已撤销。';
   if (next.account_id === props.profile.account_id && next.status === 'inactive')
     window.dispatchEvent(new Event('hongyan-session-expired'));
 }
 
-function credentialReset(next: AccountSummary) {
+function credentialChanged(next: AccountSummary) {
   if (account.value?.account_id !== next.account_id || account.value.version > next.version) return;
-  account.value = next;
-  message.value = '旧凭证和登录会话已失效，新凭证待发放。';
+  account.value = { ...account.value, version: next.version, credential_pending: next.credential_pending };
+  message.value = next.credential_pending ? '旧凭证和登录会话已失效，新凭证待发放。' : '临时凭证已签发，首次登录须修改密码。';
   if (next.account_id === props.profile.account_id) window.dispatchEvent(new Event('hongyan-session-expired'));
 }
 
@@ -110,8 +112,8 @@ function validity(grant: RoleGrant) {
 }
 
 function saved(roles: AccountRoles, notice: string) {
-  if (account.value?.account_id !== roles.account_id || (roleState.value && roleState.value.version > roles.version)) return;
-  roleState.value = roles;
+  if (account.value?.account_id !== roles.account_id || account.value.roles_version > roles.version) return;
+  account.value = { ...account.value, roles: roles.roles, roles_version: roles.version };
   message.value = notice;
   if (roles.account_id === props.profile.account_id) window.dispatchEvent(new Event('hongyan-roles-changed'));
 }
@@ -130,7 +132,8 @@ function saved(roles: AccountRoles, notice: string) {
         <button class="primary" :disabled="busy">{{ busy ? '正在查询…' : '查询账号' }}</button>
       </div>
     </form>
-    <StaffAccountForm v-if="technical && !detailId" />
+    <StaffAccountForm v-if="technical && !detailId" @created="directoryRevision++" />
+    <AccountDirectory :key="directoryRevision" v-if="technical && !detailId && !account" />
     <RouterLink v-if="!technical && !detailId" class="onboard" to="/manage/imports">导入学生名单建档</RouterLink>
     <p role="status">{{ message || (account ? '已找到可查看的账号' : '') }}</p>
     <button v-if="detailId && message" @click="lookup()">重新读取</button>
@@ -155,8 +158,8 @@ function saved(roles: AccountRoles, notice: string) {
       <details :key="account.account_id + ':' + account.version" class="account-security">
         <summary>账号安全</summary>
         <div class="page-actions">
-          <CredentialResetForm v-if="!account.credential_pending" :account="account" :self="account.account_id === profile.account_id"
-            @saved="credentialReset" @reload="lookup" />
+          <CredentialResetForm :account="account" :self="account.account_id === profile.account_id"
+            @saved="credentialChanged" @reload="lookup" />
           <AccountStatusForm v-if="technical || account.student_id" :account="account" :self="account.account_id === profile.account_id"
             @saved="statusSaved" @student-saved="studentStatusSaved" @reload="lookup" />
         </div>

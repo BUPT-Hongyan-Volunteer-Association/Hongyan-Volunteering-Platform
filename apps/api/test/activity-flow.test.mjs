@@ -169,6 +169,40 @@ test('收回负责人资格与添加协作者、交接主负责人并发', async
         });
       }
     }
+    await t.test('待发放的成员不能接任，主负责人领取临时凭证后恢复登录和团队资格', async () => {
+      const activity = '/organizer/activities/' + sample.id;
+      async function resetStudent(number) {
+        const row = (await teacher.request('/admin/accounts?q=' + number)).data.items[0];
+        const endpoint = '/admin/accounts/' + row.account_id + '/password-reset';
+        const reset = await teacher.write('POST', endpoint, { expected_version: row.version, reason: '现场核对本人' });
+        assert.equal(reset.status, 200);
+        return { row, endpoint, version: reset.data.version };
+      }
+      const helper = await resetStudent('0000000004');
+      const team = (await owner.request(activity + '/members')).data;
+      assert.deepEqual((await owner.request(activity + '/member-candidates?student_no=0000000004')).data.items, []);
+      assert.equal((await owner.write('POST', activity + '/transfer-owner', {
+        expected_version: team.version, target_account_id: helper.row.account_id, reason: '安排接任',
+      })).status, 422);
+      const primary = await resetStudent('0000000002');
+      const queue = '/organizer/activities?scope=all&owner_unavailable=true&q=' + sample.activity_code;
+      assert.equal((await teacher.request(queue)).data.total, 1);
+      assert.equal((await teacher.request(activity + '/members')).data.owner_unavailable_reason, 'credential_pending');
+
+      const input = { expected_version: primary.version, reason: '向本人签发', temporary_password: 'T9' + randomUUID() };
+      const key = randomUUID();
+      const issue = () => teacher.write('POST', primary.endpoint, input, key);
+      const issued = await issue();
+      assert.equal(issued.status, 200);
+      assert.deepEqual(await issue(), issued);
+      assert.equal((await teacher.request(queue)).data.total, 0);
+      await owner.signIn('0000000002', input.temporary_password, 'S9' + randomUUID());
+      assert.equal((await owner.request(activity + '/members')).status, 200);
+      const events = await db.auditEvent.findMany({ where: { resource_id: primary.row.account_id, action: 'issue_temporary_password' } });
+      assert.equal(events.length, 1);
+      assert.equal(events[0].after.credential_pending, false);
+      assert.ok(!JSON.stringify([issued, events]).includes(input.temporary_password));
+    });
   } finally {
     await app.close();
   }
@@ -176,11 +210,13 @@ test('收回负责人资格与添加协作者、交接主负责人并发', async
 
 test('没有长期技术管理员时，老师仍可办理学生账号，限期管理员可维护后台账号', async (t) => {
   const password = randomUUID();
-  await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: password, DEMO_ADMIN_PASSWORD: '' });
+  await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: password });
   const app = await createApp();
   try {
     await app.listen(0, '127.0.0.1');
     const base = (await app.getUrl()) + '/api/v1';
+    // Simulate an installation created before a permanent administrator was required.
+    await app.get(Database).account.update({ where: { username: 'demo.admin' }, data: { active: false } });
     const teacher = browser(base), tech = browser(base);
     await teacher.signIn('demo.teacher', password);
     const student = (await teacher.request('/admin/accounts?q=0000000001')).data.items[0];
@@ -1035,7 +1071,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
         assert.equal((await teacher.request(path + '/' + hidden.id + suffix)).status, 403);
       }
       const detail = (await teacher.request(path + '/' + firstVisible.id)).data;
-      assert.deepEqual(Object.keys(detail).sort(), ['account_id','display_name','roles','status','student_id','student_version','username','version']);
+      assert.deepEqual(Object.keys(detail).sort(), ['account_id','display_name','roles','roles_version','status','student_id','student_version','username','version']);
       const grants = (await teacher.request(path + '/' + firstVisible.id + '/roles')).data;
       assert.equal(grants.version, 3);
       assert.equal(detail.version, 1);

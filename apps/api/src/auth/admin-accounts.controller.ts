@@ -1,6 +1,7 @@
+import { hashPassword } from './password.js';
 import { guardPermanentAdminLoss, managedAccountScope } from './account-access.js';
 import { Body, Controller, Get, Header, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
-import type { AccountStatusPatch, ReasonAction, RoleReplacement, StaffAccountInput } from '@hongyan/contracts/types';
+import type { AccountStatusPatch, CredentialResetWritable, RoleReplacement, StaffAccountInput } from '@hongyan/contracts/types';
 import { checkVersion, Workflow, type Tx } from '../activities/workflow.js';
 import { validate } from '../activities/validation.js';
 import { audit } from '../audit.js';
@@ -26,7 +27,7 @@ function grants(row: Row) {
 
 function summary(row: Row) {
   return {
-    account_id: row.id, version: row.version, username: row.username, display_name: row.display_name,
+    account_id: row.id, version: row.version, roles_version: row.roles_version, username: row.username, display_name: row.display_name,
     status: row.active ? 'active' : 'inactive', ...(row.student && { student_id: row.student.id, student_version: row.student.version }),
     ...(row.password_hash === null && { credential_pending: true }), roles: grants(row),
   };
@@ -80,15 +81,15 @@ export class AdminAccountsController {
   @Patch(':id')
   setStatus(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
     const checkAccess = async (tx: Tx) => {
-      const target = await tx.account.findUnique({ where: { id }, select: { student: { select: { id: true } } } });
+      const target = await tx.account.findUnique({ where: { id }, select: fields });
       if (!target) invisible();
       if (target.student) invalid('account_id', '学生账号请在学生档案办理启停');
+      return target;
     };
-    return this.workflow.runAccount(req, id, 'tech', checkAccess, async (tx, actor) => {
+    return this.workflow.runAccount(req, id, 'tech', checkAccess, async (tx, actor, row) => {
       const input = validate<AccountStatusPatch>('account_status_patch', body);
       const reason = input.reason.trim();
       if (!reason) invalid('reason', '请填写启停原因');
-      const row = await tx.account.findUniqueOrThrow({ where: { id }, select: fields });
       checkVersion(row.version, input.expected_version);
       const active = input.status === 'active';
       if (active === row.active) return summary(row);
@@ -108,23 +109,28 @@ export class AdminAccountsController {
   @HttpCode(200)
   resetPassword(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
     const checkAccess = async (tx: Tx, actor: Actor) => {
-      const visible = await tx.account.count({ where: { id, ...managedAccountScope(actor) } });
-      if (!visible) return actor.roles.includes('tech_admin') ? invisible() : denied();
+      const target = await tx.account.findFirst({ where: { id, ...managedAccountScope(actor) },
+        select: { version: true, password_hash: true } });
+      if (!target) return actor.roles.includes('tech_admin') ? invisible() : denied();
+      return target;
     };
-    return this.workflow.runAccount(req, id, 'review', checkAccess, async (tx, actor) => {
-      const input = validate<ReasonAction>('reason_action', body);
+    return this.workflow.runAccount(req, id, 'review', checkAccess, async (tx, actor, account) => {
+      const input = validate<CredentialResetWritable>('credential_reset', body);
       const reason = input.reason.trim();
       if (!reason) invalid('reason', '请填写核验后的重置原因');
-      const account = await tx.account.findUniqueOrThrow({ where: { id }, select: { version: true, password_hash: true } });
       checkVersion(account.version, input.expected_version);
-      if (account.password_hash === null)
-        throw new BusinessError(409, 'invalid_state', '该账号的凭证已待发放，请重新核对');
-      await guardPermanentAdminLoss(tx, id);
+      const pending = account.password_hash === null;
+      const { temporary_password } = input;
+      const issuing = temporary_password !== undefined;
+      if (pending !== issuing)
+        throw new BusinessError(409, 'invalid_state', pending ? '该账号已待发放，请核对后签发凭证' : '请先办理凭证重置');
+      if (!issuing) await guardPermanentAdminLoss(tx, id);
+      const password_hash = issuing ? await hashPassword(temporary_password) : null;
       const { version } = await tx.account.update({ where: { id },
-        data: { password_hash: null, must_change_password: true, version: { increment: 1 } }, select: { version: true } });
+        data: { password_hash, must_change_password: true, version: { increment: 1 } }, select: { version: true } });
       await tx.httpSession.deleteMany({ where: { account_id: id } });
-      await audit(tx, { actor_id: actor.account_id, action: 'reset_password', resource_type: 'account', resource_id: id,
-        reason, before: { credential_pending: false, version: account.version }, after: { credential_pending: true, version } });
+      await audit(tx, { actor_id: actor.account_id, action: issuing ? 'issue_temporary_password' : 'reset_password', resource_type: 'account', resource_id: id,
+        reason, before: { credential_pending: pending, version: account.version }, after: { credential_pending: !issuing, version } });
       return { completed: true, resource_id: id, version };
     });
   }

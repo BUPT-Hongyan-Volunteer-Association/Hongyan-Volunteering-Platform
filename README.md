@@ -21,7 +21,7 @@
    pnpm build
    ```
 
-3. 首次体验时，在终端设置至少 12 个字符的 `DEMO_STAFF_PASSWORD`，运行 `pnpm --filter @hongyan/api db:seed` 创建示例账号和活动。学生 `0000000001`、负责人 `0000000002` 首登使用学号后六位，审核员 `demo.teacher` 使用上述密码。
+3. 首次体验时，在终端分别设置 `DEMO_STAFF_PASSWORD` 和 `DEMO_ADMIN_PASSWORD`，两者均至少 12 个字符且互不相同，运行 `pnpm --filter @hongyan/api db:seed` 创建示例账号和活动。学生 `0000000001`、负责人 `0000000002` 首登使用学号后六位，审核员 `demo.teacher` 和长期技术管理员 `demo.admin` 分别使用各自的密码。已有账号的凭证不会被建种覆盖。
 4. 在三个终端分别启动服务。
 
    | 服务 | 命令 | 本机地址 |
@@ -32,7 +32,7 @@
 
 可直接用浏览器访问前端。Safari 手动登录时，启动前为两个前端设置 `HY_LOCAL_HTTPS=1`，通过 HTTPS 访问。多角色体验可运行 `pnpm demo:open` 并打开 `http://127.0.0.1:5180`。身份选择页会为各账号打开独立窗口，Chromium、Chrome 和 Edge 会最大化并保留标签栏和地址栏，Firefox 与 WebKit 可手动调整。
 
-macOS 完成首次配置后，可在 `.local/demo.env` 写入建种时的 `DEMO_STAFF_PASSWORD`，双击 [一键启动.command](一键启动.command)。脚本复用已就绪的服务，每次新启动 API 前重新生成接口和 Prisma 客户端，并向开发库应用待执行的迁移。
+macOS 完成首次配置后，可在 `.local/demo.env` 写入建种时的 `DEMO_STAFF_PASSWORD` 和 `DEMO_ADMIN_PASSWORD`，双击 [一键启动.command](一键启动.command)。脚本复用已就绪的服务，每次新启动 API 前重新生成接口和 Prisma 客户端，并向开发库应用待执行的迁移。
 
 ## 开发检查
 

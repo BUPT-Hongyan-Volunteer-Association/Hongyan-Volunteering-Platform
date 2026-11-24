@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { ApiError, createCommand, createStaffAccount, type StaffAccountInput } from '@hongyan/contracts';
 
+const emit = defineEmits<{ created: [] }>();
 const username = ref(''), name = ref(''), reason = ref('');
 const role = ref<StaffAccountInput['role']>('reviewer');
 const review = ref<StaffAccountInput>(), created = ref<{ id: string; username: string }>();
@@ -28,6 +29,7 @@ async function submit() {
     command.confirmed();
     created.value = { id: data.data.account_id, username: body.username };
     review.value = undefined;
+    emit('created');
     username.value = name.value = reason.value = '';
     role.value = 'reviewer';
   } catch (e) {

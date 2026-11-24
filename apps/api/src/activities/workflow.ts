@@ -118,6 +118,7 @@ export type Tx = Prisma.TransactionClient;
 export type Reauthorize = () => Promise<Actor>;
 export type Target =
   | { activityId: string }
+  | { teamId: string }
   | { activityIds: (tx: Tx) => Promise<string[]> }
   | { reviewId: string }
   | { requestId: string }
@@ -127,7 +128,7 @@ type Access = 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 
 type CommandArgs = [tx: Tx, row: LoadedActivity | null, actor: Actor, reauthorize: Reauthorize];
 type Write = () => Promise<unknown>;
 
-async function targetActivityId(tx: Tx, target: Exclude<Target, { activityIds: unknown } | null>) {
+async function targetActivityId(tx: Tx, target: Exclude<Target, { activityIds: unknown } | { teamId: string } | null>) {
   if ('activityId' in target) return target.activityId;
   if ('requestId' in target) {
     const request = await tx.exitRequest.findUnique({ where: { id: target.requestId }, select: { registration: { select: { activity_id: true } } } });
@@ -195,6 +196,9 @@ export class Workflow {
       let ids: string[] | undefined;
       if (target && 'accountId' in target) {
         await tx.$queryRaw`SELECT id FROM account WHERE id IN (${target.accountId}::uuid, ${account_id}::uuid) ORDER BY id FOR UPDATE`;
+      } else if (target && 'teamId' in target) {
+        const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM activity WHERE id=${target.teamId}::uuid FOR UPDATE`;
+        if (!locked.length) invisible();
       } else if (target && 'activityIds' in target) {
         ids = [...new Set(await target.activityIds(tx))];
         const locked = await tx.$queryRaw<{ id: string }[]>`
@@ -236,8 +240,8 @@ export class Workflow {
         if (access === 'create' && !actor.roles.includes('organizer')) denied();
         if (access === 'tech' && !actor.roles.includes('tech_admin')) denied();
         if (access === 'review' && !staff(actor)) denied();
-        if (access === 'team' && (!row || !await tx.activity.count({
-          where: { id: row.id, ...teamManagerScope(actor) },
+        if (access === 'team' && (!target || !('teamId' in target) || !await tx.activity.count({
+          where: { id: target.teamId, ...teamManagerScope(actor) },
         }))) invisible();
         if (ids && access === 'manage' && await tx.activity.count({
           where: { id: { in: ids }, ...managedScope(actor) },

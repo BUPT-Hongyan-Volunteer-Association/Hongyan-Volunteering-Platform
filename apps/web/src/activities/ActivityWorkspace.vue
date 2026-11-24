@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import ActivityMemberListView from './ActivityMemberListView.vue';
+import ActivityMemberListView from '@hongyan/ui/ActivityMemberListView.vue';
 import TransferOwner from './TransferOwner.vue';
 import AddCollaborator from './AddCollaborator.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';

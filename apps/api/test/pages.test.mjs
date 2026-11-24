@@ -62,18 +62,18 @@ async function pickOption(page, label, option) {
   await list.waitFor({ state: 'hidden' });
 }
 
-async function signIn(browser, origin, username, password, width) {
+async function signIn(browser, origin, username, password, width,
+  initialPassword = username.startsWith('000') ? username.slice(-6) : undefined) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width, height: 900 } });
   const page = await context.newPage();
   page.setDefaultTimeout(12000);
   await page.goto(origin);
   await page.getByLabel('账号', { exact: true }).fill(username);
-  const student = username.startsWith('000');
-  await page.getByLabel('当前密码').fill(student ? username.slice(-6) : password);
+  await page.getByLabel('当前密码').fill(initialPassword ?? password);
   await button(page, '登录').click();
-  if (student) {
+  if (initialPassword) {
     await page.getByLabel('新密码').fill(password);
-    await page.getByLabel('当前密码').fill(username.slice(-6));
+    await page.getByLabel('当前密码').fill(initialPassword);
     await button(page, '保存新密码').click();
   }
   await visible(button(page, '退出登录'));
@@ -802,8 +802,20 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       assert.equal(await db.account.count({ where: { username: 'faculty.demo' } }), 0);
       await button(tech, '确认创建').click();
       await visible(tech.getByText('已创建 faculty.demo，待发放初始凭证。'));
-      await link(tech, '查看新账号详情').click();
+      await tech.getByLabel('筛选角色').selectOption('reviewer');
+      await tech.getByLabel('筛选账号状态').selectOption('active');
+      await link(tech, '合成教师 · faculty.demo').click();
       await visible(tech.getByText('待发放，暂不可登录'));
+      await accountSecurity(tech).click();
+      await button(tech, '签发临时凭证').click();
+      const temporary = await tech.getByLabel('临时凭证', { exact: true }).inputValue();
+      await tech.getByLabel('签发原因').fill('本人已核验');
+      await tech.getByLabel('我已人工核验申请人本人，并核对上述账号').check();
+      await button(tech, '确认签发').click();
+      await visible(tech.getByText('临时凭证已签发，首次登录须修改密码。'));
+      const faculty = await signIn(browser, admin, 'faculty.demo', 'F9' + randomUUID(), 1440, temporary);
+      await visible(link(faculty, '账号与角色'));
+      await faculty.context().close();
       await link(tech, '返回账号查询').click();
       await tech.getByLabel('登录账号', { exact: true }).fill('faculty.demo');
       await button(tech, '查询账号').click();
@@ -830,6 +842,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await button(tech, '取消').click();
       await teacher.reload();
       await visible(teacher.getByText('创建后台账号', { exact: true }));
+      const teacherAccount = await db.account.findUniqueOrThrow({ where: { username: 'demo.teacher' } });
+      await db.roleGrant.update({ where: { account_id_role: { account_id: teacherAccount.id, role: 'tech_admin' } },
+        data: { expires_at: new Date(0) } });
+      await lookup('demo.teacher');
+      await visible(tech.getByText(/已到期 · /));
       await button(tech, '收回技术管理员角色').click();
       await tech.getByLabel('办理原因').fill('代班结束');
       await button(tech, '确认收回技术管理员角色').click();
@@ -3206,6 +3223,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         const row = team.getByRole('row').filter({ has: teacher.getByRole('rowheader', { name, exact: true }) });
         await visible(row.getByText(role, { exact: true }));
       }
+      await button(teacher, '移除协作者 同学乙').click();
+      await teacher.getByLabel('移除原因').fill('离任交接完成');
+      await button(teacher, '确认移除').click();
+      await visible(teacher.getByText('已从本活动移除同学乙。'));
       await link(teacher, '返回活动团队').click();
       await visible(teacher.getByText('当前筛选范围内没有待接管活动。'));
       assert.equal(await teacher.getByLabel('活动名称或编号').inputValue(), 'P2026-0001');
@@ -3296,6 +3317,23 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await owner.getByLabel('当前密码').fill(password);
       await button(owner, '登录').click();
       await visible(owner.getByText(loginFailureMessage, { exact: true }));
+    });
+    await t.test('接管末页最后一项后返回有效页码，保留待接管筛选', async () => {
+      await createScheduleDataset(db, { count: 21, codePrefix: 'TEAM-END-', titlePrefix: '交接验收',
+        date: firstDate, ownerUsername: '0000000002' });
+      await teacher.goto(admin + '/manage/teams?owner_unavailable=true&q=TEAM-END-&page=2');
+      await link(teacher, '交接验收 21').click();
+      await teacher.getByLabel('接任人学号').fill('0000000004');
+      await button(teacher, '核对接任人').click();
+      await teacher.getByLabel('添加原因').fill('接任协作');
+      await button(teacher, '确认添加协作者').click();
+      await teacher.getByLabel('交接原因').fill('办理交接');
+      await button(teacher, '确认重新指定').click();
+      await visible(teacher.getByRole('heading', { name: '当前主负责人：同学丙' }));
+      await link(teacher, '返回活动团队').click();
+      await visible(link(teacher, '交接验收 01'));
+      assert.equal(await teacher.getByRole('link', { name: /^交接验收/ }).count(), 20);
+      assert.ok(await teacher.getByLabel('仅看待接管活动').isChecked());
     });
   } finally {
     try {

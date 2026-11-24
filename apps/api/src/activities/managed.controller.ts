@@ -30,11 +30,12 @@ async function staffTeam(tx: Tx, team: Awaited<ReturnType<typeof readTeam>>) {
   const owner = team.items.find(member => member.member_role === 'owner')!;
   const unavailable = await tx.account.findFirst({
     where: { id: owner.account_id, NOT: eligibleOrganizer(new Date()) },
-    select: { active: true, roles: { where: { role: 'organizer' }, select: { role: true } } },
+    select: { active: true, password_hash: true, roles: { where: { role: 'organizer' }, select: { role: true } } },
   });
   if (!unavailable) return team;
-  const reason = !unavailable.active ? 'account_disabled' : unavailable.roles.length ? 'role_expired' : 'role_missing';
-  return { ...team, owner_unavailable_reason: reason };
+  if (!unavailable.active) return { ...team, owner_unavailable_reason: 'account_disabled' };
+  if (unavailable.password_hash === null) return { ...team, owner_unavailable_reason: 'credential_pending' };
+  return { ...team, owner_unavailable_reason: unavailable.roles.length ? 'role_expired' : 'role_missing' };
 }
 
 const teamSnapshot = (team: Awaited<ReturnType<typeof readTeam>>) => ({
@@ -112,7 +113,7 @@ export class ManagedController {
   @Post(':id/members')
   @HttpCode(200)
   add(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.workflow.run(req, { activityId: id }, 'team', async (tx, _row, actor, reauthorize) => {
+    return this.workflow.run(req, { teamId: id }, 'team', async (tx, _row, actor, reauthorize) => {
       const input = validate<MemberAdd>('member_add', body);
       const target = input.account_id.toLowerCase();
       const reason = input.reason.trim();
@@ -131,7 +132,7 @@ export class ManagedController {
   @Delete(':id/members/:account_id')
   remove(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string,
     @Param('account_id', ParseUUIDPipe) accountId: string, @Body() body: unknown) {
-    return this.workflow.run(req, { activityId: id }, 'team', async (tx, _row, actor, reauthorize) => {
+    return this.workflow.run(req, { teamId: id }, 'team', async (tx, _row, actor, reauthorize) => {
       const input = validate<ReasonAction>('reason_action', body);
       const reason = input.reason.trim();
       if (!reason) invalid('reason', '请填写移除原因');
@@ -143,14 +144,15 @@ export class ManagedController {
       if (!member) invisible();
       if (member.member_role === 'owner') invalid('account_id', '请先交接主负责人，再移除该成员');
       await tx.activityMember.delete({ where: { activity_id_account_id: { activity_id: id, account_id: accountId } } });
-      return recordTeamChange(tx, id, before, actor.account_id, 'remove_activity_member', reason);
+      const after = await recordTeamChange(tx, id, before, actor.account_id, 'remove_activity_member', reason);
+      return staff(actor) ? staffTeam(tx, after) : after;
     });
   }
 
   @Post(':id/transfer-owner')
   @HttpCode(200)
   transfer(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.workflow.run(req, { activityId: id }, 'team', async (tx, _row, actor, reauthorize) => {
+    return this.workflow.run(req, { teamId: id }, 'team', async (tx, _row, actor, reauthorize) => {
       const input = validate<OwnerTransfer>('owner_transfer', body);
       const reason = input.reason.trim();
       if (!reason) invalid('reason', '请填写交接原因');
@@ -174,7 +176,7 @@ export class AdminTeamController {
 
   @Put(':id/members')
   replace(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.workflow.run(req, { activityId: id }, 'review', async (tx, _row, actor, reauthorize) => {
+    return this.workflow.run(req, { teamId: id }, 'review', async (tx, _row, actor, reauthorize) => {
       const input = validate<MemberReplacement>('member_replacement', body);
       const reason = input.reason.trim();
       if (!reason) invalid('reason', '请填写成员调整原因');

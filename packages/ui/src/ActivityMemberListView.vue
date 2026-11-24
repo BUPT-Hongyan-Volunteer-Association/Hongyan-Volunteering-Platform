@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue';
-import UiIcon from '@hongyan/ui/UiIcon.vue';
 import { ApiError, createCommand, removeActivityMember, type Activity, type ActivityMemberList } from '@hongyan/contracts';
 
 const props = defineProps<{ activity: Activity; team: ActivityMemberList; canManage: boolean; paused: boolean }>();
@@ -44,16 +43,18 @@ async function remove() {
 </script>
 
 <template>
-  <ul class="member-list">
-    <li v-for="m in team.items" :key="m.account_id">
-      <span class="item-icon"><UiIcon name="User" /></span><strong>{{ m.display_name }}</strong
-      ><span class="state-chip neutral">{{
-        m.member_role === 'owner' ? '主负责人' : '协作者'
-      }}</span>
-      <button v-if="canManage && m.member_role === 'collaborator'" class="remove" :disabled="paused"
-        :aria-label="'移除协作者 ' + m.display_name" @click="open(m)">移除协作者</button>
-    </li>
-  </ul>
+  <div class="scroll-table">
+    <table aria-label="活动成员">
+      <thead><tr><th scope="col">姓名</th><th scope="col">活动角色</th><th scope="col">学号</th><th v-if="canManage" scope="col">操作</th></tr></thead>
+      <tbody><tr v-for="member in team.items" :key="member.account_id">
+        <th scope="row">{{ member.display_name }}</th>
+        <td>{{ member.member_role === 'owner' ? '主负责人' : '协作者' }}</td>
+        <td>{{ member.student_no ?? '—' }}</td>
+        <td v-if="canManage"><button v-if="member.member_role === 'collaborator'" class="remove" :disabled="paused"
+          :aria-label="'移除协作者 ' + member.display_name" @click="open(member)">移除协作者</button></td>
+      </tr></tbody>
+    </table>
+  </div>
   <p v-if="notice" role="status">{{ notice }}</p>
   <dialog ref="dialog" aria-labelledby="remove-title" @cancel="saving && $event.preventDefault()">
     <form v-if="selected" @submit.prevent="remove">
@@ -71,21 +72,7 @@ async function remove() {
 </template>
 
 <style scoped>
-.member-list {
-  display: grid;
-  list-style: none;
-  padding: 0;
-  border-top: 1px solid var(--line);
-}
-.member-list li {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
-}
-.remove { margin-left:auto; color:var(--danger); }
+.remove { color:var(--danger); }
 dialog { max-width:min(28rem, 90vw); border:1px solid var(--line); border-radius:var(--radius); padding:20px; }
 dialog::backdrop { background:#17243a55; }
 h3 { margin-top:0; }

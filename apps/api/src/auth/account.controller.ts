@@ -92,6 +92,8 @@ export class AccountController {
       !(await matches(body.current_password, account.password_hash))
     )
       invalid('current_password', '当前密码不正确');
+    if (account.must_change_password && next === body.current_password)
+      invalid('new_password', '新密码须与初始或临时凭证不同');
     const password_hash = await hashPassword(next);
     const issued = issueSession(id);
     await this.db.$transaction(async (tx) => {
