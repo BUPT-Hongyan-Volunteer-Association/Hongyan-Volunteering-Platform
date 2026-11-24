@@ -698,6 +698,11 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.deepEqual(added.items.filter(member => member.account_id === account_id).map(member => member.member_role), ['collaborator']);
       assert.equal((await owner.write('POST',team,body)).code, 'version_conflict');
       assert.deepEqual((await owner.write('POST',team,{...body,expected_version:added.version})).data, added);
+      const duplicate = await owner.write('POST', team, {
+        ...body, account_id: account_id.toUpperCase(), expected_version: added.version,
+      });
+      assert.equal(duplicate.status, 200);
+      assert.deepEqual(duplicate.data, added);
       assert.equal((await other.request(team.replace('/members','/registrations'))).status, 200);
       assert.equal((await other.request(path + '/registrations')).status, 404);
       assert.equal((await find(other, number)).status, 404);
@@ -715,7 +720,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       const before = (await members()).data;
       const target = (await other.request('/me')).data.account_id;
       const oldOwner = (await owner.request('/me')).data.account_id;
-      const body = { expected_version: before.version, target_account_id: target, reason: '现场交接' };
+      const body = { expected_version: before.version, target_account_id: target.toUpperCase(), reason: '现场交接' };
       const post = (user, data, key) => user.write('POST', base + '/transfer-owner', data, key);
       assert.equal((await post(other, body)).status, 404);
       assert.equal((await post(owner, { ...body, target_account_id: oldOwner })).status, 422);

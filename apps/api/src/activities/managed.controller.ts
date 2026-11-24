@@ -114,16 +114,17 @@ export class ManagedController {
   add(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.workflow.run(req, { activityId: id }, 'team', async (tx, _row, actor, reauthorize) => {
       const input = validate<MemberAdd>('member_add', body);
+      const target = input.account_id.toLowerCase();
       const reason = input.reason.trim();
       if (!reason) invalid('reason', '请填写添加原因');
-      await tx.$queryRaw`SELECT id FROM account WHERE id IN (${actor.account_id}::uuid, ${input.account_id}::uuid) ORDER BY id FOR SHARE`;
+      await tx.$queryRaw`SELECT id FROM account WHERE id IN (${actor.account_id}::uuid, ${target}::uuid) ORDER BY id FOR SHARE`;
       await reauthorize();
       const before = await readTeam(tx, { id });
       checkVersion(before.version, input.expected_version);
-      if (before.items.some(member => member.account_id === input.account_id)) return before;
-      if (!await tx.account.count({ where: { id: input.account_id, ...eligibleOrganizer(new Date()) } }))
+      if (before.items.some(member => member.account_id === target)) return before;
+      if (!await tx.account.count({ where: { id: target, ...eligibleOrganizer(new Date()) } }))
         invalid('account_id', '该账号当前没有有效的负责人资格，请重新核对');
-      await tx.activityMember.create({ data: { activity_id: id, account_id: input.account_id, member_role: 'collaborator' } });
+      await tx.activityMember.create({ data: { activity_id: id, account_id: target, member_role: 'collaborator' } });
       return recordTeamChange(tx, id, before, actor.account_id, 'add_activity_member', reason);
     });
   }
@@ -153,7 +154,7 @@ export class ManagedController {
       const input = validate<OwnerTransfer>('owner_transfer', body);
       const reason = input.reason.trim();
       if (!reason) invalid('reason', '请填写交接原因');
-      const target = input.target_account_id;
+      const target = input.target_account_id.toLowerCase();
       await tx.$queryRaw`SELECT id FROM account WHERE id IN (${actor.account_id}::uuid, ${target}::uuid) ORDER BY id FOR SHARE`;
       await reauthorize();
       const before = await readTeam(tx, { id });
