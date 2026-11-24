@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type {
   Activity,
   ActivityInput,
@@ -163,7 +164,7 @@ export async function timelinePage(
   db: Database,
   actor: Actor,
   q: Query,
-): Promise<TimelineActivityPage> {
+): Promise<{ page: TimelineActivityPage; rangeKey: string }> {
   const scope = q.scope as TimelineScope;
   if (!scopes.includes(scope)) invalid('scope', '日程范围无效');
   const { from, to } = window(q);
@@ -214,7 +215,15 @@ export async function timelinePage(
       ],
     };
 
-  const views = await activityViews(db, where, management ? revision : 'public', q, studentId);
+  // 日程本就需要扫描全部匹配项以计数。只对当前身份可见的日程字段取摘要，排除请求时刻。
+  const digest = createHash('sha256');
+  const views = await activityViews(db, where, management ? revision : 'public', q, studentId, (a) => {
+    digest.update(JSON.stringify([
+      a.id, a.activity_code, a.title, a.status, a.schedule_revision, a.revision_state, a.schedule,
+      a.campus, a.location, a.capacity, a.registration_closes_at, a.registration_phase, a.is_ongoing,
+      a.owner_account_id, a.owner_display_name, a.has_pending_review, a.current_review_id,
+    ]));
+  });
   const plan =
     scope === 'mine' && studentId
       ? await plannedSlots(db, studentId, from, to)
@@ -223,7 +232,7 @@ export async function timelinePage(
   const items = views.items
     .map((view) => toActivity(view, views.now, from, to, management, plan))
     .filter((item): item is TimelineActivity => item !== null);
-  return {
+  const page = {
     items,
     total: views.total,
     page: views.page,
@@ -231,4 +240,9 @@ export async function timelinePage(
     state_evaluated_at: views.now.toISOString(),
     ...(owners && { owner_options: owners }),
   };
+  if (plan) {
+    plan.sort((a, b) => a.activity_id.localeCompare(b.activity_id) || a.start - b.start || a.end - b.end);
+    digest.update(JSON.stringify(plan));
+  }
+  return { page, rangeKey: digest.digest('hex') };
 }

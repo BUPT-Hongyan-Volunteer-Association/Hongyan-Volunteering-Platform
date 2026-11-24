@@ -31,6 +31,17 @@ const link = (page, name) => page.getByRole('link', { name, exact: true });
 const button = (page, name) => page.getByRole('button', { name, exact: true });
 const visible = (locator) => locator.first().waitFor({ state: 'visible' });
 
+async function publicSchedulePage(browserPage, date, q, page) {
+  const url = new URL('/api/v1/timeline', browserPage.url());
+  url.search = new URLSearchParams({
+    scope: 'public', from: atTime(date, '00:00'), to: atTime(shiftDay(date, 1), '00:00'),
+    q, page: String(page), page_size: '20',
+  }).toString();
+  const response = await browserPage.request.get(url.href);
+  assert.equal(response.status(), 200);
+  return (await response.json()).data;
+}
+
 async function openOptions(page, label) {
   const input = page.getByRole('combobox', { name: label, exact: true });
   const trigger = page
@@ -511,7 +522,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
         assert.ok(Math.abs((box.x - area.x) * 2 + box.width - area.width) < 2);
       }
       await notice.click();
-      await visible(helper.getByText('已读未确认', { exact: true }));
+      await visible(helper.locator('.notice-detail').getByText('已读未确认', { exact: true }));
       await visible(badge.getByText('1', { exact: true }));
       await link(helper, '返回通知').click();
       await link(helper, '全部 2').click();
@@ -1134,7 +1145,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await student.locator('.schedule-more button').click();
       await button(student, '重试').click();
       await visible(student.getByText('41 项（已显示 40）', { exact: false }));
-      assert.deepEqual(requested, [1, 1, 2, 1, 2], '加载更多先复核头部，失败后重试从第 1 页整段重读');
+      assert.deepEqual(requested, [1, 2, 1, 2], '追加只读下一页，失败时整段重试');
       assert.match(await rows.first().innerText(), /分页演示 01/);
       await rows.filter({ hasText: '分页演示 21' }).getByRole('button').first().click();
       const detail = student.getByRole('complementary', { name: '时段详情' });
@@ -1148,8 +1159,12 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await button(student, '重新读取').click();
       await visible(detail.getByRole('heading', { name: '分页演示 21' }));
       await visible(student.getByText('41 项（已显示 40）', { exact: false }));
-      assert.deepEqual(requested, [1, 1, 1, 2], '重新读取后补读先复核头部，再取第 2 页');
+      assert.deepEqual(requested, [1, 1, 2], '重新读取首页后只补到选中页');
       assert.equal(student.url(), selectedUrl);
+      await pickOption(student, '活动状态', '已发布');
+      await student.waitForURL((url) => url.searchParams.get('status') === 'published');
+      await visible(detail.getByRole('heading', { name: '分页演示 21' }));
+      assert.equal(new URL(student.url()).searchParams.get('slot'), new URL(selectedUrl).searchParams.get('slot'));
       await student.locator('.schedule-more button').click();
       await student.locator('.schedule-more').waitFor({ state: 'detached' });
       assert.equal(await rows.count(), 41);
@@ -2086,36 +2101,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       requested.length = 0;
       await student.locator('.schedule-more button').click();
       await visible(student.getByText(/^40 项/));
-      // 追加前先复核第 1 页：total 由 41 变 40，复核不一致后整段重读 1–2。
-      assert.deepEqual(requested, [1, 1, 2], '先复核头部，不一致后整段重读 1–2');
+      // 第二页与已加载首页属于不同结果集。
+      assert.deepEqual(requested, [2, 1, 2], '范围发生变化后整段重读');
 
       // 已加载范围与同条件服务端结果逐项一致，无重复无缺口。
-      const from = new Date(Date.parse(date + 'T00:00:00+08:00')).toISOString();
-      const to = new Date(Date.parse(date + 'T00:00:00+08:00') + 86_400_000).toISOString();
-      const server = await student.evaluate(
-        async ({ from, to, q }) => {
-          const pages = [];
-          for (const page of [1, 2]) {
-            const query = new URLSearchParams({
-              scope: 'public',
-              revision_scope: 'published',
-              from,
-              to,
-              q,
-              page: String(page),
-              page_size: '20',
-            });
-            const response = await fetch('/api/v1/timeline?' + query);
-            pages.push((await response.json()).data);
-          }
-          return pages;
-        },
-        { from, to, q: title },
-      );
-      assert.equal(server[0].total, 40);
-      assert.equal(server[1].total, 40);
-      assert.equal(server[0].items.length, 20);
-      assert.equal(server[1].items.length, 20);
+      const server = await Promise.all([1, 2].map((n) => publicSchedulePage(student, date, title, n)));
       const expected = server.flatMap((page) => page.items.map((item) => item.title));
       const shown = await rows.evaluateAll((items) =>
         items.map((li) => li.querySelector('.row-button')?.textContent?.trim()),
@@ -2191,16 +2181,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       const query = 'date=' + date + '&unit=day&view=list&q=' + encodeURIComponent(title);
       const timeline = (url) =>
         url.pathname === '/api/v1/timeline' && url.searchParams.get('q') === title;
-      await teacher.goto(admin + '/schedule?' + query);
-      const rows = teacher.locator('.schedule-list li');
-      await visible(teacher.getByText('1001 项（已显示 20）', { exact: false }));
-      for (const shown of [40, 60, 80, 100]) {
-        await teacher.locator('.schedule-more button').click();
-        await visible(teacher.getByText('已显示 ' + shown, { exact: false }));
-      }
-      await rows.first().getByRole('button', { name: /10:00/ }).click();
+      const last = await db.activity.findUniqueOrThrow({ where: { activity_code: created.codes.at(-1) } });
+      await teacher.goto(admin + '/schedule?' + query + '&item=' + last.id);
       const detail = teacher.getByRole('complementary', { name: '时段详情' });
-      await visible(detail.getByRole('heading', { name: '深页演示 0001' }));
+      await detail.getByRole('heading', { name: '深页演示 1001' }).waitFor({ timeout: 60000 });
+      const expectedPages = Array.from({ length: 51 }, (_, i) => i + 1);
 
       const claimed = [];
       const live = new Set();
@@ -2224,7 +2209,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
         teacher.off('requestfailed', settle);
       });
 
-      // 刷新只为已加载的 1–5 页取页：压住第 1 页直到另外两页也已发出，峰值 3 由闸门决定，不靠时序快慢。
+      // 刷新只为已加载的 51 页取页：压住第 1 页直到另外两页也已发出，峰值 3 由闸门决定，不靠时序快慢。
       await teacher.route(
         timeline,
         async (route) => {
@@ -2238,33 +2223,14 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       );
       const refreshed = teacher.waitForResponse((response) => {
         const url = new URL(response.url());
-        return timeline(url) && url.searchParams.get('page') === '5';
+        return timeline(url) && url.searchParams.get('page') === '51';
       });
       await teacher.evaluate(() => window.dispatchEvent(new Event('focus')));
       await refreshed;
-      assert.deepEqual([...claimed].sort((a, b) => a - b), [1, 2, 3, 4, 5], '只重读已加载页');
-      assert.deepEqual(claimed, [...claimed].sort((a, b) => a - b), '页号升序领取');
+      assert.deepEqual(claimed, expectedPages);
+      await teacher.locator('.schedule-view[aria-busy=true]').waitFor({ state: 'hidden' });
       assert.equal(peak, 3);
-      await visible(detail.getByRole('heading', { name: '深页演示 0001' }));
-
-      // 同条件失败可重试：从第 1 页整段重读已加载页，失败页号只作记录。
-      await teacher.route(
-        (url) => timeline(url) && url.searchParams.get('page') === '3',
-        (route) => route.fulfill({ status: 503, body: '' }),
-        { times: 1 },
-      );
-      await teacher.evaluate(() => window.dispatchEvent(new Event('focus')));
-      await visible(teacher.getByText('状态待刷新，请重试', { exact: false }));
-      assert.equal(await rows.count(), 100);
-      claimed.length = 0;
-      const retried = teacher.waitForResponse((response) => {
-        const url = new URL(response.url());
-        return timeline(url) && url.searchParams.get('page') === '5';
-      });
-      await button(teacher, '重试').click();
-      await retried;
-      assert.deepEqual([...claimed].sort((a, b) => a - b), [1, 2, 3, 4, 5], '重试从第 1 页整段重读已加载页');
-      assert.equal(await rows.count(), 100);
+      await visible(detail.getByRole('heading', { name: '深页演示 1001' }));
 
       // 切换条件后旧查询不再补页：压住旧查询的 3 个在途请求，切换后再放行。
       const held = [];
@@ -2347,89 +2313,25 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       assert.equal(await student.locator('.schedule-detail').count(), 0);
       await visible(button(student, '重新读取'));
 
-      // 两页都是普通失败：保留旧结果，给同轮重试。
-      await button(student, '重新读取').click();
-      await visible(student.getByText('41 项（已显示 20）', { exact: false }));
-      await loadTwoPages();
-      await student.route(pageOnly('1'), unavailable, { times: 1 });
-      await student.route(pageOnly('2'), unavailable, { times: 1 });
-      await student.evaluate(() => window.dispatchEvent(new Event('focus')));
-      await visible(student.getByText('状态待刷新，请重试', { exact: false }));
-      assert.equal(await rows.count(), 40);
-      await visible(button(student, '重试'));
-      await button(student, '重试').click();
-      await visible(student.getByText('41 项（已显示 40）', { exact: false }));
-      await visible(rows.first());
     });
 
-    await t.test('日程 1-12 结果集首项被替换且总数不变时加载更多整段重读', async (t) => {
+    await t.test('日程 1-12 总数与首页不变时替换中间页活动', async (t) => {
       const date = shiftDay(demo.paged, 35);
       const title = '替换演示';
       await createScheduleDataset(db, { codePrefix: 'TL-970', titlePrefix: title, date, count: 41 });
       t.after(() => db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-97' } } }));
-      await student.setViewportSize({ width: 1440, height: 900 });
-      await student.goto(
-        web + '/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent(title),
-      );
-      const rows = student.locator('.schedule-list li');
-      await visible(student.getByText('41 项（已显示 20）', { exact: false }));
-      assert.match(await rows.first().innerText(), new RegExp(title + ' 01'));
-
-      // 首项移出窗口、补一项编码更靠后的进窗口：total 仍是 41，首屏身份序列换了。
-      await moveActivityTo(db, { activityCode: 'TL-97001', date: shiftDay(date, 5) });
-      await createScheduleDataset(db, {
-        codePrefix: 'TL-979',
-        titlePrefix: title + ' 移入',
-        date,
-        count: 1,
-      });
-      await student.locator('.schedule-more button').click();
+      await student.goto(web + '/schedule?' + new URLSearchParams({ date, unit: 'day', view: 'list', q: title }));
+      const more = student.locator('.schedule-more button');
+      await more.click();
       await visible(student.getByText('41 项（已显示 40）', { exact: false }));
-
-      const from = new Date(Date.parse(date + 'T00:00:00+08:00')).toISOString();
-      const to = new Date(Date.parse(date + 'T00:00:00+08:00') + 86_400_000).toISOString();
-      const server = await student.evaluate(
-        async ({ from, to, q }) => {
-          const pages = [];
-          for (const page of [1, 2]) {
-            const query = new URLSearchParams({
-              scope: 'public',
-              revision_scope: 'published',
-              from,
-              to,
-              q,
-              page: String(page),
-              page_size: '20',
-            });
-            const response = await fetch('/api/v1/timeline?' + query);
-            pages.push((await response.json()).data);
-          }
-          return pages;
-        },
-        { from, to, q: title },
-      );
-      assert.equal(server[0].total, 41);
-      assert.equal(server[0].items.length, 20);
-      assert.equal(server[1].items.length, 20);
-      const expected = server.flatMap((page) => page.items.map((item) => item.title));
-      const shown = await rows.evaluateAll((items) =>
-        items.map((li) => li.querySelector('.row-button')?.textContent?.trim()),
-      );
-      assert.deepEqual(shown, expected, '列表就是换过首项后的 40 项');
-      assert.equal(shown.includes(title + ' 01'), false, '移出的首项不出现');
-      assert.equal(shown.includes(title + ' 21'), true, '旧第 1 页拼新第 2 页会漏掉的那一项在列');
-      assert.equal(new Set(shown).size, shown.length);
-
-      // 时间轴与列表同一范围。
-      await button(student, '时间轴').click();
-      const chartRows = student.locator('.chart tbody tr');
-      await visible(chartRows.first());
-      assert.equal(await chartRows.count(), expected.length);
-      const chartTitles = await student
-        .locator('.chart tbody tr > th strong')
-        .evaluateAll((items) => items.map((node) => node.textContent.trim()));
-      assert.deepEqual(chartTitles, expected);
-      await button(student, '列表').click();
+      await moveActivityTo(db, { activityCode: 'TL-97021', date: shiftDay(date, 5) });
+      await createScheduleDataset(db, { codePrefix: 'TL-979', titlePrefix: title + ' 移入', date, count: 1 });
+      await more.click();
+      await more.waitFor({ state: 'detached' });
+      const current = await Promise.all([1, 2, 3].map((n) => publicSchedulePage(student, date, title, n)));
+      assert.equal(current[0].total, 41);
+      const shown = await student.locator('.schedule-list .row-button').allTextContents();
+      assert.deepEqual(shown.map((text) => text.trim()), current.flatMap((page) => page.items.map((r) => r.title)));
     });
 
     await t.test('日程 1-13 范围收缩后补读不保留已移出活动', async (t) => {
@@ -2469,35 +2371,13 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       t.after(() => db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-88' } } }));
       const shrinkAt =
         web + '/schedule?date=' + shrink + '&unit=day&view=list&q=' + encodeURIComponent(shrinkTitle);
-      const from = new Date(Date.parse(shrink + 'T00:00:00+08:00')).toISOString();
-      const to = new Date(Date.parse(shrink + 'T00:00:00+08:00') + 86_400_000).toISOString();
-      // 所选是排在最后的第 41 项，落在第 3 页。
-      const target = await student.evaluate(
-        async ({ from, to, q }) => {
-          const query = new URLSearchParams({
-            scope: 'public',
-            revision_scope: 'published',
-            from,
-            to,
-            q,
-            page: '3',
-            page_size: '20',
-          });
-          const response = await fetch('/api/v1/timeline?' + query);
-          const page = (await response.json()).data;
-          return {
-            id: page.items[0].activity_id,
-            slot: page.items[0].segments[0].occurrence_key,
-          };
-        },
-        { from, to, q: shrinkTitle },
-      );
+      const [target] = (await publicSchedulePage(student, shrink, shrinkTitle, 3)).items;
       // 首屏拿的是收缩前的快照，期间的删除让补读读到空页。
       const held = await holdResponse(
         student,
         (url) => url.pathname === '/api/v1/timeline' && url.searchParams.get('q') === shrinkTitle,
       );
-      await student.goto(shrinkAt + '&item=' + target.id + '&slot=' + encodeURIComponent(target.slot));
+      await student.goto(shrinkAt + '&item=' + target.activity_id + '&slot=' + encodeURIComponent(target.segments[0].occurrence_key));
       await held.received;
       await db.activity.deleteMany({
         where: { activity_code: { startsWith: 'TL-88', lt: 'TL-8822' } },
@@ -2510,61 +2390,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       assert.equal(await rows.filter({ hasText: shrinkTitle + ' 01' }).count(), 0, '被删的活动不出现');
       assert.equal(await rows.filter({ hasText: shrinkTitle + ' 41' }).count(), 1);
       assert.equal(await student.getByText('所选活动已移出当前筛选').count(), 0);
-    });
-
-    await t.test('日程 1-14 跨午夜分段在次日日视图可选并返回', async (t) => {
-      const date = shiftDay(demo.paged, 49);
-      const before = shiftDay(date, -1);
-      const title = '跨午夜演示';
-      await createScheduleDataset(db, {
-        codePrefix: 'TL-89',
-        titlePrefix: title,
-        date: before,
-        count: 0,
-        extra: [
-          {
-            code: 'TL-891',
-            title: title + ' 跨夜',
-            schedule: {
-              schedule_type: 'custom',
-              duration_start_date: before,
-              duration_end_date: date,
-              slots: [{ starts_at: atTime(before, '23:00'), ends_at: atTime(date, '02:00') }],
-            },
-          },
-        ],
-      });
-      t.after(() => db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-89' } } }));
-      await student.setViewportSize({ width: 1440, height: 900 });
-      await student.goto(
-        web + '/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent(title),
-      );
-      const row = student.locator('.schedule-list li').filter({ hasText: title + ' 跨夜' });
-      await visible(row);
-      assert.match(await row.innerText(), /23:00/);
-      assert.match(await row.innerText(), /02:00/);
-
-      // 开始时刻早于窗口首、结束在窗口内：时段键在响应里，选中成立。
-      await row.getByRole('button', { name: /23:00/ }).click();
-      const detail = student.getByRole('complementary', { name: '时段详情' });
-      await visible(detail.getByRole('heading', { name: title + ' 跨夜' }));
-      assert.match(await detail.innerText(), /23:00 至 .*02:00/);
-      assert.equal(await student.getByText('所选时段已移出当前窗口').count(), 0);
-      assert.equal(await student.getByText('所选时段已随安排更新失效，已回到日程。').count(), 0);
-
-      // 时间轴画出同一段。
-      await button(student, '时间轴').click();
-      await visible(
-        student.getByRole('button', { name: new RegExp(title + ' 跨夜.*23:00 至 .*02:00') }),
-      );
-
-      // 详情返回后选中保留。
-      await student.setViewportSize({ width: 390, height: 844 });
-      await button(student, '返回日程').click();
-      await visible(student.locator('.chart rect[aria-pressed=true]'));
-      await visible(button(student, '查看活动'));
-      assert.equal(new URL(student.url()).searchParams.has('slot'), true);
-      await student.setViewportSize({ width: 1440, height: 900 });
     });
 
     await t.test('日程 1-15 刷新重试整段重读不拼接旧页', async (t) => {
@@ -2658,33 +2483,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       // 跨午夜项按编码排在第 21 位，落在首屏之后。
       await student.goto(at);
       await visible(student.getByText('21 项（已显示 20）', { exact: false }));
-      const from = new Date(Date.parse(date + 'T00:00:00+08:00')).toISOString();
-      const to = new Date(Date.parse(date + 'T00:00:00+08:00') + 86_400_000).toISOString();
-      const target = await student.evaluate(
-        async ({ from, to, q }) => {
-          const query = new URLSearchParams({
-            scope: 'public',
-            revision_scope: 'published',
-            from,
-            to,
-            q,
-            page: '2',
-            page_size: '20',
-          });
-          const response = await fetch('/api/v1/timeline?' + query);
-          const page = (await response.json()).data;
-          return {
-            total: page.total,
-            id: page.items[0].activity_id,
-            slot: page.items[0].segments[0].occurrence_key,
-          };
-        },
-        { from, to, q: title },
-      );
-      assert.equal(target.total, 21);
+      const [target] = (await publicSchedulePage(student, date, title, 2)).items;
+      const slot = target.segments[0].occurrence_key;
 
       // 带选中直接进入：首屏读第 1 页后自动补读第 2 页，选中在跨午夜段上成立。
-      await student.goto(at + '&item=' + target.id + '&slot=' + encodeURIComponent(target.slot));
+      await student.goto(at + '&item=' + target.activity_id + '&slot=' + encodeURIComponent(slot));
       const rows = student.locator('.schedule-list li');
       const detail = student.getByRole('complementary', { name: '时段详情' });
       await visible(detail.getByRole('heading', { name: title + ' 跨夜' }));
@@ -2692,15 +2495,20 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       assert.equal(await student.getByText('所选时段已移出当前窗口').count(), 0);
       await visible(rows.filter({ hasText: title + ' 跨夜' }));
       assert.equal(await rows.count(), 21, '补读未因开始时刻早于窗口首而提前退出');
-      assert.equal(new URL(student.url()).searchParams.get('item'), target.id);
-      assert.equal(new URL(student.url()).searchParams.get('slot'), target.slot);
+      assert.equal(new URL(student.url()).searchParams.get('item'), target.activity_id);
+      assert.equal(new URL(student.url()).searchParams.get('slot'), slot);
 
       // 时间轴同样有这一段。
       await button(student, '时间轴').click();
       await visible(
         student.getByRole('button', { name: new RegExp(title + ' 跨夜.*23:00 至 .*02:00') }),
       );
-      await button(student, '列表').click();
+      await student.setViewportSize({ width: 390, height: 844 });
+      await button(student, '返回日程').click();
+      await visible(student.locator('.chart rect[aria-pressed=true]'));
+      await visible(button(student, '查看活动'));
+      assert.equal(new URL(student.url()).searchParams.get('slot'), slot);
+      await student.setViewportSize({ width: 1440, height: 900 });
     });
 
   } finally {

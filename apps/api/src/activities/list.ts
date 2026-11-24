@@ -38,6 +38,7 @@ export async function activityViews(
   scope: Scope,
   q: Query,
   studentId?: string,
+  onMatch?: (view: View) => void,
 ) {
   const { page, page_size, skip } = pagination(q);
   const matches = contentFilter(q);
@@ -109,6 +110,7 @@ export async function activityViews(
             continue;
           const view = project(data, scope, now);
           if (!view || !matches(view)) continue;
+          onMatch?.(view);
           if (derived) {
             total++;
             if (total <= skip || items.length === page_size) continue;

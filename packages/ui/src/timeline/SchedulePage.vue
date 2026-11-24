@@ -20,7 +20,7 @@ import {
   timelineColors,
 } from '../activityDisplay';
 import { units, validDate, validUnit, dateWindow, shiftDate, windowLabel } from './window';
-import { createScheduleRange } from './scheduleRange';
+import { createScheduleRange, type RangeIntent } from './scheduleRange';
 import {
   campusOptionsFor,
   ownerOptionsFor,
@@ -32,7 +32,7 @@ import ScheduleDatePicker from './ScheduleDatePicker.vue';
 import TimelineChart from './TimelineChart.vue';
 
 type Query = GetTimelineData['query'];
-type LoadMode = 'initial' | 'refresh' | 'more' | 'retry';
+type LoadMode = Exclude<RangeIntent['kind'], 'focus'>;
 
 const props = defineProps<{ scope: Query['scope']; showPersonalScope?: boolean }>();
 const scopes = { public: '活动日程', mine: '活动日程', managed: '本人管理日程', all: '全院日程' };
@@ -85,21 +85,13 @@ const query = computed<Query>(() => ({
   review_status: route.query.pending ? 'pending_review' : undefined,
 }));
 
-// 查询以本轮开始时的条件为准；条件变化由代际截断旧轮，不会串到新条件上。
 const pageSize = 20;
-let readParams!: Query;
-let lastReadError = '';
 const readPage = async (page: number) => {
-  try {
-    const { data } = await getTimeline({
-      query: { ...readParams, page, page_size: pageSize },
-      throwOnError: true,
-    });
-    return data.data;
-  } catch (e) {
-    lastReadError = e instanceof Error ? e.message : '读取活动日程失败';
-    throw e;
-  }
+  const { data, response } = await getTimeline({
+    query: { ...query.value, page, page_size: pageSize },
+    throwOnError: true,
+  });
+  return { ...data.data, rangeKey: response.headers.get('X-Timeline-Range') };
 };
 
 const schedule = createScheduleRange(readPage, {
@@ -144,10 +136,9 @@ const ownerOptions = computed(() =>
   ownerOptionsFor(lastPage.value, String(route.query.owner || '')),
 );
 const error = ref('');
-let retryMode: LoadMode = 'initial';
 let lastMode: LoadMode = 'initial';
 let pendingRefresh = false;
-// 条件切换从发起到本轮结束都算读取中：旧结果仍留在画面上，但不再接受点击与加载更多。
+// 切换查询时立即撤下旧结果，等待中的新查询也计入读取状态。
 // 计数是响应式的：行按钮按它呈禁用态，与「加载更多」在读取中禁用一致。
 const switching = ref(0);
 
@@ -170,8 +161,7 @@ function applySelection() {
   clearSelection();
 }
 
-/** 选中活动不在已加载范围且还有更多页时，按 §1.6 补读到它或范围耗尽；一次挂载最多一次。 */
-let backfilled = false;
+/** 选中活动不在已加载范围且还有更多页时，按 §1.6 补读到它或范围耗尽。 */
 function needsBackfill() {
   const item = typeof route.query.item === 'string' ? route.query.item : undefined;
   return !!item && !rows.value.some((row) => row.activity_id === item) && hasMore.value;
@@ -179,23 +169,22 @@ function needsBackfill() {
 
 async function load(mode: LoadMode) {
   if (mode !== 'initial' && (loading.value || switching.value > 0)) return;
-  readParams = { ...query.value };
   if (mode !== 'retry') lastMode = mode;
   if (mode === 'initial') switching.value += 1;
   error.value = '';
   let refreshAfter = false;
   try {
-    let outcome = await schedule.run(mode === 'retry' ? { kind: 'retry' } : { kind: mode });
-    if (outcome.status === 'ok' && !backfilled && needsBackfill()) {
-      backfilled = true;
-      outcome = await schedule.run({ kind: 'focus', activityId: String(route.query.item) });
+    let outcome = await schedule.run({ kind: mode });
+    while (outcome.status === 'ok' && needsBackfill()) {
+      const item = String(route.query.item);
+      outcome = await schedule.run({ kind: 'focus', activityId: item });
+      if (route.query.item === item) break;
     }
     if (outcome.status === 'aborted') return;
     if (outcome.status !== 'ok') {
-      retryMode = 'retry';
       pendingRefresh = false;
       if (outcome.status === 'unstable') {
-        error.value = pages.value.length ? '状态待刷新，请重试' : lastReadError || '读取活动日程失败';
+        error.value = pages.value.length ? '状态待刷新，请重试' : '日程仍在变化，请重新读取';
         return;
       }
       if (outcome.forbidden) {
@@ -204,11 +193,10 @@ async function load(mode: LoadMode) {
       } else if (pages.value.length) {
         error.value = lastMode === 'more' ? '未能加载更多，请重试' : '状态待刷新，请重试';
       } else {
-        error.value = lastReadError;
+        error.value = outcome.message;
       }
       return;
     }
-    retryMode = 'initial';
     applySelection();
     if (pendingRefresh) {
       pendingRefresh = false;
@@ -290,7 +278,7 @@ watch(
 watch([() => route.query.item, () => route.query.slot], () => {
   if (!route.query.item || loading.value || error.value) return;
   if (selection.value.kind === 'kept') return;
-  if (hasMore.value) void load('more');
+  if (needsBackfill()) void load('refresh');
   else applySelection();
 });
 onMounted(() => {
@@ -484,7 +472,7 @@ onUnmounted(() => {
     <template v-else>
       <p v-if="error" class="notice" role="status">
         {{ error }}
-        <button @click="load(retryMode)">重试</button>
+        <button @click="load('retry')">重试</button>
       </p>
       <p v-if="selectionMessage" role="status" class="notice">{{ selectionMessage }}</p>
       <div v-if="!rows.length" class="empty-state">
