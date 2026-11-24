@@ -27,7 +27,14 @@ start() {
       if ready "$url" "$marker"; then return; fi
       sleep 1
     done
-    fail "端口 $port 上的服务未通过检查，请查看 $log。"
+    fail "端口 $port 上的服务未通过检查，请查看 ${log}。"
+  fi
+  if [[ "$task" == dev:api ]]; then
+    local step
+    echo "正在生成接口和数据库客户端，并应用待执行的开发库迁移…"
+    for step in contracts:generate db:generate db:migrate; do
+      pnpm "$step" </dev/null || fail "${step} 失败，请查看上方输出。"
+    done
   fi
   echo "正在启动 $task …"
   nohup pnpm "$task" </dev/null >"$log" 2>&1 &
@@ -37,7 +44,7 @@ start() {
     kill -0 "$pid" 2>/dev/null || break
     sleep 1
   done
-  fail "$task 启动失败，请查看 $PWD/$log。"
+  fail "$task 启动失败，请查看 $PWD/${log}。"
 }
 start dev:api 3000 http://127.0.0.1:3000/api/v1/auth/csrf csrf_token
 start dev:web 5173 "$scheme://localhost:5173/" '/src/main.ts'
