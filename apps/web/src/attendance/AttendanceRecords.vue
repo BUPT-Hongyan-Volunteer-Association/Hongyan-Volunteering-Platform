@@ -237,7 +237,6 @@ onUnmounted(() => { mounted = false; });
 
 <style scoped>
 .filters {
-  align-items: center;
   gap: 12px 16px;
   margin-bottom: 20px;
 }
@@ -263,13 +262,10 @@ onUnmounted(() => { mounted = false; });
 }
 .date-and-status {
   display: grid;
-  grid-template-columns: minmax(0, 11rem) minmax(0, 8.25rem);
+  grid-template-columns: repeat(2, minmax(0, max-content));
+  --select-height: var(--date-field-height);
   align-items: start;
   gap: 12px;
-}
-.date-and-status :deep(.el-select__wrapper) { min-height: 40px; }
-@media (max-width: 700px), (pointer: coarse) {
-  .date-and-status :deep(.el-select__wrapper) { min-height: 44px; }
 }
 .identity-row {
   display: flex;
@@ -277,7 +273,6 @@ onUnmounted(() => { mounted = false; });
   align-items: end;
   gap: 12px 16px;
 }
-.date-field { font-variant-numeric: tabular-nums; }
 .date-field,
 .date-and-status label,
 .identity-row label,

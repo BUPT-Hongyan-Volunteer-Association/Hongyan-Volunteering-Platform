@@ -2019,6 +2019,19 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await link(owner, '现场人员记录').click();
       await visible(owner.getByText('本活动暂无现场异常。'));
       await button(owner, '登记异常').click();
+      const dateButton = button(owner, '登记服务日期');
+      await dateButton.click();
+      const calendar = owner.locator('.schedule-date-menu:visible');
+      await visible(calendar);
+      const membership = await holdResponse(owner, '**/organizer/activities/*/members');
+      try {
+        await owner.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await membership.received;
+        assert.ok(await dateButton.isDisabled());
+        await calendar.waitFor({ state: 'hidden' });
+      } finally {
+        await membership.release();
+      }
       await chooseDate(owner, '登记服务日期', date);
       await pickOption(owner, '异常类型', '迟到');
       const people = owner.getByRole('group', { name: '报名人员' });

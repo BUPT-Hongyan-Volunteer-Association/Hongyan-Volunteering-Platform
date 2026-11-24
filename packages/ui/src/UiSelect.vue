@@ -60,7 +60,7 @@ function select(value: T) {
   vertical-align: middle;
 }
 .platform-select .el-select__wrapper {
-  min-height: 36px;
+  min-height: var(--select-height, 36px);
 }
 .platform-select .el-select__wrapper.is-focused {
   outline: 2px solid var(--brand);

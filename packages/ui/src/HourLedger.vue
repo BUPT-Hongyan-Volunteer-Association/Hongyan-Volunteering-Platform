@@ -172,9 +172,9 @@ defineExpose({ refresh, clear });
 </template>
 <style scoped>
 .hour-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-block: 16px; }
-.hour-filters > label { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; }
+.hour-filters > label { display: inline-flex; align-items: center; gap: 8px; }
 .hour-filters > label input { margin: 0; }
-.hour-filters > button { min-height: 40px; }
+.hour-filters > :is(label, button) { min-height: var(--date-field-height); }
 .ledger-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; background: var(--surface); padding: 10px 14px; margin-bottom: 12px; }
 .ledger-summary p { margin: 0; }
 .ledger-summary strong { color: var(--brand); font-size: 20px; font-variant-numeric: tabular-nums; }
@@ -184,9 +184,6 @@ defineExpose({ refresh, clear });
 .ledger-table th, .ledger-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
 .ledger-table small { display: block; color: var(--muted); }
 .ledger-source { display: grid; gap: 4px; min-width: 10rem; max-width: 24rem; font-size: 13px; }
-@media (max-width: 700px), (pointer: coarse) {
-  .hour-filters > :is(label, button) { min-height: 44px; }
-}
 @media (max-width: 700px) {
   .ledger-table thead { position: absolute; clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; }
   .ledger-table tbody, .ledger-table tbody tr, .ledger-table tbody th { display: block; }
