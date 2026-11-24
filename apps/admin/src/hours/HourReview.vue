@@ -6,6 +6,7 @@ import {
   listIncidentsForReview, reviewHourBatch, type HourBatch, type HourBatchReviewDecision,
   type HourMisconductReviewInput, type Profile,
 } from '@hongyan/contracts';
+import StatusFilter from '@hongyan/ui/StatusFilter.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import Pager from '@hongyan/ui/Pager.vue';
 import HourWarnings from '@hongyan/ui/HourWarnings.vue';
@@ -17,8 +18,6 @@ const route = useRoute(), router = useRouter();
 const id = computed(() => String(route.params.id ?? ''));
 const queuePage = computed(() => pageNumber(route.query.page));
 const status = computed(() => String(route.query.status ?? 'pending_review') as HourBatch['status'] | 'all');
-const filters = [{ value: 'all', label: '全部状态' },
-  ...Object.entries(statuses).map(([value, label]) => ({ value, label }))];
 const { data: queue, error: queueError, loading: queueLoading, refresh: loadQueue } = usePageRead(
   () => [id.value, queuePage.value, status.value],
   async (signal) => id.value ? undefined : (await listHourBatchesForReview({
@@ -150,9 +149,8 @@ async function decide(decision: 'approved' | 'rejected') {
 <template>
   <section v-if="!id">
     <h1>时长审核</h1>
-    <label class="queue-filter">批次状态
-      <UiSelect label="批次状态" :model-value="status" :options="filters" @update:model-value="setQueue({ status: String($event), page: 1 })" />
-    </label>
+    <StatusFilter label="批次状态" :model-value="status" :options="{ all: '全部', ...statuses }"
+      @update:model-value="setQueue({ status: $event, page: 1 })" />
     <p v-if="queueError" role="alert">{{ queueError }} <button @click="loadQueue()">重读队列</button></p>
     <p v-else-if="queueLoading" role="status">正在读取时长批次…</p>
     <p v-else-if="!queue?.total">当前条件下没有时长批次。</p>
@@ -178,13 +176,14 @@ async function decide(decision: 'approved' | 'rejected') {
         <div class="page-title"><h1>时长批次审核</h1><span class="state-chip">{{ statuses[batch.status] }}</span></div>
         <p>{{ batch.activity_title }} · {{ batch.activity_code }}</p>
         <p class="meta-line">{{ batch.batch_code }} · {{ modes[batch.mode] }} · 送审人 {{ batch.submitted_by_name ?? '—' }} · {{ beijing(batch.submitted_at) }}</p>
-        <a v-if="batch.source_file_id" :href="'/api/v1/files/' + batch.source_file_id + '/download'">下载原工作簿 · {{ batch.source_file_name }}</a>
+        <a class="button" v-if="batch.source_file_id" :href="'/api/v1/files/' + batch.source_file_id + '/download'">下载原工作簿 · {{ batch.source_file_name }}</a>
         <p v-if="batch.source_description">批次说明：{{ batch.source_description }}</p>
         <p v-if="batch.reviewed_at">完成于 {{ beijing(batch.reviewed_at) }}<span v-if="batch.decision_reason"> · {{ batch.decision_reason }}</span></p>
       </header>
       <div class="page-actions review-tools">
         <strong>全批 {{ batch.row_count ?? 0 }} 行 · 预计差额 {{ signed(batch.projected_delta_hours) }} 小时</strong>
-        <label><input type="checkbox" v-model="only" />只看待核实行</label>
+        <StatusFilter label="原表行范围" :model-value="only ? 'pending' : 'all'"
+          :options="{ all: '全部', pending: '待核实行' }" @update:model-value="only = $event === 'pending'" />
         <label class="size">每页
           <UiSelect label="每页" v-model="size" :options="[5, 20, 50].map(value => ({ value, label: value + ' 条' }))" />
         </label>
@@ -257,7 +256,6 @@ async function decide(decision: 'approved' | 'rejected') {
 </template>
 
 <style scoped>
-.queue-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-block: 14px; }
 .review-tools { margin-block: 14px; }
 .review-tools .size { display: flex; align-items: center; gap: 8px; --select-width: 6rem; }
 .hour-review { overflow-wrap: anywhere; }

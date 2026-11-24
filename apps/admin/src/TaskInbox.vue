@@ -7,7 +7,7 @@ import { usePageRead } from '@hongyan/ui/usePageRead';
 const tasks = [
   { to: '/hours', label: '时长批次', read: (signal: AbortSignal) =>
     listHourBatchesForReview({ query: { status: 'pending_review', page_size: 1 }, signal, throwOnError: true }) },
-  { to: '/manage/corrections?group_status=pending_review', label: '错账修复组', read: (signal: AbortSignal) =>
+  { to: '/manage/corrections?group_status=pending_review', label: '错帐修复', read: (signal: AbortSignal) =>
     listHourCorrectionGroups({ query: { status: 'pending_review', page_size: 1 }, signal, throwOnError: true }) },
   { to: '/manage/incidents', label: '异常复核', read: (signal: AbortSignal) =>
     listIncidentsForReview({ query: { status: 'pending', page_size: 1 }, signal, throwOnError: true }) },

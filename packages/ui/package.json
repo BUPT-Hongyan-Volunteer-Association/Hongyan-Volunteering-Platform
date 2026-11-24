@@ -18,6 +18,7 @@
     "./activityFields": "./src/activityFields.ts",
     "./ActivitySnapshot.vue": "./src/ActivitySnapshot.vue",
     "./timeWindow": "./src/timeline/window.ts",
+    "./StatusFilter.vue": "./src/StatusFilter.vue",
     "./UiSelect.vue": "./src/UiSelect.vue",
     "./ActivityDateField.vue": "./src/ActivityDateField.vue",
     "./ServiceCalendar.vue": "./src/ServiceCalendar.vue",

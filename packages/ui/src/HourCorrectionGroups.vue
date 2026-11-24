@@ -6,6 +6,7 @@ import {
   reviewHourCorrectionGroup, withdrawHourCorrectionGroup, type HourCorrectionGroup, type Profile,
 } from '@hongyan/contracts';
 import Pager from './Pager.vue';
+import StatusFilter from './StatusFilter.vue';
 import RecordWorkspace from './RecordWorkspace.vue';
 import HourCorrectionForm from './HourCorrectionForm.vue';
 import HourWarnings from './HourWarnings.vue';
@@ -106,25 +107,27 @@ async function act(decision: 'approved' | 'rejected' | 'withdrawn') {
 </script>
 <template>
   <section class="corrections">
-    <h1>错账修复组</h1>
+    <h1>错帐修复</h1>
     <p v-if="savedMessage" role="status">{{ savedMessage }}</p>
     <template v-if="creating">
-      <RouterLink class="back-link" :to="{ path: base, query: listQuery }">返回修复组</RouterLink>
+      <RouterLink class="back-link" :to="{ path: base, query: listQuery }">返回修复列表</RouterLink>
       <HourCorrectionForm :activity-id="activityId" :admin="!!admin" :disabled="writesPaused" @saved="saved" @denied="emit('denied')" />
     </template>
     <RecordWorkspace v-else :selected="!!id">
       <template #list>
-        <div class="page-actions">
-          <RouterLink class="button" :to="{ path: base, query: { ...listQuery, new: '1' } }">新建修复组</RouterLink>
-          <RouterLink v-if="admin" :to="{ path: base, query: { group_status: mode ? undefined : 'pending_review' } }">{{ mode ? '显示全部' : '只看待审核' }}</RouterLink>
+        <div class="page-actions correction-tools">
+          <RouterLink class="button" :to="{ path: base, query: { ...listQuery, new: '1' } }">新建修复申请</RouterLink>
+          <StatusFilter v-if="admin" label="审核状态" :model-value="mode ?? 'all'"
+            :options="{ all: '全部', pending_review: '待审核' }"
+            @update:model-value="router.push({ path: base, query: { group_status: $event === 'all' ? undefined : $event } })" />
         </div>
-        <p v-if="listError" role="alert">{{ listError }} <button @click="loadQueue()">重读修复组</button></p>
-        <p v-else-if="listLoading && !queue" role="status">正在读取修复组…</p>
-        <p v-else-if="!queue?.total">当前没有修复组。</p>
+        <p v-if="listError" role="alert">{{ listError }} <button @click="loadQueue()">重读修复列表</button></p>
+        <p v-else-if="listLoading && !queue" role="status">正在读取修复列表…</p>
+        <p v-else-if="!queue?.total">当前没有修复申请。</p>
         <div v-else class="entry-list">
           <RouterLink v-for="item in queue.items" :key="item.id" :to="{ path: base + '/' + item.id, query: listQuery }"
             :class="{ selected: item.id === id }">
-            <div><strong>{{ item.items.length }} 对错账修复</strong><small>{{ beijing(item.created_at) }} · {{ item.id.slice(0, 8) }}</small></div>
+            <div><strong>{{ item.items.length }} 对错帐修复</strong><small>{{ beijing(item.created_at) }} · {{ item.id.slice(0, 8) }}</small></div>
             <span class="state-chip">{{ labels[item.status] }}</span>
           </RouterLink>
         </div>
@@ -132,7 +135,7 @@ async function act(decision: 'approved' | 'rejected' | 'withdrawn') {
           @change="router.push({ path: route.path, query: { ...listQuery, group_page: String($event) } })" />
       </template>
       <template #detail>
-        <RouterLink class="back-link" :to="{ path: base, query: listQuery }">返回修复组</RouterLink>
+        <RouterLink class="back-link" :to="{ path: base, query: listQuery }">返回修复列表</RouterLink>
         <p v-if="detailError" role="alert">{{ detailError }} <button @click="loadGroup()">重读详情</button></p>
         <p v-else-if="detailLoading && !group" role="status">正在读取修复快照…</p>
         <template v-if="group">
@@ -173,6 +176,7 @@ async function act(decision: 'approved' | 'rejected' | 'withdrawn') {
   </section>
 </template>
 <style scoped>
+.correction-tools { align-items: end; }
 .corrections { min-width: 0; overflow-wrap: anywhere; }
 .entry-list small { display: block; color: var(--muted); }
 .entry-list a.selected { border-inline-start: 3px solid var(--brand); }

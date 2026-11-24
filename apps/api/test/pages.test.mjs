@@ -259,11 +259,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
           '时长批次',
           '时长台账',
           '漏记反馈',
-          '错账修复组',
+          '错帐修复',
           '异常记录',
         ]) {
           const nav = owner.getByRole('navigation', { name: '活动工作区' });
-          const parent = { '退出与恢复': '报名名单', '漏记反馈': '时长台账', '错账修复组': '时长台账', '异常记录': '现场人员记录' }[tab];
+          const parent = { '退出与恢复': '报名名单', '漏记反馈': '时长台账', '错帐修复': '时长台账', '异常记录': '现场人员记录' }[tab];
           if (parent) await link(nav, parent).click();
           await link(parent ? owner.getByRole('main') : nav, tab).click();
           await visible(nav.locator('a.current').filter({ hasText: parent ?? tab }));
@@ -287,7 +287,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
           const empty = {
             退出与恢复: '暂无符合条件的退出申请。',
             漏记反馈: '当前没有反馈。',
-            错账修复组: '当前没有修复组。',
+            错帐修复: '当前没有修复申请。',
             时长台账: '当前条件下没有时长记录。',
             异常记录: '没有异常记录。',
           }[tab];
@@ -306,16 +306,38 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
         if (await button(teacher, '展开导航').isVisible())
           await button(teacher, '展开导航').click();
         const nav = teacher.getByRole('navigation', { name: '后台导航' });
+        const inboxTitleSize = await teacher.getByRole('heading', { level: 1, name: '待办' })
+          .evaluate((el) => getComputedStyle(el).fontSize);
         for (const section of [
-          '错账修复组',
+          '错帐修复',
           '异常复核',
           '申诉与更正',
           '账号与角色',
           '通知失败队列',
         ]) {
           await nav.getByRole('link', { name: section, exact: true }).click();
+          if (section === '异常复核') {
+            const title = teacher.getByRole('heading', { level: 1, name: '异常记录', exact: true });
+            assert.equal(await title.evaluate((el) => getComputedStyle(el).fontSize), inboxTitleSize);
+          }
+          if (section === '错帐修复') {
+            const filter = teacher.getByRole('group', { name: '审核状态' });
+            const pending = button(filter, '待审核');
+            const all = button(filter, '全部');
+            assert.equal(await all.getAttribute('aria-pressed'), 'true');
+            await pending.click();
+            await teacher.waitForURL('**/manage/corrections?group_status=pending_review');
+            assert.equal(await pending.getAttribute('aria-pressed'), 'true');
+            await teacher.reload();
+            await visible(pending);
+            if (await button(teacher, '展开导航').isVisible()) await button(teacher, '展开导航').click();
+            assert.equal(await pending.getAttribute('aria-pressed'), 'true');
+            await all.click();
+            await teacher.waitForURL('**/manage/corrections');
+            assert.equal(await all.getAttribute('aria-pressed'), 'true');
+          }
           const empty = {
-            错账修复组: '当前没有修复组。',
+            错帐修复: '当前没有修复申请。',
             异常复核: '没有异常记录。',
             申诉与更正: '当前没有反馈。',
           }[section];
@@ -328,6 +350,23 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
           await visible(teacher.locator('article dl'));
           await fits(teacher);
           await link(teacher, '返回' + section).click();
+        }
+        for (const [section, label, choice, key, value] of [
+          ['时长审核', '批次状态', '系统校验失败', 'status', 'failed'],
+          ['活动审核', '审核状态', '已批准', 'status', 'approved'],
+          ['异常复核', '异常状态', '待核实', 'status', 'pending'],
+          ['申诉与更正', '反馈状态', '处理中', 'appeal_status', 'in_review'],
+          ['学生档案', '账号状态', '停用', 'status', 'inactive'],
+        ]) {
+          await link(nav, section).click();
+          const group = teacher.getByRole('group', { name: label, exact: true });
+          const before = await group.getByRole('button', { pressed: true }).innerText();
+          await button(group, choice).click();
+          await teacher.waitForURL((url) => url.searchParams.get(key) === value);
+          assert.equal(await group.getByRole('button', { pressed: true }).innerText(), choice);
+          await fits(teacher);
+          await teacher.goBack();
+          await visible(group.getByRole('button', { name: before, pressed: true, exact: true }));
         }
         await nav.getByRole('link', { name: '审计记录', exact: true }).click();
         await teacher.waitForURL('**/manage/audit');
@@ -435,7 +474,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await link(teacher, '连接状态').click();
       await visible(teacher.getByRole('heading', { name: '连接失败' }));
       await link(teacher, '全院日程').click();
-      await teacher.getByLabel('待审核', { exact: true }).check();
+      await button(teacher.getByRole('group', { name: '审核状态' }), '待审核').click();
       await teacher.goto(admin + '/schedule?date=' + firstDate + '&pending=1&unit=day');
       await button(teacher, '校园服务甲').click();
       await link(teacher, '查看待审版本').click();
@@ -1097,16 +1136,16 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
           key === 'revision' ? u.searchParams.get(key) === 'working' : !u.searchParams.has(key),
         );
       }
-      for (const [label, key] of [
-        ['进行中', 'ongoing'],
-        ['待审核', 'pending'],
-      ]) {
-        const check = teacher.getByRole('checkbox', { name: label, exact: true });
-        await check.check();
-        await teacher.waitForURL((u) => u.searchParams.get(key) === '1');
-        await check.uncheck();
-        await teacher.waitForURL((u) => !u.searchParams.has(key));
-      }
+      const ongoing = teacher.getByRole('checkbox', { name: '进行中' });
+      await ongoing.check();
+      await teacher.waitForURL((u) => u.searchParams.get('ongoing') === '1');
+      await ongoing.uncheck();
+      await teacher.waitForURL((u) => !u.searchParams.has('ongoing'));
+      const reviewStatus = teacher.getByRole('group', { name: '审核状态' });
+      await button(reviewStatus, '待审核').click();
+      await teacher.waitForURL((u) => u.searchParams.get('pending') === '1');
+      await button(reviewStatus, '全部').click();
+      await teacher.waitForURL((u) => !u.searchParams.has('pending'));
       let previousList;
       for (const label of ['校区', '报名阶段', '活动状态', '展示版本', '负责人', '校区']) {
         const { trigger, list } = await openOptions(teacher, label);
@@ -2080,7 +2119,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       assert.equal(await supplemented.count(), 2);
       await fits(owner);
     });
-    await t.test('四个账号完成真实送审、入账、错账修复和分别结案，逐行审核跨页保留意见', async () => {
+    await t.test('四个账号完成真实送审、入账、错帐修复和分别结案，逐行审核跨页保留意见', async () => {
       await checkLedgerPages({ db, web, admin, owner, teacher, student, secondStudent: helper,
         worker: api.get(NoticeWorker), fits, pickOption, capture, holdResponse, settleRender });
     });

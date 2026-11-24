@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import UiSelect from '@hongyan/ui/UiSelect.vue';
+import StatusFilter from '@hongyan/ui/StatusFilter.vue';
 import { computed, nextTick, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -169,24 +169,8 @@ watch(
 <template>
   <div class="page-heading">
     <h1>活动审核</h1>
-    <label v-if="!route.params.id" class="review-filter"
-      >审核状态
-      <UiSelect
-        label="审核状态"
-        :model-value="status"
-        :options="[
-          { value: 'pending', label: '待审' },
-          { value: 'approved', label: '已批准' },
-          { value: 'rejected', label: '已驳回' },
-        ]"
-        @update:model-value="
-          savedScroll = 0;
-          router.push({ path: '/reviews', query: { status: $event, page: 1 } });
-        "
-      />
-    </label>
     <RouterLink
-      v-else
+      v-if="route.params.id"
       class="button"
       :to="scheduleReturn() || { path: '/reviews', query: route.query }"
       ><UiIcon name="ArrowLeft" />{{ scheduleReturn() ? '返回日程' : '返回审核队列' }}</RouterLink
@@ -197,6 +181,9 @@ watch(
   <p v-if="loading" role="status">正在读取…</p>
   <RecordWorkspace :selected="!!route.params.id">
     <template #list>
+      <StatusFilter v-if="!route.params.id" label="审核状态" :model-value="status"
+        :options="{ pending: reviewLabels.pending, approved: reviewLabels.approved, rejected: reviewLabels.rejected }"
+        @update:model-value="savedScroll = 0; router.push({ path: '/reviews', query: { status: $event, page: 1 } })" />
       <p v-if="queueError" role="alert">
         {{ queueError }} <button @click="loadQueue">重新读取队列</button>
       </p>
@@ -287,13 +274,6 @@ watch(
   </RecordWorkspace>
 </template>
 <style scoped>
-.review-filter {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: var(--muted);
-}
 .entry-list small {
   display: block;
   color: var(--muted);
