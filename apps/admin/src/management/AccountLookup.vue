@@ -144,10 +144,6 @@ function saved(roles: AccountRoles, notice: string) {
           <span v-if="!roleState.roles.length">无角色</span></dd>
       </dl>
       <p v-if="account.student_id">具备负责人资格不等于已加入某个活动。</p>
-      <CredentialResetForm v-if="!account.credential_pending" :key="'reset' + account.account_id + account.version"
-        :account="account" :self="account.account_id === profile.account_id" @saved="credentialReset" @reload="lookup" />
-      <AccountStatusForm v-if="technical || account.student_id" :key="account.account_id + account.version"
-        :account="account" :self="account.account_id === profile.account_id" @saved="statusSaved" @student-saved="studentStatusSaved" @reload="lookup" />
       <label v-if="technical" class="role-choice">要办理的角色
         <select v-model="managedRole"><option value="organizer">负责人</option><option value="reviewer">老师审核员</option><option value="tech_admin">技术管理员</option></select>
       </label>
@@ -156,6 +152,15 @@ function saved(roles: AccountRoles, notice: string) {
         :key="[account.account_id, roleState.version, managedRole].join('/')" :role="technical ? managedRole : 'organizer'"
         :account="account" :state="roleState" :now="now"
         @saved="saved" @reload="lookup" />
+      <details :key="account.account_id + ':' + account.version" class="account-security">
+        <summary>账号安全</summary>
+        <div class="page-actions">
+          <CredentialResetForm v-if="!account.credential_pending" :account="account" :self="account.account_id === profile.account_id"
+            @saved="credentialReset" @reload="lookup" />
+          <AccountStatusForm v-if="technical || account.student_id" :account="account" :self="account.account_id === profile.account_id"
+            @saved="statusSaved" @student-saved="studentStatusSaved" @reload="lookup" />
+        </div>
+      </details>
     </section>
   </section>
 </template>
@@ -173,5 +178,8 @@ function saved(roles: AccountRoles, notice: string) {
 .identity-card dt { color:var(--muted); }
 .identity-card dd { margin:0; overflow-wrap:anywhere; }
 .identity-card ul { list-style:none; margin:0; padding:0; }
-.identity-card p { border-top:1px solid var(--line); padding-top:12px; margin-bottom:0; }
+.identity-card > p { border-top:1px solid var(--line); padding-top:12px; margin-bottom:12px; }
+.account-security { margin-top:16px; border-top:1px solid var(--line); }
+.account-security summary { padding:12px 0; color:var(--ink); }
+.account-security .page-actions > :deep(form) { flex-basis:100%; min-width:0; }
 </style>

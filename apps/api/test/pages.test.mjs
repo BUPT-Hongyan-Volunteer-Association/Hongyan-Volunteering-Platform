@@ -17,6 +17,7 @@ const loginFailureMessage = '登录失败，请核对账号和密码。如果你
 const lostTeamMessage = '你已不在本活动团队，个人功能不受影响。';
 const link = (page, name) => page.getByRole('link', { name, exact: true });
 const button = (page, name) => page.getByRole('button', { name, exact: true });
+const accountSecurity = page => page.getByText('账号安全', { exact: true });
 const visible = (locator) => locator.first().waitFor({ state: 'visible' });
 
 async function openOptions(page, label) {
@@ -585,6 +586,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       await tech.goto(admin + '/manage/accounts');
       await tech.getByLabel('登录账号', { exact: true }).fill('demo.dual');
       await button(tech, '查询账号').click();
+      await accountSecurity(tech).click();
       await button(tech, '停用账号').click();
       await visible(tech.getByText('停用账号 · 兼任审核员（demo.dual）'));
       await tech.getByLabel('办理原因').fill('轮岗交接');
@@ -592,6 +594,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       await visible(tech.getByText('账号已停用，所有旧会话已撤销。'));
       await affected.reload();
       await visible(button(affected, '登录'));
+      await accountSecurity(tech).click();
       await button(tech, '启用账号').click();
       await tech.getByLabel('办理原因').fill('恢复履职');
       await button(tech, '确认启用').click();
@@ -604,6 +607,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       await visible(button(affected, '退出登录'));
       await tech.getByLabel('登录账号', { exact: true }).fill('demo.admin');
       await button(tech, '查询账号').click();
+      await accountSecurity(tech).click();
       await button(tech, '停用账号').click();
       await tech.getByLabel('办理原因').fill('核对最后一个管理员');
       await button(tech, '确认停用').click();
@@ -621,22 +625,34 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       await button(teacher, '查询账号').click();
       await button(teacher, '授予负责人资格').click();
       assert.equal(await teacher.getByLabel('办理原因').inputValue(), '');
-      await input.fill('0000000001');
-      await button(teacher, '查询账号').click();
-      await button(teacher, '授予负责人资格').click();
-      await teacher.getByLabel('限期授权').check();
-      await teacher.getByLabel('到期时间（北京时间）').fill('2099-06-30T23:59');
-      await teacher.getByLabel('办理原因').fill('合成志愿服务授权');
-      await button(teacher, '保存负责人资格').click();
-      await visible(teacher.getByText('负责人资格已保存，本次操作不会分配活动。'));
-      await visible(teacher.getByText(/有效至.*23:59/));
-      await student.goto(web + '/managed');
-      await visible(student.getByRole('heading', {name:'我的管理活动'}));
-      await button(teacher, '收回负责人资格').click();
-      await visible(teacher.getByText(/学生身份和历史记录保留/));
-      await teacher.getByLabel('办理原因').fill('合成授权结束');
-      await button(teacher, '确认收回资格').click();
-      await visible(teacher.getByText('已收回负责人资格，学生身份保留。'));
+      for (const width of [390, 1440]) {
+        await teacher.setViewportSize({ width, height: 900 });
+        await input.fill('0000000001');
+        await button(teacher, '查询账号').click();
+        const grant = button(teacher, '授予负责人资格');
+        await visible(grant);
+        const action = await grant.boundingBox();
+        const security = await accountSecurity(teacher).boundingBox();
+        assert.ok(action.y + action.height <= security.y);
+        assert.equal(await button(teacher, '重置登录凭证').isVisible(), false);
+        assert.equal(await button(teacher, '停用账号').isVisible(), false);
+        await fits(teacher);
+        await grant.click();
+        await teacher.getByLabel('限期授权').check();
+        await teacher.getByLabel('到期时间（北京时间）').fill('2099-06-30T23:59');
+        await teacher.getByLabel('办理原因').fill('合成志愿服务授权');
+        await button(teacher, '保存负责人资格').click();
+        await visible(teacher.getByText('负责人资格已保存，本次操作不会分配活动。'));
+        await visible(teacher.getByText(/有效至.*23:59/));
+        await visible(button(teacher, '调整有效期'));
+        await student.goto(web + '/managed');
+        await visible(student.getByRole('heading', {name:'我的管理活动'}));
+        await button(teacher, '收回负责人资格').click();
+        await visible(teacher.getByText(/学生身份和历史记录保留/));
+        await teacher.getByLabel('办理原因').fill('合成授权结束');
+        await button(teacher, '确认收回资格').click();
+        await visible(teacher.getByText('已收回负责人资格，学生身份保留。'));
+      }
       await student.reload();
       await visible(student.getByText('当前账号无活动管理权限。'));
       await student.goto(web + '/mine');
@@ -1770,6 +1786,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
         await teacher.getByLabel('学号或姓名').fill('0000000002');
         await button(teacher, '查询').click();
         await link(teacher, '核对同学甲的账号').click();
+        await accountSecurity(teacher).click();
         await button(teacher, '停用账号').click();
         await visible(teacher.getByText('停用账号 · 同学甲（0000000002）'));
         await visible(teacher.getByText(/重新启用后，如负责人资格仍有效/));
@@ -1785,6 +1802,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
           await page.goto(web + '/mine');
           await visible(button(page, '登录'));
         }
+        await accountSecurity(teacher).click();
         await button(teacher, '启用账号').click();
         await teacher.getByLabel('办理原因').fill('已核对本期名单');
         assert.equal(await button(teacher, '确认启用').isDisabled(), true);
@@ -1810,6 +1828,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 4 * 60_000 }
       await teacher.goto(admin + '/manage/accounts');
       await teacher.getByLabel('学生学号').fill('0000000002');
       await button(teacher, '查询账号').click();
+      await accountSecurity(teacher).click();
       await button(teacher, '重置登录凭证').click();
       await visible(teacher.getByText('重置登录凭证 · 同学甲（0000000002）'));
       const confirmed = teacher.getByLabel('我已人工核验申请人本人，并核对上述账号');
