@@ -121,15 +121,16 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
     if (!activity_id) throw new DeliveryError('通知事件缺少活动标识');
     await this.db.$transaction(async (tx) => {
       // 审批与投递共用活动锁，版本号和当前通知随回执一起提交。
-      const [activity] = await tx.$queryRaw<{ published_revision: number | null }[]>`
-        SELECT published_revision FROM activity WHERE id = ${activity_id}::uuid FOR UPDATE`;
+      const [activity] = await tx.$queryRaw<{ published_revision: number | null; status: string }[]>`
+        SELECT published_revision, status FROM activity WHERE id = ${activity_id}::uuid FOR UPDATE`;
       const existing = await tx.notice.findUnique({
         where: { source_event_id: event.id },
         select: { id: true },
       });
       let status = 'delivered';
       if (!existing) {
-        status = activity?.published_revision
+        const obsoleteGathering = event.event_type === 'gathering_supplement' && activity?.status !== 'published';
+        status = activity?.published_revision && !obsoleteGathering
           ? await this.publish(tx, event, activity_id, activity.published_revision, now)
           : 'superseded';
       }

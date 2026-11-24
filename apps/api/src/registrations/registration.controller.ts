@@ -10,7 +10,6 @@ import {
   Req,
 } from '@nestjs/common';
 import type {
-  ActivityInput,
   RegistrationDecision,
   ActivityPublicationContent,
   BulkRegistrationDecision,
@@ -23,7 +22,7 @@ import { validate } from '../activities/validation.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import { envelope, invalid, invisible } from '../http.js';
-import { canRecruit, decideBatch, apply, registrationView, rosterOrderBy, rosterSearchWhere, rosterWhere } from './registration.js';
+import { canRequest, canWithdraw, canDecide, decideBatch, apply, registrationView, rosterOrderBy, rosterSearchWhere, rosterWhere } from './registration.js';
 
 const zeroCounts: RosterStatusCounts = {
   submitted: 0,
@@ -89,7 +88,7 @@ export class RegistrationController {
             ? []
             : [{ activity_id: r.activity_id, revision: r.activity.published_revision }],
         );
-        const titles = new Map(
+        const approvals = new Map(
           (versions.length
             ? await tx.activityRevision.findMany({
                 where: { OR: versions, revision_state: 'approved' },
@@ -104,9 +103,10 @@ export class RegistrationController {
           total,
           items: rows.map((r) => ({
             ...registrationView(r),
-            activity_title: titles.get(r.activity_id)?.title,
-            can_request_exit: r.status === 'accepted' && !r.exit_requests.length && r.activity.status === 'published' && canRecruit(titles.get(r.activity_id), true),
-            can_request_restoration: r.status === 'exited' && !r.exit_requests.length && r.activity.status === 'published' && canRecruit(titles.get(r.activity_id)),
+            activity_title: approvals.get(r.activity_id)?.title,
+            can_withdraw: canWithdraw(r.activity.status, r.status),
+            can_request_exit: !r.exit_requests.length && canRequest('exit', r.activity.status, r.status, approvals.get(r.activity_id)),
+            can_request_restoration: !r.exit_requests.length && canRequest('restoration', r.activity.status, r.status, approvals.get(r.activity_id)),
             ...(r.exit_requests[0] && { [r.exit_requests[0].kind === 'exit' ? 'pending_exit_request_id' : 'pending_restoration_request_id']: r.exit_requests[0].id }),
           })),
         });
@@ -125,7 +125,7 @@ export class RegistrationController {
       async (tx) => {
         const activity = await tx.activity.findFirst({
           where: { id, ...scope },
-          select: { published_revision: true },
+          select: { published_revision: true, status: true },
         });
         if (!activity) invisible();
         const { page, page_size, skip } = pagination(q);
@@ -153,6 +153,7 @@ export class RegistrationController {
                 },
                 select: { content: true },
               });
+        const content = approved?.content as unknown as ActivityPublicationContent | undefined;
         const accepted_count = search
           ? await tx.registration.count({ where: { activity_id: id, status: 'accepted' } })
           : counts.accepted;
@@ -176,7 +177,8 @@ export class RegistrationController {
           total,
           status_counts: counts,
           accepted_count,
-          capacity: approved ? (approved.content as unknown as ActivityInput).capacity : 0,
+          capacity: content?.capacity ?? 0,
+          can_decide: canDecide(activity.status, content),
           items: rows.map((r) => ({
             ...registrationView(r),
             student_name: r.student.account.display_name,

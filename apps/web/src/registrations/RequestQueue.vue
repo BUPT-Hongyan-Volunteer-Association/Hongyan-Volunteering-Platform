@@ -17,6 +17,7 @@ import {
   type ExitRequest,
   type Registration,
 } from '@hongyan/contracts';
+import { noAccess, usePageRead } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 import { localDateTime } from '@hongyan/ui/activityDisplay';
 const props = defineProps<{
@@ -37,62 +38,35 @@ const states = {
   cancelled: '已取消',
 };
 const status = ref<ExitRequest['status'] | ''>(props.registration || props.requestId ? '' : 'pending');
-const page = ref(1),
-  total = ref(0);
-const rows = ref<ExitRequest[]>([]),
-  reason = ref(''),
-  selected = ref<ExitRequest>();
-const loading = ref(false),
-  saving = ref(false),
-  error = ref(''),
-  readError = ref(''),
-  message = ref('');
+const page = ref(1);
+const reason = ref(''), selected = ref<ExitRequest>();
+const saving = ref(false), error = ref(''), message = ref('');
 const requiresRead = ref(false);
-const paused = computed(
-  () => props.writesPaused || loading.value || saving.value || requiresRead.value || !!readError.value,
-);
 const command = createCommand();
-let serial = 0;
-async function load() {
-  const turn = ++serial;
-  loading.value = true;
-  readError.value = '';
-  selected.value = undefined;
-  try {
+let mounted = true;
+const { data: queue, loading, error: readError, refresh: load, clear: clearQueue } = usePageRead(
+  () => [kind.value, status.value, page.value, props.requestId, props.activityId, props.registration],
+  async signal => {
     const query = { page: page.value, page_size: 10 };
     const { data } = props.registration
       ? await (exit.value ? listMyExitRequests : listMyRestorationRequests)({
-          query: { ...query, activity_id: props.activityId },
-          throwOnError: true,
+          query: { ...query, activity_id: props.activityId }, signal, throwOnError: true,
         })
       : await (exit.value ? listExitRequests : listActivityRestorationRequests)({
           path: { id: props.activityId },
-          query: {
-            ...query,
-            scope: 'managed',
-            status: status.value || undefined,
-            request_id: props.requestId,
-          },
-          throwOnError: true,
+          query: { ...query, scope: 'managed', status: status.value || undefined, request_id: props.requestId },
+          signal, throwOnError: true,
         });
-    if (turn !== serial) return;
-    const last = Math.max(1, Math.ceil(data.data.total / 10));
-    if (page.value > last) {
-      page.value = last;
-      return;
-    }
-    rows.value = data.data.items;
-    total.value = data.data.total;
-    requiresRead.value = false;
-  } catch (e) {
-    if (turn === serial) {
-      rows.value = [];
-      readError.value = e instanceof Error ? e.message : '申请记录读取失败';
-    }
-  } finally {
-    if (turn === serial) loading.value = false;
-  }
-}
+    return data.data;
+  },
+);
+watch(queue, result => {
+  selected.value = undefined;
+  if (!result) return;
+  page.value = Math.min(page.value, Math.max(1, Math.ceil(result.total / result.page_size)));
+  requiresRead.value = false;
+});
+const paused = computed(() => props.writesPaused || loading.value || saving.value || requiresRead.value || !queue.value);
 watch(
   [kind, status, () => props.activityId],
   () => {
@@ -105,16 +79,15 @@ watch(
 watch(() => props.registration?.status, value => {
   if (value === 'exited') kind.value = 'restoration';
 });
-watch([kind, status, page, () => props.requestId, () => props.activityId, () => props.registration], load, { immediate: true });
-onUnmounted(() => {
-  serial++;
-});
+onUnmounted(() => { mounted = false; });
 async function act(
   action: 'withdrawRegistration' | 'create' | 'withdraw' | 'approved' | 'rejected',
   row?: ExitRequest,
 ) {
   if (paused.value) return;
-  const turn = serial;
+  const actionLabel = label.value;
+  const targetActivity = props.activityId;
+  const targetRequest = props.requestId;
   saving.value = true;
   error.value = '';
   const r = props.registration;
@@ -148,27 +121,22 @@ async function act(
       await write({ path: { id }, body, headers: command.headers(action, id, body), throwOnError: true });
     }
     command.confirmed();
-    if (turn !== serial) return;
+    if (!mounted || targetActivity !== props.activityId || targetRequest !== props.requestId) return;
     reason.value = '';
     message.value =
       action === 'withdrawRegistration'
         ? '已撤回报名。'
-        : label.value +
+        : actionLabel +
           '申请' +
           { create: '已提交', withdraw: '已撤回', approved: '已批准', rejected: '已驳回' }[action] +
           '。';
     if (r) emit('changed', message.value);
     else await load();
   } catch (e) {
-    if (turn !== serial) return;
+    if (!mounted || targetActivity !== props.activityId || targetRequest !== props.requestId) return;
     error.value = e instanceof Error ? e.message : '操作失败，请重试';
-    if (e instanceof ApiError && [401, 403, 404, 409].includes(e.status ?? 0)) {
-      requiresRead.value = true;
-      if (e.status !== 409) {
-        rows.value = [];
-        selected.value = undefined;
-      }
-    }
+    requiresRead.value = noAccess(e) || (e instanceof ApiError && e.status === 409);
+    if (requiresRead.value) clearQueue();
   } finally {
     saving.value = false;
   }
@@ -200,11 +168,11 @@ async function act(
       {{ error }}
       <button v-if="requiresRead" @click="registration ? emit('changed', '') : load()">刷新复核</button>
     </p>
-    <p v-if="readError" role="alert">{{ readError }} <button @click="load">重新读取申请</button></p>
+    <p v-if="readError" role="alert">{{ readError }} <button @click="load()">重新读取申请</button></p>
     <p v-else-if="loading">正在读取申请…</p>
-    <template v-else>
+    <template v-else-if="queue">
       <button
-        v-if="registration && ['submitted', 'waitlisted'].includes(registration.status)"
+        v-if="registration?.can_withdraw"
         :disabled="paused"
         @click="act('withdrawRegistration')"
       >
@@ -217,8 +185,8 @@ async function act(
         <label>申请原因 <textarea v-model="reason" required maxlength="2000" /></label>
         <button :disabled="paused || !reason.trim()">申请{{ exit ? '退出整项活动' : '恢复报名' }}</button>
       </form>
-      <p v-if="!rows.length">暂无符合条件的{{ label }}申请。</p>
-      <article v-for="row in rows" :key="row.id" class="record">
+      <p v-if="!queue.items.length">暂无符合条件的{{ label }}申请。</p>
+      <article v-for="row in queue.items" :key="row.id" class="record">
         <strong
           >{{ row.student_name }} {{ row.student_no }} {{ label }}申请 · {{ states[row.status] }}</strong
         >
@@ -248,7 +216,7 @@ async function act(
           </div>
         </template>
       </article>
-      <Pager :page="page" :total="total" :size="10" @change="page = $event" />
+      <Pager :page="page" :total="queue.total" :size="10" @change="page = $event" />
     </template>
   </section>
 </template>

@@ -1747,7 +1747,7 @@ paths:
     post:
       operationId: withdraw_registration
       summary: 录取前撤回报名
-      description: 仅本人submitted或waitlisted可撤回。accepted须提交退出申请。
+      description: 活动仍为published时，仅本人submitted或waitlisted可撤回。accepted须提交退出申请。
       tags:
       - 报名
       x-requirement: FR02
@@ -8700,6 +8700,7 @@ components:
           type: string
         decision_reason:
           type: string
+        can_withdraw: {type: boolean, description: 本人报名当前可撤回。}
         can_request_exit: {type: boolean}
         can_request_restoration: {type: boolean}
         pending_exit_request_id:
@@ -12253,6 +12254,7 @@ components:
           minimum: 0
         status_counts:
           $ref: '#/components/schemas/roster_status_counts'
+        can_decide: {type: boolean, description: 按活动状态和当前获批安排判断名单决定是否开放。}
         accepted_count:
           type: integer
           minimum: 0

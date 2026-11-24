@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { listMyRegistrations, type Registration, type RegistrationPage } from '@hongyan/contracts';
+import { listMyRegistrations, type Registration } from '@hongyan/contracts';
 import RecordSummaryList from '@hongyan/ui/RecordSummaryList.vue';
 import RequestQueue from './RequestQueue.vue';
+import { pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
@@ -12,14 +13,24 @@ import { registrationLabels } from './labels';
 
 const route = useRoute();
 const router = useRouter();
-const page = computed(() => Number(route.query.page || 1));
+const page = computed(() => pageNumber(route.query.page));
 const status = computed(() => String(route.query.status || '') as Registration['status'] | '');
 const item = computed(() => String(route.params.item || ''));
 const options = [
   { value: '', label: '全部状态' },
   ...Object.entries(registrationLabels).map(([value, label]) => ({ value, label })),
 ];
-const result = ref<RegistrationPage>();
+const { data: result, error, loading: refreshing, refresh } = usePageRead(
+  () => route.fullPath,
+  async signal => {
+    const { data } = await listMyRegistrations({
+      query: item.value ? { id: item.value } : { page: page.value, page_size: 10, status: status.value || undefined },
+      signal, throwOnError: true,
+    });
+    return data.data;
+  },
+);
+const load = () => refresh(false);
 const rows = computed(() =>
   (result.value?.items || []).map((row) => ({
     id: row.id,
@@ -38,42 +49,13 @@ const rows = computed(() =>
       .join('　'),
   })),
 );
-const error = ref('');
 const feedback = ref('');
-const refreshing = ref(false);
-let serial = 0;
-async function load() {
-  const turn = ++serial;
-  error.value = '';
-  refreshing.value = true;
-  try {
-    const { data } = await listMyRegistrations({
-      query: item.value
-        ? { id: item.value }
-        : {
-            page: page.value,
-            page_size: 10,
-            status: status.value || undefined,
-          },
-      throwOnError: true,
-    });
-    if (turn === serial) result.value = data.data;
-  } catch (e) {
-    if (turn === serial) {
-      result.value = undefined;
-      error.value = e instanceof Error ? e.message : '报名记录读取失败';
-    }
-  } finally {
-    if (turn === serial) refreshing.value = false;
-  }
-}
 function filter(value: string) {
   void router.push({ path: '/registrations', query: { status: value || undefined } });
 }
-watch(() => route.fullPath, () => { result.value = undefined; feedback.value = ''; void load(); }, { immediate: true });
+watch(() => route.fullPath, () => { feedback.value = ''; });
 onMounted(() => window.addEventListener('focus', load));
 onUnmounted(() => {
-  serial++;
   window.removeEventListener('focus', load);
 });
 </script>

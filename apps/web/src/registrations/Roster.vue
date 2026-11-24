@@ -18,6 +18,7 @@ import {
 } from '@hongyan/contracts';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import ExportButton from '@hongyan/ui/ExportButton.vue';
+import { noAccess } from '@hongyan/ui/usePageRead';
 import { useIdSelection } from '@hongyan/ui/useSelection';
 import { registrationLabels } from './labels';
 import Pager from '@hongyan/ui/Pager.vue';
@@ -61,9 +62,11 @@ const selectedExportInput = computed(() => ({
   registration_ids: [...selected.value],
 }));
 let serial = 0;
+let filterVersion = 0;
 let mounted = true;
 async function load() {
   const turn = ++serial;
+  const reviewing = refreshRequired.value;
   readError.value = '';
   result.value = undefined;
   inspected.value = undefined;
@@ -86,11 +89,11 @@ async function load() {
       return;
     }
     result.value = data.data;
-    refreshRequired.value = false;
+    if (reviewing) refreshRequired.value = false;
   } catch (e) {
     if (turn !== serial) return;
     readError.value = e instanceof Error ? e.message : '名单读取失败';
-    if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) {
+    if (noAccess(e)) {
       conflicts.value = [];
       selected.value.clear();
       notice.value = '';
@@ -108,13 +111,13 @@ const conflicts = ref<{ id: string; text: string }[]>([]);
 const reason = ref('');
 type Decision = RegistrationDecision['decision'];
 const actions = { accepted: '录取', waitlisted: '设为候补', rejected: '不录取' } as const;
-const paused = computed(() => saving.value || refreshRequired.value || props.writesPaused || !result.value);
+const paused = computed(() => saving.value || refreshRequired.value || props.writesPaused || !result.value?.can_decide);
 async function decide(decision: Decision, single?: Registration) {
   if (paused.value) return;
   const rows = single ? [single] : [...snapshots.values()];
   if (!rows.length || rows.length > 100) return;
   const activityId = String(route.params.id);
-  const filterKey = serial;
+  const filterKey = filterVersion;
   saving.value = true;
   writeError.value = '';
   conflicts.value = [];
@@ -130,7 +133,8 @@ async function decide(decision: Decision, single?: Registration) {
         headers: command.headers('bulk', activityId, body), throwOnError: true });
     }
     command.confirmed();
-    if (!mounted || filterKey !== serial) return;
+    if (!mounted || activityId !== route.params.id) return;
+    if (filterKey !== filterVersion) { await load(); return; }
     const who = single ? single.student_name : rows.length + ' 人';
     notice.value = decision === 'waitlisted' ? '已将' + who + '设为候补。'
       : decision === 'accepted' ? '已录取' + who + '。' : who + '已标为未录取。';
@@ -138,16 +142,18 @@ async function decide(decision: Decision, single?: Registration) {
     reason.value = '';
     await load();
   } catch (e) {
-    if (!mounted || filterKey !== serial) return;
-    if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) {
+    if (!mounted || activityId !== route.params.id) return;
+    if (noAccess(e)) {
       conflicts.value = [];
       notice.value = '';
       selected.value.clear();
       inspected.value = undefined;
       result.value = undefined;
-      readError.value = e.message;
+      serial++;
+      readError.value = e instanceof Error ? e.message : '名单不可见';
       return;
     }
+    if (filterKey !== filterVersion) return;
     writeError.value = e instanceof Error ? e.message : '决定提交失败';
     refreshRequired.value = e instanceof ApiError && e.status === 409;
     if (e instanceof ApiError) conflicts.value = (e.body?.details ?? []).flatMap(d => {
@@ -174,6 +180,7 @@ const otherStates = computed(() => [
   })),
 ]);
 function clear() {
+  filterVersion++;
   conflicts.value = [];
   reason.value = '';
   notice.value = selected.value.size ? '筛选或活动已变更，已清空选择。' : '';

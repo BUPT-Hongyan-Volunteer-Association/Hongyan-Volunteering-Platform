@@ -889,13 +889,25 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await button(owner, '下一页').click();
       await owner.getByLabel('选择名单测试6', { exact: true }).check();
       await db.registration.updateMany({ where: { activity_id: first.id, student: { account: { display_name: '名单测试1' } } }, data: { version: { increment: 1 } } });
-      await button(owner, '所选设为候补').click();
+      async function submitWhileTurningPage(direction, visibleName) {
+        const held = await holdResponse(owner, '**/registration-decisions?*');
+        await button(owner, '所选设为候补').click();
+        try {
+          await held.received;
+          await button(owner, direction).click();
+          await visible(owner.getByLabel('选择' + visibleName, { exact: true }));
+        } finally {
+          await held.release();
+        }
+      }
+      await submitWhileTurningPage('上一页', '名单测试1');
       await visible(owner.getByLabel('冲突记录').getByText(/名单测试1/));
       await visible(owner.getByText('已选 2 人', { exact: true }));
       await button(owner, '刷新名单复核').click();
       await button(owner, '移出选择').click();
-      await button(owner, '所选设为候补').click();
+      await submitWhileTurningPage('下一页', '名单测试7');
       await visible(owner.getByText('已将1 人设为候补。', { exact: true }));
+      await visible(owner.getByText('已选 0 人', { exact: true }));
     });
 
     await t.test('已打开的报名名单在成员被移出后拒绝旧窗口决定', async () => {
@@ -1518,8 +1530,25 @@ test('三端页面、真实发布与报名录取流程', { timeout: 480000 }, as
       await student.evaluate(() => window.dispatchEvent(new Event('focus')));
       await refreshed;
       assert.equal(await student.getByLabel('申请原因').inputValue(), '时间冲突');
+      // 焦点刷新先读回旧报名和空申请队列，才放行真实写入。
+      const intercepted = Promise.withResolvers(), release = Promise.withResolvers();
+      await student.route('**/api/v1/me/exit-requests', async route => {
+        intercepted.resolve();
+        await release.promise;
+        await route.continue();
+      }, { times: 1 });
       await button(student, '申请退出整项活动').click();
+      try {
+        await intercepted.promise;
+        const reread = student.waitForResponse(r => r.url().includes('/me/exit-requests?'));
+        await student.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await reread;
+        await visible(student.getByText('暂无符合条件的退出申请。', { exact: true }));
+      } finally {
+        release.resolve();
+      }
       await visible(button(student, '撤回退出申请'));
+      await visible(student.getByText('退出申请已提交。', { exact: true }));
       await link(owner, '退出与恢复').click();
       await button(owner, '处理申请').click();
       await button(owner, '批准退出').click();

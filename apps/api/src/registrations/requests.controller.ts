@@ -11,10 +11,12 @@ import { BusinessError, envelope, invalid, invisible } from '../http.js';
 import {
   approvedContent,
   canRecruit,
+  canWithdraw,
+  canRequest,
   enabledStudents,
   occupiedSeats,
   queueGathering,
-  recordChange,
+  recordChanges,
   registrationView,
 } from './registration.js';
 
@@ -53,13 +55,12 @@ export class RecruitmentRequests {
       const previous = await tx.registration.findFirst({ where: { id, student_id: studentId(actor) } });
       if (!previous) invisible();
       checkVersion(previous.version, validate<VersionAction>('version_action', body).expected_version);
-      if (activity!.status !== 'published' || !['submitted', 'waitlisted'].includes(previous.status))
-        wrongState();
+      if (!canWithdraw(activity!.status, previous.status)) wrongState();
       const current = await tx.registration.update({
         where: { id },
         data: { version: { increment: 1 }, status: 'withdrawn', decision_reason: null },
       });
-      await recordChange(tx, previous, current, new Date(), actor.account_id);
+      await recordChanges(tx, [previous], [current], new Date(), actor.account_id);
       return registrationView(current);
     });
   }
@@ -77,12 +78,7 @@ export class RecruitmentRequests {
         });
         if (!r) invisible();
         checkVersion(r.version, input.expected_registration_version);
-        if (
-          activity!.status !== 'published' ||
-          r.status !== (kind === 'exit' ? 'accepted' : 'exited') ||
-          !canRecruit(approvedContent(activity!), kind === 'exit')
-        )
-          wrongState();
+        if (!canRequest(kind, activity!.status, r.status, approvedContent(activity!))) wrongState();
         if (await tx.exitRequest.findFirst({ where: { registration_id: r.id, status: 'pending' } }))
           throw new BusinessError(409, 'invalid_state', '已有申请待处理');
         const q = await tx.exitRequest.create({
@@ -198,7 +194,7 @@ export class RecruitmentRequests {
               decision_reason: input.reason ?? null,
             },
           });
-          await recordChange(tx, r, current, new Date(), actor.account_id);
+          await recordChanges(tx, [r], [current], new Date(), actor.account_id);
           if (kind === 'restoration') await queueGathering(tx, r.activity_id, [current]);
           else
             await tx.noticeReceipt.updateMany({

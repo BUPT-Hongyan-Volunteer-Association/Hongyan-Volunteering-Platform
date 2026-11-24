@@ -286,6 +286,12 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     await setSchedule(content.schedule);
   });
   await t.test('活动终态在同一事务取消申请，成员被移出后旧窗口提交失败', async () => {
+    const submitted = success(await apply(owner), 201);
+    const ownRegistration = async () => success(await owner.request('/me/registrations?id=' + submitted.id)).items[0];
+    const supplement = await db.notificationEvent.findUniqueOrThrow({
+      where: { event_key: `gathering:${a.id}:${a.version}:${source.id}` },
+    });
+    assert.equal(supplement.status, 'pending');
     const q = success(await request(alice, 'exit', a), 201);
     // 给另一名已退出学生预置待恢复申请，与退出申请一起验证同事务收尾。
     await db.registration.update({ where: { id: b.id }, data: { status: 'exited' } });
@@ -311,7 +317,41 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     await db.activity.update({ where: { id }, data: { status: 'completed' } });
     assert.equal((await finish(owner, 'exit', q, 'approved')).status, 409);
     await worker.drain();
+    assert.equal(await db.notice.count({ where: { source_event_id: supplement.id } }), 0);
+    assert.equal((await db.notificationEvent.findUniqueOrThrow({ where: { id: supplement.id } })).status, 'superseded');
+    assert.equal((await ownRegistration()).can_withdraw, false);
+    assert.equal((await write(owner, '/me/registrations/' + submitted.id + '/withdraw', { expected_version: submitted.version })).code, 'invalid_state');
     const results = success(await alice.request('/me/notices?notice_kind=result&page_size=100'));
     assert.ok(results.items.some((n) => n.body.includes('因活动取消或结束已取消')));
   });
+  await t.test('活动取消与恢复批准争用同一活动锁，迟到集合补发作废', async () => {
+    const createdBy = activity.revisions[0].created_by;
+    const next = await db.activity.create({ data: {
+      activity_code: 'RECRUIT-CANCEL', status: 'published', working_revision: 1, published_revision: 1,
+      members: { create: { account_id: createdBy, member_role: 'owner' } },
+      revisions: { create: { revision: 1, revision_state: 'approved', content, created_by: createdBy } },
+      notices: { create: { title: '集合', body: '北门', notice_kind: 'gathering' } },
+    } });
+    const form = success(await write(alice, '/activities/' + next.id + '/registrations', {}), 201);
+    success(await write(owner, '/organizer/registrations/' + form.id + '/decision', { decision: 'accepted', expected_version: form.version }));
+    const exited = await db.registration.create({ data: { activity_id: next.id, student_id: b.student_id, status: 'exited' } });
+    const pending = success(await request(bob, 'restoration', exited), 201);
+    const [, approval] = await Promise.all([
+      db.activity.update({ where: { id: next.id }, data: { status: 'cancelled' } }),
+      finish(owner, 'restoration', pending, 'approved'),
+    ]);
+    assert.ok([200, 409].includes(approval.status));
+    const won = approval.status === 200;
+    assert.equal((await registration(exited)).status, won ? 'accepted' : 'exited');
+    assert.equal((await db.exitRequest.findUniqueOrThrow({ where: { id: pending.id } })).status, won ? 'approved' : 'cancelled');
+    await worker.drain();
+    const events = await db.notificationEvent.findMany({ where: { activity_id: next.id, event_type: 'gathering_supplement' } });
+    assert.equal(events.length, won ? 2 : 1);
+    assert.ok(events.every(e => e.status === 'superseded'));
+    assert.equal(success(await alice.request('/me/notices?notice_kind=gathering&activity_id=' + next.id)).total, 0);
+    const results = success(await bob.request('/me/notices?notice_kind=result&activity_id=' + next.id));
+    assert.equal(results.total, 1);
+    assert.match(results.items[0].body, won ? /已批准/ : /已取消/);
+  });
+
 });

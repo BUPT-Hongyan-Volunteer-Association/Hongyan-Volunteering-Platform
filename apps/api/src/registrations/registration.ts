@@ -78,20 +78,28 @@ function history(row: Registration, changed_at: Date | null, actor_id: string | 
   };
 }
 
-export async function recordChange(
-  tx: Tx,
-  previous: Registration | null,
-  current: Registration,
-  time: Date,
-  actor: string,
+export async function recordChanges(
+  tx: Tx, previous: Registration[], current: Registration[], time: Date, actor: string,
 ) {
-  // An imported or seeded relation may predate version history. Preserve the facts it actually has.
-  if (previous)
-    await tx.registrationHistory.createMany({
-      data: [history(previous, previous.status === 'submitted' ? previous.submitted_at : null, null)],
-      skipDuplicates: true,
-    });
-  await tx.registrationHistory.create({ data: history(current, time, actor) });
+  // 旧报名可能尚无版本历史，保留已有事实，再写本次变化。
+  if (previous.length) await tx.registrationHistory.createMany({
+    data: previous.map(r => history(r, r.status === 'submitted' ? r.submitted_at : null, null)),
+    skipDuplicates: true,
+  });
+  await tx.registrationHistory.createMany({ data: current.map(r => history(r, time, actor)) });
+}
+
+export function canWithdraw(activityStatus: string, registrationStatus: string) {
+  return activityStatus === 'published' && ['submitted', 'waitlisted'].includes(registrationStatus);
+}
+
+export function canDecide(activityStatus: string, approved: ActivityPublicationContent | undefined) {
+  return activityStatus === 'published' && canRecruit(approved);
+}
+
+export function canRequest(kind: 'exit' | 'restoration', activityStatus: string, status: string, approved: ActivityPublicationContent | undefined) {
+  if (kind === 'restoration') return status === 'exited' && canDecide(activityStatus, approved);
+  return status === 'accepted' && activityStatus === 'published' && canRecruit(approved, true);
 }
 
 export async function apply(
@@ -130,7 +138,7 @@ export async function apply(
         data: { ...data, version: { increment: 1 } },
       })
     : await tx.registration.create({ data: { ...relation, ...data } });
-  await recordChange(tx, previous, current, received, actor);
+  await recordChanges(tx, previous ? [previous] : [], [current], received, actor);
   return registrationView(current);
 }
 
@@ -184,7 +192,7 @@ export async function decideBatch(
   );
   const now = new Date(),
     approved = approvedContent(activity);
-  const available = activity.status === 'published' && canRecruit(approved, false, now);
+  const available = canDecide(activity.status, approved);
   const failures = ids.flatMap((resource_id, i) => {
     const row = byId.get(resource_id);
     let code = 'invalid_state',
@@ -221,11 +229,7 @@ export async function decideBatch(
     where: { id: { in: ids } },
     data: { status: input.decision, version: { increment: 1 }, decision_reason: input.reason ?? null },
   });
-  await tx.registrationHistory.createMany({
-    data: rows.map((r) => history(r, r.status === 'submitted' ? r.submitted_at : null, null)),
-    skipDuplicates: true,
-  });
-  await tx.registrationHistory.createMany({ data: changed.map((r) => history(r, now, actor)) });
+  await recordChanges(tx, rows, changed, now, actor);
   const events = changed.map((r) => ({
     event_id: randomUUID(),
     activity_id: activity.id,
