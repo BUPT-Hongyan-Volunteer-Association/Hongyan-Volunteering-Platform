@@ -17,7 +17,7 @@ const publicNav = studentNav.filter(item => !router.resolve(item.to).meta.person
 function studentDestination(to: string) {
   if (to !== '/schedule' || route.path !== '/') return to;
   const { q, campus, phase, status, ongoing, date, unit } = route.query;
-  return { path: to, query: { q, campus, phase, status, ongoing, date, unit: date ? unit || 'hour' : undefined } };
+  return { path: to, query: { q, campus, phase, status, ongoing, date, unit: date ? unit || 'day' : undefined } };
 }
 const crumb = computed(() => route.meta.title);
 </script>

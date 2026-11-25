@@ -88,10 +88,7 @@ const pending = computed(() => detail.value?.current_review?.status === 'pending
 const readonly = computed(
   () =>
     !!pending.value ||
-    ['cancelled', 'completed', 'archived'].includes(detail.value?.activity.status ?? '') ||
-    ['weekly', 'custom'].includes(
-      detail.value?.working_snapshot.content.schedule?.schedule_type ?? '',
-    ),
+    ['cancelled', 'completed', 'archived'].includes(detail.value?.activity.status ?? ''),
 );
 const restore = ref<ActivityRevision['content']>();
 const imageLoading = ref(false);
@@ -336,7 +333,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
     ><UiIcon name="ArrowLeft" />返回活动管理</RouterLink
   >
   <div class="page-heading">
-    <component :is="id ? 'h2' : 'h1'">{{ id ? '活动编辑与送审' : '新建单次活动' }}</component>
+    <component :is="id ? 'h2' : 'h1'">{{ id ? '活动编辑与送审' : '新建活动' }}</component>
   </div>
   <p v-if="loading" role="status">正在读取…</p>
   <p v-if="confirmation?.id === id" role="status" class="notice">{{ confirmation.text }}</p>
@@ -364,9 +361,6 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
           detail.current_review &&
           ['rejected', 'withdrawn'].includes(detail.current_review.status) &&
           detail.current_review.revision !== detail.working_snapshot.revision &&
-          !['weekly', 'custom'].includes(
-            detail.current_review.snapshot.content.schedule?.schedule_type ?? '',
-          ) &&
           !readonly
         "
         :disabled="dirty || busy || writesPaused || conflict"

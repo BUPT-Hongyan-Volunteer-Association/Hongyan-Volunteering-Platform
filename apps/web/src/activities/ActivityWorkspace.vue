@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { serviceDateText } from '@hongyan/contracts/activity';
 import ActivityMemberListView from '@hongyan/ui/ActivityMemberListView.vue';
 import TransferOwner from './TransferOwner.vue';
 import AddCollaborator from './AddCollaborator.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
-import { serviceTime } from '@hongyan/ui/activityDisplay';
+
 import { useRoute } from 'vue-router';
 import {
   ApiError,
@@ -132,7 +133,7 @@ onUnmounted(() => {
     <p class="activity-meta meta-line">
       <span>{{ activity.activity_code }}</span
       ><span v-if="activity.campus"><UiIcon name="Location" />{{ activity.campus }}</span
-      ><span><UiIcon name="Clock" />{{ serviceTime(activity) }}</span>
+      ><span><UiIcon name="Calendar" />{{ serviceDateText(activity.schedule) }}</span>
     </p>
     <nav class="section-nav" aria-label="活动工作区">
       <RouterLink

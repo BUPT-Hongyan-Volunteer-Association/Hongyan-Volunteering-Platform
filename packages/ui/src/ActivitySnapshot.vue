@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ActivitySnapshotContent } from '@hongyan/contracts';
+import { serviceDateText } from '@hongyan/contracts/activity';
 import { fieldLabel, fieldValue } from './activityFields';
 defineProps<{ content: ActivitySnapshotContent }>();
 </script>
@@ -9,6 +10,12 @@ defineProps<{ content: ActivitySnapshotContent }>();
       <template v-if="value !== undefined && value !== null && value !== ''">
         <dt>{{ fieldLabel(String(key)) }}</dt>
         <dd v-if="key === 'group_qr_id'"><img width="150" :src="'/api/v1/activity-group-images/' + value" alt="此版本的入群二维码" /></dd>
+        <dd v-else-if="key === 'schedule' && content.schedule">
+          {{ serviceDateText(content.schedule) }}
+          <details v-if="content.schedule.schedule_type !== 'date_range'">
+            <summary>查看具体服务时间</summary>{{ fieldValue('schedule', content.schedule) }}
+          </details>
+        </dd>
         <dd v-else>{{ fieldValue(String(key), value) }}</dd>
       </template>
     </template>

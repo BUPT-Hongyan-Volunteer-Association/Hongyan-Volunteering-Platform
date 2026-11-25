@@ -14,12 +14,12 @@ test('活动时间按北京时间显示，入群信息只在正文里提示更�
     ends_at: `2026-11-${day}T10:00:00Z`,
   });
   const version = (day, secret) => ({
-    schedule: { schedule_type: 'custom', slots: [slot(day)] },
+    schedule: { schedule_type: 'custom', duration_start_date: '2026-11-' + day, duration_end_date: '2026-11-' + day, slots: [slot(day)] },
     registration_closes_at: slot(day).starts_at,
     group_join_instructions: secret,
   });
   const body = changeNoticeBody([version(25, '旧群号'), version(26, '新群号')]);
-  assert.match(body, /活动时间：2026\/11\/25 14:00 至 2026\/11\/25 18:00（多时段） → 2026\/11\/26/);
+  assert.match(body, /活动时间：2026-11-25 → 2026-11-26/);
   assert.match(body, /报名截止时间：2026\/11\/25 14:00 → 2026\/11\/26 14:00/);
   assert.match(body, /入群方式：已更新/);
   assert.doesNotMatch(body, /旧群号|新群号/);

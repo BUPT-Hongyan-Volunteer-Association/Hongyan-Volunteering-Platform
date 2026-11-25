@@ -1,4 +1,4 @@
-import type { Registration, RegistrationDecision } from './generated/types.gen.js';
+import type { ActivitySchedule, DateRangeSchedule, Registration, RegistrationDecision } from './generated/types.gen.js';
 
 export const activeRegistrationStatuses: Registration['status'][] = ['submitted', 'waitlisted', 'accepted'];
 
@@ -24,3 +24,28 @@ export function matchesCampus(value: string | undefined, filter: string) {
 
 export const localDate = (value: string | number) =>
   new Date(new Date(value).getTime() + 8 * 3600000).toISOString().slice(0, 10);
+
+type ServiceDates = Pick<DateRangeSchedule, 'duration_start_date' | 'duration_end_date'>;
+
+export function serviceDates(schedule?: ActivitySchedule | ServiceDates): ServiceDates {
+  if (!schedule) return {};
+  if ('starts_at' in schedule) {
+    return {
+      duration_start_date: localDate(schedule.starts_at),
+      duration_end_date: localDate(Date.parse(schedule.ends_at) - 1),
+    };
+  }
+  return { duration_start_date: schedule.duration_start_date, duration_end_date: schedule.duration_end_date };
+}
+
+export function serviceDateText(schedule?: ActivitySchedule | ServiceDates) {
+  const { duration_start_date: first, duration_end_date: last } = serviceDates(schedule);
+  if (!first || !last) return '日期待定';
+  return first === last ? first : first + ' 至 ' + last;
+}
+
+export function serviceWindow(schedule?: ActivitySchedule | ServiceDates) {
+  const { duration_start_date: first, duration_end_date: last } = serviceDates(schedule);
+  if (!first || !last) return undefined;
+  return { start: Date.parse(first + 'T00:00:00+08:00'), end: Date.parse(last + 'T00:00:00+08:00') + 86400000 };
+}

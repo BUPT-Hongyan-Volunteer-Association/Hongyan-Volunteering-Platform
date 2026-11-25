@@ -1,6 +1,6 @@
 import { localDate } from '../activityDisplay';
 
-export const units = { hour: '小时', day: '日', week: '周', month: '月' } as const;
+export const units = { day: '日', week: '周', month: '月' } as const;
 export type TimeUnit = keyof typeof units;
 export const validUnit = (v: unknown): v is TimeUnit =>
   typeof v === 'string' && Object.hasOwn(units, v);

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { serviceDateText } from '@hongyan/contracts/activity';
 import UiSelect from '../UiSelect.vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -6,16 +7,13 @@ import {
   getTimeline,
   type GetTimelineData,
   type TimelineActivity,
-  type TimelineItem,
 } from '@hongyan/contracts';
 import StatusFilter from '../StatusFilter.vue';
 import SegmentedControl from '../SegmentedControl.vue';
 import UiIcon from '../UiIcon.vue';
 import {
-  activityTypes,
   localDate,
   localDateTime,
-  localTime,
   phaseLabels,
   phaseOptions,
   statusLabels,
@@ -48,7 +46,7 @@ const revision = computed<'working' | 'published'>(() =>
   managed.value && route.query.revision !== 'published' ? 'working' : 'published',
 );
 const unit = computed(() =>
-  validUnit(route.query.unit) ? route.query.unit : mobile.value ? 'hour' : 'week',
+  validUnit(route.query.unit) ? route.query.unit : route.query.unit === 'hour' || mobile.value ? 'day' : 'week',
 );
 const filterOpen = ref(false);
 const chart = computed(() => (route.query.view || (mobile.value ? 'list' : 'chart')) === 'chart');
@@ -102,14 +100,7 @@ const readPage = async (page: number) => {
 const schedule = createScheduleRange(readPage, {
   maxInFlight: 3,
   pageSize,
-  window: () => ({
-    from: new Date(start.value).toISOString(),
-    to: new Date(end.value).toISOString(),
-  }),
-  selection: () => ({
-    item: typeof route.query.item === 'string' ? route.query.item : undefined,
-    slot: typeof route.query.slot === 'string' ? route.query.slot : undefined,
-  }),
+  selectedId: () => typeof route.query.item === 'string' ? route.query.item : undefined,
 });
 const pages = schedule.pages;
 const rows = schedule.rows;
@@ -122,7 +113,6 @@ const lastPage = computed(() => pages.value.at(-1));
 const selected = computed(() =>
   selection.value.kind === 'kept' ? selection.value.activity : undefined,
 );
-const segment = computed(() => (selection.value.kind === 'kept' ? selection.value.slot : undefined));
 const selectionMessage = ref('');
 const fullMobileDetail = computed(
   () => mobile.value && selected.value && route.query.detail !== 'summary',
@@ -149,20 +139,15 @@ const switching = ref(0);
 
 function clearSelection() {
   void router.replace({
-    query: { ...route.query, item: undefined, slot: undefined, detail: undefined },
+    query: { ...route.query, item: undefined, detail: undefined },
   });
 }
 
-/** 读取成功后才判选中失效：页面只按 kind 映射说明并清空 URL，不自己解析时段键。 */
+/** 读取成功后才判选中失效：页面只按 kind 映射说明并清空 URL，保留仍在结果内的活动。 */
 function applySelection() {
   const state = selection.value;
   if (state.kind === 'kept' || state.kind === 'none') return;
-  selectionMessage.value =
-    state.kind === 'window-moved'
-      ? '所选时段已移出当前窗口'
-      : state.kind === 'schedule-updated'
-        ? '所选时段已随安排更新失效，已回到日程'
-        : '所选活动已移出当前筛选';
+  selectionMessage.value = '所选活动已移出当前日期或筛选范围';
   clearSelection();
 }
 
@@ -242,13 +227,13 @@ function set(key: string, value: string) {
 }
 const valueOf = (event: Event) => (event.target as HTMLInputElement).value;
 let opener: Element | null = null;
-async function choose(r: TimelineActivity, s: TimelineItem) {
+async function choose(r: TimelineActivity) {
   // 切换条件时忽略旧行的点击，避免把失效选段写回 URL。
   if (switching.value > 0) return;
   selectionMessage.value = '';
   opener = document.activeElement;
   await router.push({
-    query: { ...route.query, item: r.activity_id, slot: s.occurrence_key, detail: undefined },
+    query: { ...route.query, item: r.activity_id, detail: undefined },
   });
   await nextTick();
   detailHeading.value?.focus();
@@ -257,7 +242,7 @@ async function close() {
   const query =
     mobile.value && selected.value
       ? { ...route.query, detail: 'summary' }
-      : { ...route.query, item: undefined, slot: undefined, detail: undefined };
+      : { ...route.query, item: undefined, detail: undefined };
   await router.push({ query });
   await nextTick();
   const fallback = document.querySelector<HTMLElement>('.schedule-controls button');
@@ -276,6 +261,14 @@ function resized() {
   mobile.value = media.matches;
 }
 watch(
+  [() => route.query.unit, () => route.query.slot],
+  ([oldUnit, slot]) => {
+    if (oldUnit === 'hour' || slot !== undefined)
+      void router.replace({ query: { ...route.query, unit: oldUnit === 'hour' ? 'day' : oldUnit, slot: undefined } });
+  },
+  { immediate: true },
+);
+watch(
   [() => JSON.stringify(query.value), () => props.scope, revision, locateOnEntry],
   ([, scope, version], [, previousScope, previousVersion]) => {
     selectionMessage.value = '';
@@ -285,7 +278,7 @@ watch(
   },
   { immediate: true },
 );
-watch([() => route.query.item, () => route.query.slot], () => {
+watch(() => route.query.item, () => {
   if (!route.query.item || loading.value || error.value) return;
   if (selection.value.kind === 'kept') return;
   if (needsBackfill()) void load('refresh');
@@ -454,7 +447,7 @@ onUnmounted(() => {
           <ScheduleDatePicker
             :date="date"
             :period="periodLabel"
-            :highlighted="!!selected && (unit === 'hour' || unit === 'day')"
+            :highlighted="!!selected && unit === 'day'"
             @select="set('date', $event)"
           />
           <button class="icon-button" :aria-label="arrows[1]" :title="arrows[1]" @click="shift(1)">
@@ -507,7 +500,7 @@ onUnmounted(() => {
               >{{ total }} 项<template v-if="hasMore"
                 >（已显示 {{ rows.length }}）</template
               ><template v-if="scope !== 'all'">
-                · 状态时刻 {{ localTime(evaluatedAt) }}</template
+                · 状态日期 {{ localDate(evaluatedAt) }}</template
               ></small
             >
           </div>
@@ -518,7 +511,7 @@ onUnmounted(() => {
               :start="start"
               :end="end"
               :now="managed ? undefined : Date.parse(evaluatedAt)"
-              :selected="segment?.occurrence_key"
+              :selected="selected?.activity_id"
               @choose="choose"
             />
           </div>
@@ -531,7 +524,7 @@ onUnmounted(() => {
               <button
                 class="row-button"
                 :disabled="switching > 0"
-                @click="choose(r, r.segments[0])"
+                @click="choose(r)"
               >
                 <i :style="{ background: timelineColors[r.color_index] }" />{{ r.title }}
               </button>
@@ -540,17 +533,7 @@ onUnmounted(() => {
                 }}{{ r.is_ongoing ? ' · 进行中' : '' }}{{ r.has_pending_review ? ' · 待审核' : ''
                 }}{{ r.has_planned_overlap ? ' · 与本人其他活动时间重叠' : '' }}
               </p>
-              <div class="slot-list">
-                <button
-                  v-for="s in r.segments"
-                  :key="s.occurrence_key"
-                  class="compact"
-                  :disabled="switching > 0"
-                  @click="choose(r, s)"
-                >
-                  <UiIcon name="Clock" />{{ localTime(s.starts_at) }} – {{ localTime(s.ends_at) }}
-                </button>
-              </div>
+              <p class="service-period"><UiIcon name="Calendar" />{{ serviceDateText(r) }}</p>
             </li>
           </ul>
           <div v-if="hasMore" class="page-actions schedule-more">
@@ -559,9 +542,9 @@ onUnmounted(() => {
             </button>
           </div>
         </section>
-        <aside v-if="selected && segment" class="schedule-detail" aria-label="时段详情">
+        <aside v-if="selected" class="schedule-detail" aria-label="日程详情">
           <div v-if="!mobile || fullMobileDetail" class="detail-bar">
-            <strong>时段详情</strong
+            <strong>日程详情</strong
             ><button
               class="icon-button quiet"
               title="返回日程"
@@ -580,8 +563,7 @@ onUnmounted(() => {
           </div>
           <div v-if="mobile && !fullMobileDetail" class="summary-info">
             <p>
-              <UiIcon name="Clock" />{{ localTime(segment.starts_at) }} 至
-              {{ localTime(segment.ends_at) }}
+              <UiIcon name="Calendar" />{{ serviceDateText(selected) }}
             </p>
             <p>
               <UiIcon name="Location" />{{
@@ -594,32 +576,22 @@ onUnmounted(() => {
             </p>
           </div>
           <dl v-else>
-            <dt><UiIcon name="Calendar" />安排</dt>
-            <dd>{{ activityTypes[selected.schedule_type] }}</dd>
-            <dt><UiIcon name="Clock" />时段</dt>
-            <dd>{{ localTime(segment.starts_at) }} 至 {{ localTime(segment.ends_at) }}</dd>
+            <dt><UiIcon name="Calendar" />活动日期</dt>
+            <dd>{{ serviceDateText(selected) }}</dd>
             <dt><UiIcon name="Location" />地点</dt>
             <dd>{{ [selected.campus, selected.location].filter(Boolean).join(' · ') }}</dd>
             <dt><UiIcon name="User" />负责人</dt>
             <dd>{{ selected.owner_display_name }}</dd>
             <dt><UiIcon name="Tickets" />名额</dt>
             <dd>{{ selected.capacity }} 人</dd>
-            <template v-if="selected.registration_closes_at"
+            <template v-if="scope === 'public' && showPersonalScope && selected.status === 'published' && selected.registration_closes_at"
               ><dt><UiIcon name="Timer" />报名截止</dt>
               <dd>{{ localDateTime(selected.registration_closes_at) }}</dd></template
             >
-            <template
-              v-if="
-                selected.is_ongoing &&
-                Date.parse(segment.starts_at) <= Date.parse(evaluatedAt) &&
-                Date.parse(evaluatedAt) < Date.parse(segment.ends_at)
-              "
-              ><dt>所选时段</dt>
-              <dd>进行中</dd></template
-            >
-            <template v-if="segment.has_planned_overlap"
+            <template v-if="selected.is_ongoing"><dt>服务状态</dt><dd>进行中</dd></template>
+            <template v-if="selected.has_planned_overlap"
               ><dt>计划提示</dt>
-              <dd>与本人其他已录取活动的计划时段重叠</dd></template
+              <dd>与本人其他已录取活动的服务时间重叠</dd></template
             >
             <template v-if="managed"
               ><dt>所选版本</dt>
@@ -629,7 +601,7 @@ onUnmounted(() => {
           <button
             v-if="mobile && !fullMobileDetail"
             class="primary summary-action"
-            @click="choose(selected, segment)"
+            @click="choose(selected)"
           >
             查看活动<UiIcon name="Right" />
           </button>
@@ -756,6 +728,12 @@ onUnmounted(() => {
   align-items: start;
   gap: 20px;
 }
+.service-period {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
 .schedule-detail {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -809,11 +787,12 @@ onUnmounted(() => {
   }
 }
 .schedule-detail dl {
-  grid-template-columns: 5.2em minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 9px 8px;
   font-size: 14px;
 }
 .schedule-detail dt {
+  white-space: nowrap;
   display: flex;
   align-items: baseline;
   gap: 5px;
@@ -856,14 +835,6 @@ onUnmounted(() => {
   width: 5px;
   height: 16px;
   border-radius: 3px;
-}
-.slot-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.slot-list button {
-  font-variant-numeric: tabular-nums;
 }
 @media (max-width: 700px) {
   .schedule-heading {

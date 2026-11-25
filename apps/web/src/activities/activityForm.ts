@@ -1,20 +1,11 @@
 import type { ActivityInputWritable as ActivityInput, ActivityRevision } from '@hongyan/contracts';
-import { beijingInput, beijingISO, localDate } from '@hongyan/ui/activityDisplay';
+import { beijingInput, beijingISO } from '@hongyan/ui/activityDisplay';
 import { activityFields as fields } from '@hongyan/ui/activityFields';
 
+import { serviceDates } from '@hongyan/contracts/activity';
+
 export function formValues(item?: ActivityRevision['content']) {
-  const schedule = item?.schedule;
-  const dates =
-    schedule?.schedule_type === 'continuous'
-      ? {
-          duration_start_date: localDate(schedule.starts_at),
-          duration_end_date: localDate(schedule.ends_at),
-        }
-      : schedule;
-  const values: Record<string, unknown> = {
-    ...item,
-    ...dates,
-  };
+  const values: Record<string, unknown> = { ...item, ...serviceDates(item?.schedule) };
   return Object.fromEntries(
     fields
       .filter(([key]) => key !== 'contacts')
@@ -56,12 +47,14 @@ export function buildPatch(
     end === original.duration_end_date
   )
     result.schedule = source.schedule;
-  else if (datesChanged)
+  else if (datesChanged) {
+    const schedule = source?.schedule ?? saved?.schedule;
     result.schedule = {
-      schedule_type: 'date_range',
-      ...(start && { duration_start_date: start }),
-      ...(end && { duration_end_date: end }),
+      ...(schedule?.schedule_type === 'weekly' || schedule?.schedule_type === 'custom' ? schedule : { schedule_type: 'date_range' }),
+      duration_start_date: start || undefined,
+      duration_end_date: end || undefined,
     };
+  }
   if (source && original) {
     for (const k of ['registration_opens_at', 'registration_closes_at'] as const)
       if (v[k] === original[k] && source[k] !== saved?.[k]) result[k] = source[k] ?? null;

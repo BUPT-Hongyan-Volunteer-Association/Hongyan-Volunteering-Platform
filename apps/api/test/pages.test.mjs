@@ -283,7 +283,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       }
     });
 
-    await t.test('时间轴按真实安排绘制分段，当前线取自服务端时刻', async () => {
+    await t.test('时间轴每项活动绘制一条服务日期，当前线取自服务端日期', async () => {
       await student.setViewportSize({ width: 1440, height: 900 });
       await student.goto(web + '/schedule');
       const ongoing = student.locator('.chart tbody tr').filter({ hasText: '正在进行演示' });
@@ -296,11 +296,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await joined.goto(web + '/managed-schedule?unit=day&view=chart');
       const { data } = await (await response).json();
       await visible(joined.locator('.chart tbody tr').filter({ hasText: '正在进行演示' }));
-      const clockText = new Date(data.state_evaluated_at).toLocaleTimeString('en-GB', {
-        timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit',
-      });
-      assert.match(await joined.locator('.view-caption').innerText(), /状态时刻/);
-      assert.ok((await joined.locator('.view-caption').innerText()).includes(clockText));
+      const stateDate = new Date(Date.parse(data.state_evaluated_at) + 8 * 3600000).toISOString().slice(0, 10);
+      assert.ok((await joined.locator('.view-caption').innerText()).includes('状态日期 ' + stateDate));
       assert.equal(await joined.locator('.chart .now-line, .chart thead path[fill="#003399"]').count(), 0);
       assert.equal(await joined.getByRole('slider').count(), 0);
 
@@ -310,7 +307,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       assert.equal(await student.locator('.schedule-list li').count(), 1);
       await button(student, '正在进行演示').click();
       await button(student, '时间轴').click();
-      await visible(student.getByRole('complementary', { name: '时段详情' }));
+      await visible(student.getByRole('complementary', { name: '日程详情' }));
       assert.ok(await student.getByLabel('进行中').isChecked());
       await student.keyboard.press('Escape');
       await student.waitForURL((u) => !u.searchParams.has('item'));
@@ -318,21 +315,25 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await student.goto(web + '/schedule?date=' + demo.anchor + '&view=chart&unit=week');
       const row = student.locator('.chart tbody tr').filter({ hasText: '校园服务丙' });
       await visible(row);
-      assert.equal(await row.locator('rect').count(), 3);
-      const widths = await row
-        .locator('rect')
-        .evaluateAll((segments) => segments.map((s) => Number(s.getAttribute('width'))));
-      assert.ok(Math.abs(widths[0] / widths[1] - 135 / 75) < 0.001);
-      assert.ok(Math.abs(widths[2] / widths[1] - 90 / 75) < 0.001);
+      const barRect = row.locator('rect[role=button]');
+      assert.equal(await barRect.count(), 1);
+      const geometry = await barRect.evaluate(bar => ({
+        days: Number(bar.getAttribute('width')) / Number(bar.ownerSVGElement.getAttribute('width')) * 7,
+        start: Number(bar.getAttribute('x')),
+      }));
+      const visibleDays = Math.min((Date.parse(demo.anchor) - Date.parse(demo.before)) / 86400000 + 1, (new Date(demo.anchor).getUTCDay() + 6) % 7 + 1);
+      assert.ok(Math.abs(geometry.days - visibleDays) < 0.001);
+      assert.ok(geometry.start >= 0);
 
       await student.setViewportSize({ width: 390, height: 900 });
       await student.goto(web + '/schedule?date=' + demo.anchor + '&unit=hour&view=chart');
-      const bar = student.getByRole('button', { name: /校园服务丙.*09:30/ });
+      const bar = student.locator('.chart tr').filter({ hasText: '校园服务丙' }).locator('rect[role=button]');
       await visible(bar);
+      assert.ok((await bar.boundingBox()).height >= 44);
       assert.equal(await student.locator('.now-line').count(), 0);
       await bar.focus();
       await student.keyboard.press('Enter');
-      await visible(student.getByText(/09:30 至 .*10:45/));
+      await visible(student.locator('.schedule-detail').getByText(demo.before + ' 至 ' + demo.anchor, {exact: true}));
       await student.reload();
       await visible(student.getByRole('heading', { name: '校园服务丙' }));
       await button(student, '返回日程').click();
@@ -721,24 +722,25 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       }
     });
 
-    await t.test('手机和桌面的失效时段链接保留筛选并关闭详情', async () => {
+    await t.test('手机和桌面的旧小时链接进入日视图，窗口外活动保留筛选并关闭详情', async () => {
       for (const width of [390, 1440]) {
         await student.setViewportSize({ width, height: 900 });
         await student.goto(
           web + '/schedule?unit=hour&view=chart&date=' + demo.anchor + '&status=published',
         );
-        const afternoon = student.getByRole('button', { name: /校园服务丙.*14:15/ });
+        const afternoon = student.locator('.chart tr').filter({ hasText: '校园服务丙' }).locator('rect[role=button]');
         await afternoon.focus();
         await student.keyboard.press('Enter');
-        await visible(student.getByRole('complementary', { name: '时段详情' }));
+        await visible(student.getByRole('complementary', { name: '日程详情' }));
         const url = new URL(student.url());
-        url.searchParams.set('date', demo.before);
+        assert.equal(url.searchParams.get('unit'), 'day');
+        url.searchParams.set('date', '2000-01-01');
         await student.goto(url.href);
-        await visible(student.getByText('所选时段已移出当前窗口', { exact: true }));
+        await visible(student.getByText('所选活动已移出当前日期或筛选范围', { exact: true }));
         await student.waitForURL((u) => !u.searchParams.has('slot') && !u.searchParams.has('item'));
         assert.equal(new URL(student.url()).searchParams.get('status'), 'published');
         assert.equal(await student.locator('.schedule-detail').count(), 0);
-        await visible(student.getByRole('button', { name: /校园服务丙.*09:15/ }));
+        await visible(student.getByText('该窗口和筛选条件下没有活动'));
       }
     });
 
@@ -968,7 +970,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await fits(student);
     });
 
-    await t.test('日程切换四种时间刻度，返回后保留所选时段', async () => {
+    await t.test('日程切换日周月，返回后保留所选活动', async () => {
       await student.setViewportSize({ width: 1440, height: 900 });
       await student.goto(web + '/schedule?date=' + demo.anchor + '&view=chart&unit=week');
       const scale = student.getByRole('group', { name: '时间刻度' });
@@ -978,8 +980,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0),
       ).getUTCDate();
       for (const [label, count] of [
-        ['小时', 24],
-        ['日', 6],
+        ['日', 1],
         ['月', daysInMonth],
         ['周', 7],
       ]) {
@@ -989,10 +990,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
           count,
         );
       }
-      const segment = student.getByRole('button', { name: /校园服务丙.*14:15/ });
+      assert.equal(await scale.getByRole('button', {name: '小时'}).count(), 0);
+      const segment = student.locator('.chart tr').filter({ hasText: '校园服务丙' }).locator('rect[role=button]');
       await segment.focus();
       await student.keyboard.press('Enter');
-      await visible(student.getByRole('complementary', { name: '时段详情' }));
+      await visible(student.getByRole('complementary', { name: '日程详情' }));
       const week = student.url();
       await link(student, '查看真实获批详情').click();
       await link(student, '返回日程').click();
@@ -1000,7 +1002,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await visible(student.locator('.chart rect[aria-pressed=true]'));
       await student.setViewportSize({ width: 390, height: 844 });
       await student.goto(web + '/schedule?unit=hour&view=chart&date=' + demo.anchor);
-      const morning = student.getByRole('button', { name: /校园服务丙.*09:30/ });
+      const morning = student.locator('.chart tr').filter({ hasText: '校园服务丙' }).locator('rect[role=button]');
       await morning.focus();
       await student.keyboard.press('Enter');
       await button(student, '返回日程').click();
@@ -1009,7 +1011,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await fits(student);
       await button(student, '今天').click();
       assert.equal(
-        await scale.getByRole('button', { name: '小时' }).getAttribute('aria-pressed'),
+        await scale.getByRole('button', { name: '日', exact: true }).getAttribute('aria-pressed'),
         'true',
       );
       assert.equal(
@@ -1139,7 +1141,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         await dateBox.waitFor({ state: 'hidden' });
         const scale = teacher.getByRole('group', { name: '时间刻度' });
         for (const [label, previous, next, nextDate, backDate] of [
-          ['小时', '前一天', '后一天', '2027-01-01', '2026-12-31'],
           ['日', '前一天', '后一天', '2027-01-01', '2026-12-31'],
           ['周', '上一周', '下一周', '2027-01-04', '2026-12-28'],
           ['月', '上个月', '下个月', '2027-01-01', '2026-12-01'],
@@ -1178,7 +1179,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       }
     });
 
-    await t.test('审核日程移除时间指针，桌面点击及手机轻触相邻色条可查看具体时段', async () => {
+    await t.test('审核日程移除时间指针，桌面和手机选中同一活动可查看完整服务日期', async () => {
       await teacher.setViewportSize({ width: 890, height: 900 });
       await teacher.goto(
         admin + '/schedule?date=' + demo.anchor + '&unit=week&view=chart&q=' +
@@ -1188,22 +1189,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await visible(row);
       assert.equal(await teacher.getByRole('slider').count(), 0);
       assert.equal(await teacher.locator('.now-line').count(), 0);
-      const morning = row.getByRole('button', { name: /09:30 至/ });
-      const afternoon = row.getByRole('button', { name: /14:15 至/ });
-      const bars = await Promise.all([morning.boundingBox(), afternoon.boundingBox()]);
-      assert.ok(
-        Math.abs(bars[0].x + bars[0].width / 2 - (bars[1].x + bars[1].width / 2)) < 22,
-        '此宽度应复现两个扩展触控区重叠',
-      );
-      for (const [bar, time] of [
-        [morning, '09:30'],
-        [afternoon, '14:15'],
-      ]) {
-        await bar.click();
-        await teacher.waitForURL((u) => u.searchParams.get('slot')?.includes('T' + time));
-        assert.equal(await teacher.locator('.time-choices').count(), 0);
-        await visible(teacher.getByRole('complementary', { name: '时段详情' }));
-      }
+      assert.equal(await row.locator('rect[role=button]').count(), 1);
+      await row.locator('rect[role=button]').click();
+      const detail = teacher.getByRole('complementary', { name: '日程详情' });
+      await visible(detail.getByText(demo.before + ' 至 ' + demo.anchor, {exact:true}));
+      assert.equal(await detail.getByText('报名截止').count(), 0);
       const touch = await browser.newContext({
         ignoreHTTPSErrors: true,
         viewport: { width: 390, height: 844 },
@@ -1216,10 +1206,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
           admin + '/schedule?date=' + demo.anchor + '&unit=week&view=chart&q=' +
             encodeURIComponent('校园服务丙'),
         );
-        await phone.getByRole('button', { name: /校园服务丙.*14:15 至/ }).tap();
-        await phone.waitForURL((u) => u.searchParams.get('slot')?.includes('T14:15'));
-        await visible(phone.getByRole('complementary', { name: '时段详情' }));
-        assert.equal(await phone.locator('.time-choices').count(), 0);
+        await phone.locator('.chart tr').filter({hasText:'校园服务丙'}).locator('rect[role=button]').tap();
+        await phone.waitForURL((u) => u.searchParams.has('item'));
+        await visible(phone.getByRole('complementary', { name: '日程详情' }));
+        await visible(phone.locator('.schedule-detail').getByText(demo.before + ' 至 ' + demo.anchor, {exact:true}));
       } finally {
         await touch.close();
       }
@@ -1251,7 +1241,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       assert.deepEqual(requested, [1, 2, 1, 2], '追加只读下一页，失败时整段重试');
       assert.match(await rows.first().innerText(), /分页演示 01/);
       await rows.filter({ hasText: '分页演示 21' }).getByRole('button').first().click();
-      const detail = student.getByRole('complementary', { name: '时段详情' });
+      const detail = student.getByRole('complementary', { name: '日程详情' });
       await visible(detail);
       const selectedUrl = student.url();
       await link(student, '查看真实获批详情').click();
@@ -1267,7 +1257,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await pickOption(student, '活动状态', '已发布');
       await student.waitForURL((url) => url.searchParams.get('status') === 'published');
       await visible(detail.getByRole('heading', { name: '分页演示 21' }));
-      assert.equal(new URL(student.url()).searchParams.get('slot'), new URL(selectedUrl).searchParams.get('slot'));
+      assert.equal(new URL(student.url()).searchParams.get('item'), new URL(selectedUrl).searchParams.get('item'));
       await student.locator('.schedule-more button').click();
       await student.locator('.schedule-more').waitFor({ state: 'detached' });
       assert.equal(await rows.count(), 41);
@@ -1326,7 +1316,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       );
       await visible(teacher.locator('.schedule-list li').first());
       await teacher.locator('.schedule-list li').first().getByRole('button').first().click();
-      const detail = teacher.getByRole('complementary', { name: '时段详情' });
+      const detail = teacher.getByRole('complementary', { name: '日程详情' });
       await visible(detail.getByRole('heading', { name: title }));
       // 刷新在途时切到获批版本：旧工作稿的行与详情在切换那一刻撤下，不等旧响应收尾。
       const inflight = await holdResponse(
@@ -1355,7 +1345,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       );
       await visible(teacher.locator('.schedule-list li').first());
       await teacher.locator('.schedule-list li').first().getByRole('button').first().click();
-      await visible(teacher.getByRole('complementary', { name: '时段详情' }));
+      await visible(teacher.getByRole('complementary', { name: '日程详情' }));
       await teacher.route('**/api/v1/timeline**', (route) => route.fulfill({ status: 503, body: '' }), { times: 1 });
       await teacher.evaluate(() => window.dispatchEvent(new Event('focus')));
       await visible(teacher.getByText('状态待刷新，请重试', { exact: false }));
@@ -1755,7 +1745,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       );
       await link(student, content.title).click();
       assert.ok((await request).ok());
-      await visible(student.getByText('每周参加报名在活动群内完成'));
+      await visible(student.locator('.facts').getByText(content.schedule.duration_start_date + ' 至 ' + content.schedule.duration_end_date));
+      assert.equal(await student.getByText('每周参加报名在活动群内完成').count(), 0);
+      const label = student.locator('.facts dt').filter({hasText:'报名截止'});
+      assert.equal(await label.evaluate(el => { const r = document.createRange(); r.selectNodeContents(el.lastChild); return r.getClientRects().length; }), 1);
       await visible(student.getByText('报名中', { exact: true }));
       await visible(student.getByText(/每次 2.0 小时/));
       await fits(student);
@@ -1768,8 +1761,17 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await link(student, '返回活动列表').click();
       assert.equal(new URL(student.url()).searchParams.get('q'), content.title);
       assert.equal(new URL(student.url()).searchParams.get('page'), '1');
+      await owner.goto(web + '/managed/' + weekly.id + '/edit');
+      const location = owner.getByLabel('活动地点', {exact:true});
+      await location.fill('图书馆一层');
+      await button(owner, '保存草稿').click();
+      await visible(owner.getByText('草稿已保存', {exact:true}));
+      const saved = await db.activityRevision.findFirstOrThrow({where:{activity_id:weekly.id}, orderBy:{revision:'desc'}});
+      assert.deepEqual(saved.content.schedule, content.schedule);
+      assert.equal(saved.content.location, '图书馆一层');
       await student.goto(web + '/activities/' + first.id);
-      await visible(student.getByText('单次活动', { exact: true }));
+      await visible(student.getByText('活动日期', {exact:true}));
+      assert.equal(await student.getByText('单次活动', {exact:true}).count(), 0);
       assert.equal(await student.getByText('每周参加报名在活动群内完成').count(), 0);
     });
     await t.test('新建按日活动：标题草稿、补全送审、分钟滚轮和管理日程', async () => {
@@ -1880,7 +1882,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       for (const text of ['13800000000','library@example.org','13900000000'])
         await visible(contactDialog.getByText(text,{exact:true}));
       await button(contactDialog,'关闭').click();
-      for (const unit of ['hour', 'day', 'week', 'month']) {
+      for (const unit of ['day', 'week', 'month']) {
         await owner.goto(web + '/managed-schedule?date=2027-05-01&view=chart&unit=' + unit);
         const row = owner.locator('.chart tbody tr').filter({ hasText: '跨校区图书整理' });
         await visible(row);
@@ -1889,7 +1891,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
           0,
         );
         await row.getByRole('button').first().click();
-        await visible(owner.getByRole('complementary', { name: '时段详情' }));
+        await visible(owner.getByRole('complementary', { name: '日程详情' }));
       }
     });
 

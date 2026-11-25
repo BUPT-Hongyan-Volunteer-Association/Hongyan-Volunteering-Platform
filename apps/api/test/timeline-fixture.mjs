@@ -217,6 +217,7 @@ export async function createWeeklyRevisionPair(db, { activityCode, title, date, 
   };
   const pending = {
     ...approved,
+    duration_end_date: new Date(Date.parse(date) + 86400000).toISOString().slice(0, 10),
     excluded_dates: [date],
     additional_slots: [{ starts_at: atTime(date, '16:15'), ends_at: atTime(date, '17:15') }],
   };

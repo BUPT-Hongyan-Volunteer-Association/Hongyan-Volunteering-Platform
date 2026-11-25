@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { serviceDateText } from '@hongyan/contracts/activity';
 import { computed } from 'vue';
 import { listManagedActivities } from '@hongyan/contracts';
 import { useRoute, useRouter } from 'vue-router';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
-import { statusLabels, serviceTime } from '@hongyan/ui/activityDisplay';
+import { statusLabels } from '@hongyan/ui/activityDisplay';
 import { pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 
@@ -42,7 +43,7 @@ const { data, loading, error, refresh: load } = usePageRead(page, async signal =
               ><UiIcon name="Location" />{{
                 [a.campus, a.location].filter(Boolean).join(' · ')
               }}</span
-            ><span><UiIcon name="Clock" />{{ serviceTime(a) }}</span>
+            ><span><UiIcon name="Calendar" />{{ serviceDateText(a.schedule) }}</span>
           </div>
         </div>
         <div class="page-actions">

@@ -1,6 +1,5 @@
 import type {
   ActivityInput,
-  ActivitySchedule,
   NotificationEvent,
   Receipt,
   Notice,
@@ -11,7 +10,7 @@ import type {
   NotificationEvent as EventRow,
 } from '../generated/prisma/client.js';
 import { stable } from '../database.js';
-import { slots } from '../activities/schedule.js';
+import { serviceDateText } from '@hongyan/contracts/activity';
 
 const fieldLabels = {
   schedule: '活动时间',
@@ -46,22 +45,10 @@ const stamp = new Intl.DateTimeFormat('zh-CN', {
   hourCycle: 'h23',
 });
 const moment = (iso: string) => stamp.format(new Date(iso));
-const kinds = { continuous: '单次', weekly: '每周', custom: '多时段' };
-
-function scheduleText(schedule: ActivitySchedule) {
-  if (schedule.schedule_type === 'date_range') {
-    return schedule.duration_start_date === schedule.duration_end_date ? schedule.duration_start_date :
-      schedule.duration_start_date + ' 至 ' + schedule.duration_end_date;
-  }
-  const times = slots(schedule).sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at));
-  const first = times[0];
-  return `${moment(first.starts_at)} 至 ${moment(first.ends_at)}（${kinds[schedule.schedule_type]}${times.length > 1 ? `，共 ${times.length} 段` : ''}）`;
-}
-
 function display(field: Field, version: ActivityInput) {
   const value = version[field];
   if (value == null || value === '') return '未设置';
-  if (field === 'schedule') return scheduleText(version.schedule!);
+  if (field === 'schedule') return serviceDateText(version.schedule);
   if (field === 'contacts') return version.contacts?.join('、') || '未设置';
   if (field.endsWith('_at') && typeof value === 'string') return moment(value);
   return String(value);

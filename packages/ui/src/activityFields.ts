@@ -1,4 +1,4 @@
-import { activityTypes, localDateTime } from './activityDisplay';
+import { localDateTime } from './activityDisplay';
 import type { IconName } from './UiIcon.vue';
 
 type Field = [
@@ -58,10 +58,9 @@ export const activityFields = fieldGroups.flatMap((g) => g.fields);
 const labels: Record<string, string> = {
   ...Object.fromEntries(activityFields.map(([key, label]) => [key, label])),
   selection_text: '录取说明', starts_at: '开始时间', ends_at: '结束时间',
-  schedule: '活动安排',
-  schedule_type: '时间类型',
-  duration_start_date: '周期开始',
-  duration_end_date: '周期结束',
+  schedule: '活动日期',
+  duration_start_date: '活动开始日期',
+  duration_end_date: '活动结束日期',
   weekly_slots: '每周时段',
   excluded_dates: '暂停日期',
   additional_slots: '补充时段',
@@ -83,13 +82,12 @@ export function fieldValue(key: string, value: unknown): string {
     return value.length ? value.map((v) => fieldValue(key, v)).join('\n') : '无';
   if (typeof value === 'object')
     return Object.entries(value)
+      .filter(([key]) => key !== 'schedule_type')
       .map(([k, v]) => fieldLabel(k) + '　' + fieldValue(k, v))
       .join('\n');
   const part = key.split('.').at(-1) || key;
   if (part.endsWith('_at') && typeof value === 'string' && Number.isFinite(Date.parse(value)))
     return localDateTime(value) + '（北京时间）';
-  if (part === 'schedule_type' && Object.hasOwn(activityTypes, String(value)))
-    return activityTypes[value as keyof typeof activityTypes];
   if (part === 'expected_hours_basis') return value === 'whole_activity' ? '整期' : '单次';
   if (part === 'expected_hours') return value + ' 小时';
   if (part === 'group_qr_id') return '已上传二维码';

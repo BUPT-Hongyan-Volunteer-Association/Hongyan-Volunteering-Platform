@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { serviceDateText } from '@hongyan/contracts/activity';
 import { computed, ref } from 'vue';
 import UiIcon, { type IconName } from '@hongyan/ui/UiIcon.vue';
-import { activityTypes as types, serviceTime, localDateTime as date } from '@hongyan/ui/activityDisplay';
+import { localDateTime as date } from '@hongyan/ui/activityDisplay';
 import {
   applyForActivity,
   createCommand,
@@ -21,6 +22,8 @@ const saving = ref(false);
 const applyError = ref('');
 const statement = ref('');
 const command = createCommand();
+const showSignupDates = computed(() => props.showRegistrations && props.activity.status === 'published' &&
+  (!props.activity.my_registration_status || props.activity.my_registration_status === 'withdrawn'));
 const canApply = computed(
   () =>
     props.showRegistrations &&
@@ -113,8 +116,7 @@ const conditions: [keyof Activity, string, IconName][] = [
     <div v-if="activity.schedule" class="detail-columns">
       <div class="detail-intro">
         <div class="page-actions">
-          <span class="state-chip">{{ types[activity.schedule.schedule_type] }}</span
-          ><span v-if="activity.registration_phase" class="phase">{{
+          <span v-if="activity.registration_phase" class="phase">{{
             phases[activity.registration_phase]
           }}</span>
         </div>
@@ -124,35 +126,9 @@ const conditions: [keyof Activity, string, IconName][] = [
           <dd>{{ [activity.campus, activity.location].filter(Boolean).join(' · ') }}</dd>
         </dl>
         <dl class="facts">
-          <template v-if="['weekly', 'custom'].includes(activity.schedule.schedule_type) && 'duration_start_date' in activity.schedule"
-            ><dt><UiIcon name="Calendar" />活动周期</dt>
-            <dd>
-              {{ activity.schedule.duration_start_date }} 至
-              {{ activity.schedule.duration_end_date }}
-            </dd></template
-          >
-          <dt><UiIcon name="Clock" />服务时段</dt>
-          <dd v-if="activity.schedule.schedule_type === 'weekly'">
-            <div
-              v-for="rule in activity.schedule.weekly_slots"
-              :key="rule.weekday + '-' + rule.start_time"
-            >
-              每周{{ '一二三四五六日'[rule.weekday - 1] }} {{ rule.start_time.slice(0, 5) }}–{{
-                rule.end_day_offset ? '次日 ' : ''
-              }}{{ rule.end_time.slice(0, 5) }}
-            </div>
-            <div v-for="d in activity.schedule.excluded_dates" :key="d">{{ d }} 暂停</div>
-            <div v-for="s in activity.schedule.additional_slots" :key="s.starts_at">
-              补充 {{ date(s.starts_at) }} 至 {{ date(s.ends_at) }}
-            </div>
-          </dd>
-          <dd v-else-if="activity.schedule.schedule_type === 'custom'">
-            <div v-for="s in activity.schedule.slots" :key="s.starts_at">
-              {{ date(s.starts_at) }} 至 {{ date(s.ends_at) }}
-            </div>
-          </dd>
-          <dd v-else>{{ serviceTime(activity) }}</dd>
-          <template v-if="activity.registration_closes_at"
+          <dt><UiIcon name="Calendar" />活动日期</dt>
+          <dd>{{ serviceDateText(activity.schedule) }}</dd>
+          <template v-if="showSignupDates && activity.registration_closes_at"
             ><dt><UiIcon name="Calendar" />报名截止</dt>
             <dd>
               <mark>{{ date(activity.registration_closes_at) }}</mark>
@@ -187,11 +163,6 @@ const conditions: [keyof Activity, string, IconName][] = [
             </template>
           </dl>
         </section>
-        <aside class="joining">
-          <h2>报名须知</h2>
-          <p>本活动统一报名，录取后查看入群方式</p>
-          <p v-if="activity.schedule.schedule_type === 'weekly'">每周参加报名在活动群内完成</p>
-        </aside>
         <details v-if="canApply" class="apply-statement">
           <summary>报名说明（选填）</summary>
           <label
@@ -200,13 +171,13 @@ const conditions: [keyof Activity, string, IconName][] = [
         </details>
         <details
           v-if="
-            activity.registration_opens_at ||
+            (showSignupDates && activity.registration_opens_at) ||
             activity.result_expected_date ||
             activity.selection_text ||
             activity.hours_rule_text
           "
         >
-          <summary>录取、时长与报名时间</summary>
+          <summary>{{ showSignupDates ? '录取、时长与报名时间' : '录取与时长' }}</summary>
           <dl>
             <template v-if="activity.selection_text"
               ><dt>录取说明</dt>
@@ -217,7 +188,7 @@ const conditions: [keyof Activity, string, IconName][] = [
               ><dt>时长认定</dt>
               <dd>{{ activity.hours_rule_text }}</dd></template
             >
-            <template v-if="activity.registration_opens_at"
+            <template v-if="showSignupDates && activity.registration_opens_at"
               ><dt>报名开放</dt>
               <dd>{{ date(activity.registration_opens_at) }}</dd></template
             >
@@ -307,6 +278,7 @@ dl {
   margin-top: 18px;
   grid-template-columns: 6.5em minmax(0, 1fr);
 }
+.facts dt { white-space: nowrap; }
 .facts dt,
 .conditions dt {
   display: flex;
@@ -356,15 +328,6 @@ summary::before {
 }
 details[open] summary::before {
   content: '▾';
-}
-.joining {
-  background: var(--surface);
-  padding: 12px 14px;
-  border-radius: var(--radius);
-}
-.joining h2 {
-  border-left: 3px solid var(--yellow);
-  padding-left: 9px;
 }
 .detail-footer {
   display: flex;

@@ -35,6 +35,7 @@ const route = useRoute(),
 const status = computed(
   () => String(route.query.status || 'pending') as 'pending' | 'approved' | 'rejected',
 );
+const visibleChanges = computed(() => review.value?.changes.filter(change => change.field_path !== 'schedule.schedule_type') ?? []);
 const page = computed(() => pageNumber(route.query.page));
 const windowScroll = () => window.scrollY;
 function scheduleReturn() {
@@ -241,8 +242,8 @@ watch(
         </p>
         <section v-if="review.previous_published_snapshot" class="diff">
           <h3>逐字段差异</h3>
-          <dl v-if="review.changes.length">
-            <template v-for="c in review.changes" :key="c.field_path"
+          <dl v-if="visibleChanges.length">
+            <template v-for="c in visibleChanges" :key="c.field_path"
               ><dt>{{ fieldLabel(c.field_path) }}</dt>
               <dd>
                 <span>{{ fieldValue(c.field_path, JSON.parse(c.before_value)) }}</span> →

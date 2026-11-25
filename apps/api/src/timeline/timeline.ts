@@ -1,12 +1,12 @@
 import { parseActivityFilters, publishedActivityFilter } from '../activities/filters.js';
-import { localDate } from '@hongyan/contracts/activity';
+import { slots } from '../activities/schedule.js';
+import { localDate, serviceDates } from '@hongyan/contracts/activity';
 import { createHash } from 'node:crypto';
 import type {
   Activity,
   ActivityInput,
   TimelineActivity,
   TimelineActivityPage,
-  TimelineItem,
 } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Database } from '../database.js';
@@ -14,15 +14,10 @@ import type { Actor } from '../auth/session.guard.js';
 import { invalid } from '../http.js';
 import { managedScope } from '../activities/read.js';
 import { activityViews } from '../activities/list.js';
-import { cachedSlots, slots } from '../activities/schedule.js';
 
 export type TimelineScope = 'public' | 'mine' | 'managed' | 'all';
 const scopes: TimelineScope[] = ['public', 'mine', 'managed', 'all'];
 const overlappingStatuses = ['published', 'completed'];
-function instant(milliseconds: number) {
-  return new Date(milliseconds + 8 * 3600_000).toISOString().replace(/(?:\.000)?Z$/, '+08:00');
-}
-
 type Query = Record<string, string>;
 
 /** 契约：活动 ID 标准小写 UUID 字符串的 UTF-8 字节 FNV-1a 32 位无符号散列模 6。 */
@@ -33,70 +28,44 @@ export function colorIndex(id: string) {
   return (hash >>> 0) % 6;
 }
 
-type Plan = { activity_id: string; start: number; end: number };
+type Period = { activityId: string; start: number; end: number };
 
-/** 本人已录取活动的计划时段，仅用于窗口内的重叠提示。取消活动不计重叠。 */
-async function plannedSlots(db: Database, studentId: string, from: number, to: number) {
-  const rows = await db.activity.findMany({
+/** 仅在本人已录取活动的实际服务时间相交时标记重叠。 */
+async function plannedOverlapIds(db: Database, studentId: string, from: number, to: number) {
+  const activities = await db.activity.findMany({
     where: {
-      status: { in: overlappingStatuses },
-      published_revision: { not: null },
+      status: { in: overlappingStatuses }, published_revision: { not: null },
       registrations: { some: { student_id: studentId, status: 'accepted' } },
     },
     include: { revisions: { where: { revision_state: 'approved' } } },
   });
-  const plan: Plan[] = [];
-  for (const row of rows) {
-    const revision = row.revisions.find((r) => r.revision === row.published_revision);
+  const periods: Period[] = [];
+  for (const activity of activities) {
+    const revision = activity.revisions.find(r => r.revision === activity.published_revision);
     if (!revision) continue;
-    const { schedule } = revision.content as unknown as ActivityInput;
-    for (const { start, end } of windowSlots(schedule, from, to))
-      plan.push({ activity_id: row.id, start, end });
+    for (const slot of slots((revision.content as unknown as ActivityInput).schedule)) {
+      const start = Date.parse(slot.starts_at), end = Date.parse(slot.ends_at);
+      if (start < to && end > from) periods.push({ activityId: activity.id, start, end });
+    }
   }
-  return plan;
+  const overlapping = new Set<string>();
+  periods.sort((a, b) => a.start - b.start);
+  let active: Period[] = [];
+  for (const period of periods) {
+    active = active.filter(other => other.end > period.start);
+    for (const other of active) {
+      if (other.activityId === period.activityId) continue;
+      overlapping.add(other.activityId);
+      overlapping.add(period.activityId);
+    }
+    active.push(period);
+  }
+  return overlapping;
 }
 
-function windowSlots(schedule: Activity['schedule'], from: number, to: number, expand = slots) {
-  return expand(schedule)
-    .map((slot) => ({ ...slot, start: Date.parse(slot.starts_at), end: Date.parse(slot.ends_at) }))
-    .filter((slot) => slot.start < to && slot.end > from);
-}
-
-function toActivity(
-  view: Activity,
-  now: Date,
-  from: number,
-  to: number,
-  management: boolean,
-  expand: typeof slots,
-  plan?: Plan[],
-): TimelineActivity | null {
-  const { schedule } = view;
-  if (!schedule) return null;
-  const segments = windowSlots(schedule, from, to, expand).sort((a, b) => a.start - b.start);
-  if (!segments.length) return null;
-  const others = overlappingStatuses.includes(view.status)
-    ? plan?.filter((slot) => slot.activity_id !== view.id)
-    : undefined;
-  const items: TimelineItem[] = segments.map((slot) => {
-    return {
-      activity_id: view.id,
-      activity_code: view.activity_code,
-      title: view.title,
-      starts_at: instant(slot.start),
-      ends_at: instant(slot.end),
-      status: view.status,
-      occurrence_key: [view.id, view.schedule_revision, slot.starts_at].join('/'),
-      schedule_revision: view.schedule_revision,
-      schedule_type: schedule.schedule_type,
-      revision_state: view.revision_state,
-      ...(view.registration_phase && { registration_phase: view.registration_phase }),
-      ...(view.location && { location: view.location }),
-      ...(plan && {
-        has_planned_overlap: others?.some((o) => slot.start < o.end && slot.end > o.start) ?? false,
-      }),
-    };
-  });
+function toActivity(view: Activity, scope: TimelineScope, overlaps?: Set<string>): TimelineActivity | null {
+  const { duration_start_date, duration_end_date } = serviceDates(view.schedule);
+  if (!duration_start_date || !duration_end_date) return null;
   return {
     activity_id: view.id,
     activity_code: view.activity_code,
@@ -104,20 +73,18 @@ function toActivity(
     status: view.status,
     revision_state: view.revision_state,
     schedule_revision: view.schedule_revision,
-    schedule_type: schedule.schedule_type,
     registration_phase: view.registration_phase ?? 'unavailable',
     ...(view.campus && { campus: view.campus }),
     location: view.location ?? '',
     capacity: view.capacity ?? 0,
-    ...(view.registration_closes_at && { registration_closes_at: view.registration_closes_at }),
+    ...(scope === 'public' && view.status === 'published' && view.registration_closes_at && { registration_closes_at: view.registration_closes_at }),
     ...(view.owner_account_id && { owner_account_id: view.owner_account_id }),
     owner_display_name: view.owner_display_name,
     color_index: colorIndex(view.id),
-    segments: items,
-    ...(plan && { has_planned_overlap: items.some((item) => item.has_planned_overlap) }),
+    duration_start_date, duration_end_date,
+    ...(overlaps && { has_planned_overlap: overlaps.has(view.id) }),
     is_ongoing: view.is_ongoing,
-    state_evaluated_at: now.toISOString(),
-    ...(management && {
+    ...((scope === 'managed' || scope === 'all') && {
       has_pending_review: view.has_pending_review === true,
       ...(view.current_review_id && { current_review_id: view.current_review_id }),
     }),
@@ -150,7 +117,6 @@ export async function timelinePage(
   const management = scope === 'managed' || scope === 'all';
   const range = parseActivityFilters(q, management, true);
   const { from, to } = range;
-  const expand = cachedSlots();
   const revision = management ? (q.revision_scope === 'published' ? 'published' : 'working') : 'published';
   const studentId = scope === 'mine' ? actor.student?.id : undefined;
 
@@ -180,20 +146,16 @@ export async function timelinePage(
     if (start >= to) nextStart = Math.min(nextStart, start);
     if (end <= from) lastEnd = Math.max(lastEnd, end);
   }
-  const views = await activityViews(db, where, management ? revision : 'public', q, { studentId, range, expand, outsideWindow }, (a) => {
-    digest.update(JSON.stringify([
-      a.id, a.activity_code, a.title, a.status, a.schedule_revision, a.revision_state, a.schedule,
-      a.campus, a.location, a.capacity, a.registration_closes_at, a.registration_phase, a.is_ongoing,
-      a.owner_account_id, a.owner_display_name, a.has_pending_review, a.current_review_id,
-    ]));
+  const views = await activityViews(db, where, management ? revision : 'public', q, { studentId, range, outsideWindow }, (a) => {
+    digest.update(JSON.stringify(toActivity(a, scope)));
   });
-  const plan =
+  const overlaps =
     scope === 'mine' && studentId
-      ? await plannedSlots(db, studentId, from, to)
+      ? await plannedOverlapIds(db, studentId, from, to)
       : undefined;
   const owners = management ? await ownerChoices(db, actor, scope) : undefined;
   const items = views.items
-    .map((view) => toActivity(view, views.now, from, to, management, expand, plan))
+    .map((view) => toActivity(view, scope, overlaps))
     .filter((item): item is TimelineActivity => item !== null);
   const suggestedTime = Number.isFinite(nextStart) ? nextStart : lastEnd - 1;
   const page = {
@@ -205,9 +167,6 @@ export async function timelinePage(
     state_evaluated_at: views.now.toISOString(),
     ...(owners && { owner_options: owners }),
   };
-  if (plan) {
-    plan.sort((a, b) => a.activity_id.localeCompare(b.activity_id) || a.start - b.start || a.end - b.end);
-    digest.update(JSON.stringify(plan));
-  }
+  if (overlaps) digest.update(JSON.stringify([...overlaps].sort()));
   return { page, rangeKey: digest.digest('hex') };
 }

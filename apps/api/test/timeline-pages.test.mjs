@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { slots } from '../dist/activities/schedule.js';
 import { atTime, createScheduleDataset, createScheduleDemo, createWeeklyRevisionPair, moveActivityTo, presetRegistration, setActivityOwner } from './timeline-fixture.mjs';
 
 import { withPages, shiftDay, link, button, visible, publicSchedulePage, holdResponse, settleRender } from './page-environment.mjs';
@@ -39,30 +38,25 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
         revision +
         '&q=' +
         encodeURIComponent(title);
-      const detail = teacher.getByRole('complementary', { name: '时段详情' });
+      const detail = teacher.getByRole('complementary', { name: '日程详情' });
       const row = teacher.locator('.schedule-list li').filter({ hasText: title });
       const mineAt =
         web + '/mine/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent(title);
       const mineRow = student.locator('.schedule-list li').filter({ hasText: title });
 
-      // 同一项活动的两版：获批版 A 是两条例行时段，待审版 B 停办当日例行时段、只留补充的 16:15。
+      const changedDates = date + ' 至 ' + pair.pending.duration_end_date;
       await teacher.goto(scheduleAt('published'));
       await visible(row);
-      assert.match(await row.innerText(), /09:30/);
-      assert.match(await row.innerText(), /14:15/);
-      assert.doesNotMatch(await row.innerText(), /16:15/);
-      assert.equal(await row.locator('.slot-list button').count(), 2);
+      assert.equal(await row.locator('.service-period').innerText(), date);
       await teacher.goto(scheduleAt('working'));
       await visible(row);
-      assert.match(await row.innerText(), /16:15/);
-      assert.doesNotMatch(await row.innerText(), /09:30|14:15/);
-      assert.equal(await row.locator('.slot-list button').count(), 1);
+      assert.equal(await row.locator('.service-period').innerText(), changedDates);
       assert.match(await row.locator('.meta-line').innerText(), /待审核/);
 
-      // 驳回：工作版本回落到获批版，所选 16:15 在窗内消失，按第 3 种清除并说明。
-      await row.getByRole('button', { name: /16:15/ }).click();
+      // 驳回后保留选中活动，日程恢复为获批版本的日期。
+      await row.getByRole('button').first().click();
       await visible(detail.getByRole('heading', { name: title }));
-      assert.equal(new URL(teacher.url()).searchParams.has('slot'), true);
+      assert.equal(new URL(teacher.url()).searchParams.get('item'), pair.activity.id);
       const beforeReject = new URL(teacher.url());
       await link(teacher, '查看待审版本').click();
       await visible(button(teacher, '驳回'));
@@ -70,25 +64,18 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       await button(teacher, '驳回').click();
       await teacher.waitForURL((url) => url.pathname === '/schedule');
       await visible(teacher.getByText('已驳回', { exact: true }));
-      await visible(teacher.getByText('所选时段已随安排更新失效，已回到日程'));
-      await teacher.waitForURL(
-        (url) => !url.searchParams.has('item') && !url.searchParams.has('slot'),
-      );
-      assert.equal(await teacher.locator('.schedule-detail').count(), 0);
+      await visible(detail.getByText(date, {exact:true}));
+      assert.equal(new URL(teacher.url()).searchParams.get('item'), pair.activity.id);
       const afterReject = new URL(teacher.url());
       for (const key of ['date', 'unit', 'view', 'revision', 'q'])
         assert.equal(afterReject.searchParams.get(key), beforeReject.searchParams.get(key));
       await visible(row);
-      assert.match(await row.innerText(), /09:30/);
-      assert.match(await row.innerText(), /14:15/);
-      assert.doesNotMatch(await row.innerText(), /16:15/);
+      assert.equal(await row.locator('.service-period').innerText(), date);
 
       // 学生端仍见获批版 A。
       await student.goto(mineAt);
       await visible(mineRow);
-      assert.match(await mineRow.innerText(), /09:30/);
-      assert.match(await mineRow.innerText(), /14:15/);
-      assert.doesNotMatch(await mineRow.innerText(), /16:15/);
+      assert.equal(await mineRow.locator('.service-period').innerText(), date);
 
       // 批准：驳回后重新提交同一 B（rev 3），批准后学生端见 B。
       const submitted = (
@@ -117,9 +104,9 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
 
       await teacher.goto(scheduleAt('working'));
       await visible(row);
-      assert.match(await row.innerText(), /16:15/);
+      assert.equal(await row.locator('.service-period').innerText(), changedDates);
       assert.match(await row.locator('.meta-line').innerText(), /待审核/);
-      await row.getByRole('button', { name: /16:15/ }).click();
+      await row.getByRole('button').first().click();
       await visible(detail.getByRole('heading', { name: title }));
       const beforeApprove = new URL(teacher.url());
       await link(teacher, '查看待审版本').click();
@@ -130,17 +117,14 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       const afterApprove = new URL(teacher.url());
       for (const key of ['date', 'unit', 'view', 'revision', 'q'])
         assert.equal(afterApprove.searchParams.get(key), beforeApprove.searchParams.get(key));
-      await visible(detail.getByText(/16:15/));
-      for (const key of ['item', 'slot'])
-        assert.equal(afterApprove.searchParams.get(key), beforeApprove.searchParams.get(key));
-      assert.equal(await teacher.getByText('所选时段已随安排更新失效，已回到日程').count(), 0);
+      await visible(detail.getByText(changedDates, {exact:true}));
+      assert.equal(afterApprove.searchParams.get('item'), beforeApprove.searchParams.get('item'));
       assert.doesNotMatch(await row.locator('.meta-line').innerText(), /待审核/);
 
-      // 学生端见获批版 B：只剩 16:15。
+      // 学生现在看到新获批的完整日期。
       await student.goto(mineAt);
       await visible(mineRow);
-      assert.match(await mineRow.innerText(), /16:15/);
-      assert.doesNotMatch(await mineRow.innerText(), /09:30|14:15/);
+      assert.equal(await mineRow.locator('.service-period').innerText(), changedDates);
 
       // 只看待审核：处理完成后活动移出结果，页面给出空态。
       await teacher.goto(
@@ -240,12 +224,12 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       const managedRows = helper.locator('.schedule-list li');
       await visible(managedRows.first());
       assert.equal(await managedRows.count(), 1);
-      await managedRows.first().getByRole('button', { name: /10:00/ }).click();
-      const detail = helper.getByRole('complementary', { name: '时段详情' });
+      await managedRows.first().getByRole('button').first().click();
+      const detail = helper.getByRole('complementary', { name: '日程详情' });
       await visible(detail.getByRole('heading', { name: '交接演示甲' }));
       await setActivityOwner(db, { activityCode: 'TL-9412', username: '0000000004', attached: false });
       await helper.evaluate(() => window.dispatchEvent(new Event('focus')));
-      await visible(helper.getByText('所选活动已移出当前筛选'));
+      await visible(helper.getByText('所选活动已移出当前日期或筛选范围'));
       assert.equal(await managedRows.count(), 0);
       assert.equal(await helper.locator('.schedule-detail').count(), 0);
     });
@@ -323,20 +307,20 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       assert.equal(new Set(chartTitles).size, chartTitles.length);
       await button(student, '列表').click();
 
-      // 分段键取自同一结果，刷新后范围仍完整、选中保留。
-      await rows.first().getByRole('button', { name: /10:00/ }).click();
-      const detail = student.getByRole('complementary', { name: '时段详情' });
+      // 活动标识取自同一结果，刷新后范围仍完整、选中保留。
+      await rows.first().getByRole('button').first().click();
+      const detail = student.getByRole('complementary', { name: '日程详情' });
       await visible(detail.getByRole('heading', { name: expected[0] }));
       assert.equal(
-        new URL(student.url()).searchParams.get('slot'),
-        server[0].items[0].segments[0].occurrence_key,
+        new URL(student.url()).searchParams.get('item'),
+        server[0].items[0].activity_id,
       );
       requested.length = 0;
       await student.evaluate(() => window.dispatchEvent(new Event('focus')));
       await visible(detail.getByRole('heading', { name: expected[0] }));
       assert.deepEqual([...requested].sort((a, b) => a - b), [1, 2], '刷新重读已加载的两页');
 
-      // 侧栏不保留已失效的段：同日改时刻后所选时段键消失，活动仍在列表里。
+      // 调整当天服务时刻后，侧栏仍指向同一活动。
       await db.activityRevision.update({
         where: {
           activity_id_revision: { activity_id: server[0].items[0].activity_id, revision: 1 },
@@ -354,10 +338,8 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
         },
       });
       await student.evaluate(() => window.dispatchEvent(new Event('focus')));
-      await visible(student.getByText('所选时段已随安排更新失效，已回到日程'));
-      await student.waitForURL((url) => !url.searchParams.has('slot'));
-      assert.equal(await student.locator('.schedule-detail').count(), 0);
-      assert.equal(new URL(student.url()).searchParams.has('slot'), false);
+      await visible(detail.getByRole('heading', {name:expected[0]}));
+      assert.equal(new URL(student.url()).searchParams.get('item'), server[0].items[0].activity_id);
       assert.equal(await rows.count(), 40);
       assert.ok((await rows.first().innerText()).includes(expected[0]));
     });
@@ -380,7 +362,7 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
         url.pathname === '/api/v1/timeline' && url.searchParams.get('q') === title;
       const last = await db.activity.findUniqueOrThrow({ where: { activity_code: created.codes.at(-1) } });
       await teacher.goto(admin + '/schedule?' + query + '&item=' + last.id);
-      const detail = teacher.getByRole('complementary', { name: '时段详情' });
+      const detail = teacher.getByRole('complementary', { name: '日程详情' });
       await detail.getByRole('heading', { name: '深页演示 1001' }).waitFor({ timeout: 60000 });
       const expectedPages = Array.from({ length: 51 }, (_, i) => i + 1);
 
@@ -495,10 +477,10 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
 
       await student.goto(at);
       const rows = student.locator('.schedule-list li');
-      const detail = student.getByRole('complementary', { name: '时段详情' });
+      const detail = student.getByRole('complementary', { name: '日程详情' });
       await visible(student.getByText('41 项（已显示 20）', { exact: false }));
       await loadTwoPages();
-      await rows.first().getByRole('button', { name: /10:00/ }).click();
+      await rows.first().getByRole('button').first().click();
       await visible(detail.getByRole('heading', { name: title + ' 01' }));
 
       // 第 2 页的权限收回不被第 1 页的普通失败掩盖：清空页集合与详情，入口回到「重新读取」。
@@ -574,19 +556,19 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
         student,
         (url) => url.pathname === '/api/v1/timeline' && url.searchParams.get('q') === shrinkTitle,
       );
-      await student.goto(shrinkAt + '&item=' + target.activity_id + '&slot=' + encodeURIComponent(target.segments[0].occurrence_key));
+      await student.goto(shrinkAt + '&item=' + target.activity_id);
       await held.received;
       await db.activity.deleteMany({
         where: { activity_code: { startsWith: 'TL-88', lt: 'TL-8822' } },
       });
       await held.release();
-      const shrinkDetail = student.getByRole('complementary', { name: '时段详情' });
+      const shrinkDetail = student.getByRole('complementary', { name: '日程详情' });
       await visible(shrinkDetail.getByRole('heading', { name: shrinkTitle + ' 41' }));
       await visible(student.getByText(/^20 项/));
       assert.equal(await rows.count(), 20, '旧页集合不被当成功提交');
       assert.equal(await rows.filter({ hasText: shrinkTitle + ' 01' }).count(), 0, '被删的活动不出现');
       assert.equal(await rows.filter({ hasText: shrinkTitle + ' 41' }).count(), 1);
-      assert.equal(await student.getByText('所选活动已移出当前筛选').count(), 0);
+      assert.equal(await student.getByText('所选活动已移出当前日期或筛选范围').count(), 0);
     });
 
     await t.test('日程 1-15 刷新重试整段重读不拼接旧页', async (t) => {
@@ -681,30 +663,29 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       await student.goto(at);
       await visible(student.getByText('21 项（已显示 20）', { exact: false }));
       const [target] = (await publicSchedulePage(student, date, title, 2)).items;
-      const slot = target.segments[0].occurrence_key;
 
       // 带选中直接进入：首屏读第 1 页后自动补读第 2 页，选中在跨午夜段上成立。
-      await student.goto(at + '&item=' + target.activity_id + '&slot=' + encodeURIComponent(slot));
+      await student.goto(at + '&item=' + target.activity_id);
       const rows = student.locator('.schedule-list li');
-      const detail = student.getByRole('complementary', { name: '时段详情' });
+      const detail = student.getByRole('complementary', { name: '日程详情' });
       await visible(detail.getByRole('heading', { name: title + ' 跨夜' }));
-      assert.match(await detail.innerText(), /23:00 至 .*02:00/);
-      assert.equal(await student.getByText('所选时段已移出当前窗口').count(), 0);
+      await visible(detail.getByText(before + ' 至 ' + date, {exact:true}));
+      assert.equal(await student.getByText('所选活动已移出当前日期或筛选范围').count(), 0);
       await visible(rows.filter({ hasText: title + ' 跨夜' }));
       assert.equal(await rows.count(), 21, '补读未因开始时刻早于窗口首而提前退出');
       assert.equal(new URL(student.url()).searchParams.get('item'), target.activity_id);
-      assert.equal(new URL(student.url()).searchParams.get('slot'), slot);
+      assert.equal(new URL(student.url()).searchParams.has('slot'), false);
 
       // 时间轴同样有这一段。
       await button(student, '时间轴').click();
       await visible(
-        student.getByRole('button', { name: new RegExp(title + ' 跨夜.*23:00 至 .*02:00') }),
+        student.getByRole('button', { name: title + ' 跨夜 ' + before + ' 至 ' + date }),
       );
       await student.setViewportSize({ width: 390, height: 844 });
       await button(student, '返回日程').click();
       await visible(student.locator('.chart rect[aria-pressed=true]'));
       await visible(button(student, '查看活动'));
-      assert.equal(new URL(student.url()).searchParams.get('slot'), slot);
+      assert.equal(new URL(student.url()).searchParams.has('slot'), false);
       await student.setViewportSize({ width: 1440, height: 900 });
     });
     await t.test('日程响应缺少范围摘要时可从当前窗口重试', async () => {

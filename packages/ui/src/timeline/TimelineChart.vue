@@ -1,138 +1,60 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import type { TimelineActivity, TimelineItem } from '@hongyan/contracts';
-import { activityTypes, localTime, timelineColors } from '../activityDisplay';
+import type { TimelineActivity } from '@hongyan/contracts';
+import { localDate, serviceDateText, serviceWindow } from '@hongyan/contracts/activity';
+import { timelineColors } from '../activityDisplay';
+import type { TimeUnit } from './window';
 
 const props = defineProps<{
   rows: TimelineActivity[];
   start: number;
   end: number;
-  unit: 'hour' | 'day' | 'week' | 'month';
+  unit: TimeUnit;
   now?: number;
   selected?: string;
 }>();
-const emit = defineEmits<{ choose: [row: TimelineActivity, segment: TimelineItem] }>();
+const emit = defineEmits<{ choose: [row: TimelineActivity] }>();
+const day = 86400000;
 const scroller = ref<HTMLDivElement>();
 const available = ref(0);
-const nameWidth = computed(() => (available.value && available.value < 560 ? 106 : 148));
-const columns = computed(() => {
-  if (props.unit === 'hour') return 24;
-  if (props.unit === 'day') return 6;
-  if (props.unit === 'month') return Math.round((props.end - props.start) / 86400000);
-  return 7;
-});
-const width = computed(() => {
-  const minimum =
-    props.unit === 'week'
-      ? 56
-      : props.unit === 'month'
-        ? 36
-        : props.unit === 'hour'
-          ? available.value && available.value < 560
-            ? 27
-            : 52
-          : 56;
-  return Math.max(columns.value * minimum, available.value - nameWidth.value - 2);
-});
-const ticks = computed(() =>
-  Array.from({ length: columns.value }, (_, i) => {
-    const at = props.start + ((props.end - props.start) * i) / columns.value;
-    const d = new Date(at + 8 * 3600000);
-    const label =
-      props.unit === 'week'
-        ? '周' + '日一二三四五六'[d.getUTCDay()] + ' ' + d.getUTCDate()
-        : props.unit === 'month'
-          ? String(d.getUTCDate())
-          : String(d.getUTCHours()).padStart(2, '0') + ':00';
-    return { at, label, x: (i * width.value) / columns.value };
-  }),
-);
-const selectedTime = computed(() => {
-  for (const row of props.rows) {
-    const s = row.segments.find((s) => s.occurrence_key === props.selected);
-    if (s) return Math.max(props.start, Date.parse(s.starts_at));
-  }
-  return undefined;
-});
-const selectedCol = computed(() =>
-  selectedTime.value === undefined
-    ? -1
-    : Math.floor(((selectedTime.value - props.start) / (props.end - props.start)) * columns.value),
-);
-const choices = ref<{ row: TimelineActivity; segments: TimelineItem[] }>();
-const selectedRow = (row: TimelineActivity) =>
-  row.segments.some((s) => s.occurrence_key === props.selected);
+const nameWidth = computed(() => available.value && available.value < 560 ? 106 : 148);
+const columns = computed(() => (props.end - props.start) / day);
+const width = computed(() => Math.max(columns.value * (props.unit === 'month' ? 44 : 56), available.value - nameWidth.value - 2));
+const ticks = computed(() => Array.from({ length: columns.value }, (_, i) => {
+  const at = props.start + i * day;
+  const date = new Date(at + 8 * 3600000);
+  const label = props.unit === 'week' ? '周' + '日一二三四五六'[date.getUTCDay()] + ' ' + date.getUTCDate()
+    : props.unit === 'month' ? String(date.getUTCDate()) : localDate(at);
+  return { at, label, x: i * width.value / columns.value };
+}));
 function x(time: number) {
-  return Math.min(
-    width.value,
-    Math.max(0, ((time - props.start) * width.value) / (props.end - props.start)),
-  );
+  return Math.min(width.value, Math.max(0, (time - props.start) * width.value / (props.end - props.start)));
 }
-function choose(row: TimelineActivity, s: TimelineItem) {
-  choices.value = undefined;
-  emit('choose', row, s);
-}
-const nowX = computed(() =>
-  props.now !== undefined && props.start <= props.now && props.now < props.end
-    ? x(props.now)
-    : undefined,
-);
-function hit(event: MouseEvent, row: TimelineActivity) {
-  const bounds = (event.currentTarget as SVGSVGElement).getBoundingClientRect();
-  const px = ((event.clientX - bounds.left) * width.value) / bounds.width;
-  const exact = row.segments.find(
-    (s) => px >= x(Date.parse(s.starts_at)) && px < x(Date.parse(s.ends_at)),
-  );
-  if (exact) return choose(row, exact);
-  const segments = row.segments.filter((s) => {
-    const left = x(Date.parse(s.starts_at)),
-      right = x(Date.parse(s.ends_at));
-    return Math.abs(px - (left + right) / 2) <= Math.max(22, (right - left) / 2);
-  });
-  if (segments.length === 1) choose(row, segments[0]);
-  else if (segments.length > 1) choices.value = { row, segments };
-}
+const bars = computed(() => props.rows.map(row => {
+  const period = serviceWindow(row)!;
+  const left = x(period.start);
+  return { row, left, width: x(period.end) - left };
+}));
+const selectedCol = computed(() => {
+  const bar = bars.value.find(b => b.row.activity_id === props.selected);
+  return bar ? Math.floor(bar.left / width.value * columns.value) : -1;
+});
+const nowX = computed(() => props.now !== undefined && props.now >= props.start && props.now < props.end
+  ? (Math.floor((props.now - props.start) / day) + 0.5) * width.value / columns.value : undefined);
 function positionWindow() {
-  if (!scroller.value || !available.value) return;
-  if (props.unit === 'hour' || props.unit === 'month') {
-    const first =
-      selectedTime.value ??
-      Math.min(...props.rows.flatMap((r) => r.segments.map((s) => Date.parse(s.starts_at))));
-    const alignAt =
-      props.unit === 'hour'
-        ? props.start + Math.floor((first - props.start) / 10800000) * 10800000
-        : first;
-    scroller.value.scrollLeft = Number.isFinite(alignAt) ? x(alignAt) : 0;
-  } else scroller.value.scrollLeft = 0;
+  if (!scroller.value) return;
+  const left = bars.value.find(b => b.row.activity_id === props.selected)?.left ?? Math.min(...bars.value.map(b => b.left));
+  scroller.value.scrollLeft = props.unit === 'month' && Number.isFinite(left) ? left : 0;
 }
 const resize = new ResizeObserver(([entry]) => {
-  if (entry.contentRect.width) {
-    const firstLayout = !available.value;
-    available.value = Math.floor(entry.contentRect.width);
-    if (firstLayout) void nextTick(positionWindow);
-  }
+  if (!entry.contentRect.width) return;
+  const first = !available.value;
+  available.value = Math.floor(entry.contentRect.width);
+  if (first) void nextTick(positionWindow);
 });
-watch(
-  () => [props.start, props.unit],
-  async () => {
-    await nextTick();
-    positionWindow();
-  },
-);
-watch(
-  () => props.rows,
-  () => {
-    choices.value = undefined;
-  },
-);
+watch(() => [props.start, props.unit], () => nextTick(positionWindow));
 onMounted(() => {
-  if (!scroller.value) return;
-  // 先量一次宽度，避免重新挂载后的第一帧按 0 宽度只画出部分刻度标签。
-  if (!available.value) {
-    available.value = Math.floor(scroller.value.clientWidth);
-    void nextTick(positionWindow);
-  }
-  resize.observe(scroller.value);
+  if (scroller.value) resize.observe(scroller.value);
 });
 onUnmounted(() => resize.disconnect());
 </script>
@@ -160,10 +82,9 @@ onUnmounted(() => resize.disconnect());
                   fill="#fff7d6"
                 />
                 <text
-                  v-if="unit !== 'hour' || available >= 560 || i % 3 === 0"
-                  :x="unit === 'hour' || unit === 'day' ? t.x + 3 : t.x + width / columns / 2"
+                  :x="t.x + width / columns / 2"
                   y="24"
-                  :text-anchor="unit === 'hour' || unit === 'day' ? 'start' : 'middle'"
+                  text-anchor="middle"
                 >
                   {{ t.label }}
                 </text>
@@ -178,20 +99,16 @@ onUnmounted(() => resize.disconnect());
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows" :key="row.activity_id" :class="{ picked: selectedRow(row) }">
+        <tr v-for="{ row, left, width: barWidth } in bars" :key="row.activity_id" :class="{ picked: selected === row.activity_id }">
           <th scope="row">
             <button
               class="name-button"
               :aria-label="row.title"
-              @click="choose(row, row.segments[0])"
+              @click="emit('choose', row)"
             >
               <i :style="{ background: timelineColors[row.color_index] }" /><span
                 ><strong>{{ row.title }}</strong
-                ><small
-                  >{{ activityTypes[row.schedule_type]
-                  }}{{ row.is_ongoing ? ' · 进行中' : '' }}{{
-                    row.has_pending_review ? ' · 待审核' : ''
-                  }}</small
+                ><small>{{ serviceDateText(row) }}{{ row.is_ongoing ? ' · 进行中' : '' }}{{ row.has_pending_review ? ' · 待审核' : '' }}</small
                 ></span
               >
             </button>
@@ -200,8 +117,7 @@ onUnmounted(() => resize.disconnect());
             <svg
               :width="width"
               height="58"
-              :aria-label="row.title + '的时段'"
-              @click="hit($event, row)"
+              :aria-label="row.title + '的服务日期'"
             >
               <line
                 v-for="t in ticks"
@@ -211,32 +127,27 @@ onUnmounted(() => resize.disconnect());
                 y1="0"
                 y2="100%"
                 stroke="#e4e9f0"
-                :stroke-dasharray="unit === 'hour' ? '3 3' : undefined"
               />
               <rect
-                v-for="s in row.segments"
-                :key="s.occurrence_key"
                 tabindex="0"
                 role="button"
-                :aria-pressed="s.occurrence_key === selected"
-                :aria-label="
-                  row.title + ' ' + localTime(s.starts_at) + ' 至 ' + localTime(s.ends_at)
-                "
-                :x="x(Date.parse(s.starts_at))"
-                :width="x(Date.parse(s.ends_at)) - x(Date.parse(s.starts_at))"
+                :aria-pressed="row.activity_id === selected"
+                :aria-label="row.title + ' ' + serviceDateText(row)"
+                :x="left"
+                :width="barWidth"
                 y="50%"
                 transform="translate(0 -12)"
                 height="24"
                 rx="3"
                 :fill="timelineColors[row.color_index]"
-                :stroke="s.occurrence_key === selected ? '#F1C64B' : 'none'"
+                :stroke="row.activity_id === selected ? '#F1C64B' : 'none'"
                 stroke-width="2"
-                @click.stop="choose(row, s)"
-                @keydown.enter.prevent="choose(row, s)"
-                @keydown.space.prevent="choose(row, s)"
+                @click.stop="emit('choose', row)"
+                @keydown.enter.prevent="emit('choose', row)"
+                @keydown.space.prevent="emit('choose', row)"
               >
                 <title>
-                  {{ row.title }} · {{ localTime(s.starts_at) }} – {{ localTime(s.ends_at) }}
+                  {{ row.title }} · {{ serviceDateText(row) }}
                 </title>
               </rect>
               <line
@@ -255,14 +166,6 @@ onUnmounted(() => resize.disconnect());
       </tbody>
     </table>
   </div>
-  <section v-if="choices" class="time-choices">
-    <h3>选择时段</h3>
-    <div class="page-actions">
-      <button v-for="s in choices.segments" :key="s.occurrence_key" @click="choose(choices.row, s)">
-        {{ localTime(s.starts_at) }} 至 {{ localTime(s.ends_at) }}
-      </button>
-    </div>
-  </section>
 </template>
 <style scoped>
 .chart-scroll {
@@ -363,8 +266,10 @@ rect[role='button'] {
 rect:focus-visible {
   outline: 2px solid var(--brand);
 }
-.time-choices {
-  padding: 12px;
-  background: var(--surface);
+@media (max-width: 700px) {
+  rect[role='button'] {
+    height: 44px;
+    transform: translateY(-22px);
+  }
 }
 </style>
