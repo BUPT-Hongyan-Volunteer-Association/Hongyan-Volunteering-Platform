@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { factKey } from '../dist/hours/ledger-data.js';
 import { previewHourRows } from '../dist/hours/preview.js';
 import { serviceDate, hourTenths } from '../dist/hours/values.js';
-import { validate } from '../dist/activities/validation.js';
+import { validate } from '../dist/validation.js';
 import { parseHourWorkbook } from '../dist/hours/workbook.js';
 import { asStrict, cell, row, workbook } from './hour-workbook-fixture.mjs';
 

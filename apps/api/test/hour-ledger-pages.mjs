@@ -25,7 +25,7 @@ async function sendWorkbook(page, name, bytes) {
   await button(page, '上传并预览').click();
   await shown(text(page, '校验完成'));
   await button(page, '提交审核').click();
-  await shown(text(page, '批次已提交审核。'));
+  await shown(text(page, '批次已提交审核'));
 }
 
 // 以契约响应驱动现有页面，验证请求范围、状态和下载动作。
@@ -74,7 +74,7 @@ async function checkExportButton(page, expected, workbook, labels = { create: '�
       assert.deepEqual(await readFile(await file.path()), workbook);
       expired = true;
       await download.click();
-      await shown(text(page, '文件已过期，请重新导出。'));
+      await shown(text(page, '文件已过期，请重新导出'));
     } else {
       await download.click();
       await shown(text(page, '当前身份无权领取此文件'));
@@ -93,7 +93,7 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   for (const page of [student, secondStudent]) await page.setViewportSize({ width: 390, height: 844 });
 
   await owner.goto(web + '/managed');
-  await link(owner, title).click();
+  await link(owner, title + '的活动团队').click();
   await tab(owner, '时长批次');
   await sendWorkbook(owner, file, ledgerWorkbook(activity, [{ student: a, day }]));
   const rejectedPath = new URL(owner.url()).pathname;
@@ -110,7 +110,7 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   await shown(teacher.getByRole('cell', { name: new RegExp(a.account.display_name) }));
   await teacher.getByLabel('整批意见').fill('请修正原文件后重新送审');
   await button(teacher, '驳回整批').click();
-  await shown(text(teacher, '批次已驳回。'));
+  await shown(text(teacher, '批次已驳回'));
   await owner.reload();
   await button(owner, '修正后重传').click();
   await sendWorkbook(owner, '修正查账演示.xlsx', ledgerWorkbook(activity, [{ student: a, day }]));
@@ -120,7 +120,7 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   await teacher.goto(admin + '/hours');
   await link(teacher, /修正查账演示/).click();
   await button(teacher, '批准整批').click();
-  await shown(text(teacher, '批次已批准，正式时长已更新。'));
+  await shown(text(teacher, '批次已批准，正式时长已更新'));
   await owner.reload();
   await shown(text(owner, '已批准'));
   assert.equal(new URL(owner.url()).pathname, batchPath);
@@ -164,7 +164,7 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   await secondStudent.getByLabel('申报时长（小时，选填）').fill('2.0');
   await secondStudent.getByLabel('情况说明').fill('当天未报名，现场协助归档 2.0 小时。');
   await button(secondStudent, '提交反馈').click();
-  await shown(text(secondStudent, '反馈已提交。'));
+  await shown(text(secondStudent, '反馈已提交'));
   const missingPath = new URL(secondStudent.url()).pathname;
 
   await tab(owner, '漏记反馈');
@@ -178,7 +178,7 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   await shown(text(owner, '已添加 1 / 100 对'));
   await owner.getByLabel('整组修复原因').fill('按当日签到与归档登记核对');
   await button(owner, '提交修复组审核').click();
-  await shown(text(owner, '修复组已提交审核。'));
+  await shown(text(owner, '修复组已提交审核'));
   const groupId = new URL(owner.url()).pathname.split('/').at(-1);
   for (const [page, total] of [[student, '2.0'], [secondStudent, '0.0']]) {
     await page.goto(web + '/mine/hours');
@@ -189,7 +189,7 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   await link(teacher, new RegExp(groupId.slice(0, 8))).click();
   await shown(text(teacher, /目标账/));
   await button(teacher, '批准整组').click();
-  await shown(text(teacher, '修复组已批准，源账与目标账已同步更新。'));
+  await shown(text(teacher, '修复组已批准，源账与目标账已同步更新'));
   await capture(teacher, 'hour-correction-group');
   for (const [page, total] of [[student, '0.0'], [secondStudent, '2.0']]) {
     await page.reload();
@@ -265,9 +265,9 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
     await teacher.getByLabel('已批准的结果').selectOption(groupId);
     await teacher.getByLabel('处理意见').fill('后台核对后确认结案，含内部姓名 ' + b.account.display_name);
     await button(teacher, '确认结案').click();
-    await shown(text(teacher, '反馈已结案，学生可查看本人的处理结果。'));
+    await shown(text(teacher, '反馈已结案，学生可查看本人的处理结果'));
     const queue = teacher.locator('main .record-list-pane'), panel = teacher.locator('main .record-detail-pane');
-    for (const width of [390, 1024, 1920, 1440]) {
+    for (const width of [390, 700, 701, 1023, 1024, 1920, 1440]) {
       await teacher.setViewportSize({ width, height: 900 });
       assert.equal(await queue.isVisible(), width >= 1024);
       await shown(panel);
@@ -278,10 +278,10 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   await close(wrongPath, 'rekey_hours', false);
   await close(missingPath, 'add_missing_hours', true);
   await student.goto(web + wrongPath);
-  await shown(text(student, '本人错记时长已撤销。'));
+  await shown(text(student, '本人错记时长已撤销'));
   assert.equal(await text(student, b.account.display_name).count(), 0);
   await secondStudent.goto(web + missingPath);
-  await shown(text(secondStudent, '本人 2.0 小时已补记。'));
+  await shown(text(secondStudent, '本人 2.0 小时已补记'));
   assert.equal(await text(secondStudent, a.account.display_name).count(), 0);
 
   await tab(owner, '时长批次');
@@ -293,17 +293,33 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   await teacher.goto(admin + '/hours');
   await link(teacher, /跨页核实\.xlsx/).click();
   await button(teacher, '批准整批').click();
-  await shown(text(teacher, '请为全部待核实行填写结论与意见。'));
+  await shown(text(teacher, '请为全部待核实行填写结论与意见'));
   await pickOption(teacher, '每页', '5 条');
-  await button(teacher, '核实原表第2行').click();
+  async function openRowReview(number) {
+    const trigger = button(teacher, '核实原表第' + number + '行');
+    await trigger.click();
+    const heading = teacher.getByRole('heading', { name: '原表第 ' + number + ' 行核实', exact: true });
+    await heading.waitFor();
+    assert.ok(await heading.evaluate(el => {
+      const rect = el.getBoundingClientRect();
+      return document.activeElement === el && rect.bottom > 0 && rect.top < innerHeight;
+    }));
+    const adjacent = await heading.evaluate(el => el.closest('tr')?.previousElementSibling
+      ?.querySelector('button[aria-pressed="true"]')?.getAttribute('aria-label'));
+    assert.equal(adjacent, await trigger.getAttribute('aria-label'));
+  }
+  await openRowReview(2);
   await teacher.getByLabel('属实', { exact: true }).check();
   await teacher.getByLabel('第2行意见').fill('核实属实，相关情况已登记。');
   await button(teacher, '下一页').click();
-  await button(teacher, '核实原表第7行').click();
+  await teacher.setViewportSize({ width: 390, height: 900 });
+  await openRowReview(7);
   await teacher.getByLabel('不成立', { exact: true }).check();
   await teacher.getByLabel('第7行意见').fill('复核为误报。');
   await button(teacher.getByRole('group', { name: '原表行范围' }), '待核实行').click();
-  await button(teacher, '核实原表第2行').click();
+  await openRowReview(2);
+  await fits(teacher);
+  await teacher.setViewportSize({ width: 1440, height: 900 });
   assert.equal(await teacher.getByLabel('第2行意见').inputValue(), '核实属实，相关情况已登记。');
   await shown(text(teacher, '全批 6 行 · 预计差额 +12.0 小时'));
   const extra = await ledgerActivity(db, manager.account_id, '时长警告复核活动');
@@ -319,7 +335,7 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   const secondRequest = teacher.waitForRequest((request) => request.method() === 'POST' && request.url().includes('/admin/hour-imports/'));
   await button(teacher, '批准整批').click();
   assert.notEqual((await secondRequest).headers()['idempotency-key'], firstKey);
-  await shown(text(teacher, '批次已批准，正式时长已更新。'));
+  await shown(text(teacher, '批次已批准，正式时长已更新'));
   await shown(text(teacher, /属实 · 核实属实/));
   await shown(text(teacher, /不成立 · 复核为误报/));
 

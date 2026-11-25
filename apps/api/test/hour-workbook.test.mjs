@@ -8,10 +8,10 @@ import { asStrict, cell, headers, row, sheet, template, workbook } from './hour-
 
 const parse = (buffer) => parseHourWorkbook('合成.xlsx', buffer);
 
-test('错误报告按文本长度截断，保留 XML 转义字符', () => {
+test('错误报告按文本长度截断，保留 XML 转义字符', async () => {
   const expected = '甲'.repeat(32766) + '&';
   const file = errorWorkbook([{ field: '备注', message: expected + '乙' }]);
-  const cells = readXlsxSheet(Buffer.from(file), '校验错误').rows[1].cells;
+  const cells = (await readXlsxSheet(Buffer.from(file), '校验错误')).rows[1].cells;
   assert.equal(cells.find((cell) => cell.column === 2).text, expected);
 });
 
@@ -97,6 +97,7 @@ test('一次报告所有可继续扫描的单元格错误，保留实际行号�
     [[803, 'E803', '不接受公式']], [[804, 'H804', '未知列存在数据']], [[805, '第 805 行', '不接受合计行']],
     [[806, 'F806', '文本含有无法保存的字符']],
   ]);
+  assert.deepEqual(rows[1].credited_hours, { type: 'number', value: '2' });
   assert.deepEqual(rows[2].credited_hours, { type: 'number', value: '1.25' });
   const legacy = await parse(workbook(row(888, cell('G888','有')), headers.slice(0,6)));
   assert.equal(legacy.rows[0].errors[0].field, 'G888');

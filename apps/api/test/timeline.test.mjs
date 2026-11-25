@@ -1,3 +1,4 @@
+import { demoActivities } from '../scripts/demo-scenarios.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -43,7 +44,7 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
     const ownerId = first.members.find((m) => m.member_role === 'owner').account_id;
     const now = Date.now();
     const from = now - 2 * day,
-      to = now + 12 * day;
+      to = now + (demoActivities.pending.serviceDay + 1) * day;
     const anchor = beijing(now + 3 * day);
     const before = beijing(now + 2 * day);
     const window = 'from=' + iso(from) + '&to=' + iso(to);
@@ -179,12 +180,13 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
     });
 
     await t.test('普通学生不能经参数读取工作稿或后台筛选', async () => {
-      assert.equal((await publicQuery('&revision_scope=working')).status, 403);
-      assert.equal((await publicQuery('&review_status=pending_review')).status, 403);
-      assert.equal(
-        (await publicQuery('&owner_account_id=' + ownerId)).status,
-        403,
-      );
+      for (const [filter, expected] of [
+        ['revision_scope=working',403], ['review_status=pending_review',403],
+        ['owner_account_id='+ownerId,403], ['status=draft',422], ['registration_phase=typo',422],
+      ]) {
+        assert.equal((await publicQuery('&'+filter)).status, expected);
+        assert.equal((await student.request('/activities?'+window+'&'+filter)).status, expected);
+      }
       assert.equal((await timeline(student, 'scope=managed&' + window)).status, 403);
       assert.equal((await timeline(outsider, 'scope=all&' + window)).status, 403);
     });
@@ -454,9 +456,11 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
         const params = new URLSearchParams({ scope: 'public', from: iso(from), to: iso(to) });
         if (value === undefined) params.delete(field);
         else params.set(field, value);
-        const response = await timeline(student, params);
-        assert.equal(response.status, 422, params.toString());
-        assert.equal(response.details[0].field, field);
+        const responses = await Promise.all([timeline(student, params), student.request('/activities?' + params)]);
+        for (const response of responses) {
+          assert.equal(response.status, 422, params.toString());
+          assert.equal(response.details[0].field, field);
+        }
       }
       // 带时区的偏移格式被接受。
       const offset = await timeline(

@@ -1,3 +1,4 @@
+import { pollUntil } from './poll-until.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -15,11 +16,11 @@ function result(response, expected) {
   assert.equal(response.status, expected, JSON.stringify(response));
   return response.data;
 }
-function sheetCells(buffer, name) {
-  return readXlsxSheet(buffer, name).rows.map((row) => row.cells);
+async function sheetCells(buffer, name) {
+  return (await readXlsxSheet(buffer, name)).rows.map((row) => row.cells);
 }
-function sheetRows(buffer, name) {
-  const sheet = readXlsxSheet(buffer, name);
+async function sheetRows(buffer, name) {
+  const sheet = await readXlsxSheet(buffer, name);
   return sheet.rows.map((row) => {
     const values = [];
     for (const cell of row.cells) values[cell.column] = cell.text;
@@ -30,27 +31,33 @@ async function createExport(client, body) {
   return result(await client.write('POST', '/exports', body, randomUUID()), 202);
 }
 async function waitExport(client, id) {
-  for (let attempt = 0; attempt < 200; attempt++) {
-    const response = await client.request('/exports/' + id);
-    if (response.status !== 200) return response;
-    if (['ready', 'failed', 'expired'].includes(response.data.status)) return response.data;
-    await delay(30);
-  }
-  assert.fail('导出未完成');
+  const response = await pollUntil(() => client.request('/exports/' + id),
+    item => item.status !== 200 || ['ready', 'failed', 'expired'].includes(item.data.status), '导出');
+  return response.status === 200 ? response.data : response;
 }
 async function download(client, id) {
   const response = await client.raw('/exports/' + id + '/download');
   return { status: response.status, headers: response.headers, body: Buffer.from(await response.arrayBuffer()) };
 }
-function rowsWithoutHeader(buffer, name) {
-  return sheetRows(buffer, name).slice(1);
+async function rowsWithoutHeader(buffer, name) {
+  return (await sheetRows(buffer, name)).slice(1);
 }
 
 test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t) => {
   Logger.overrideLogger(['error']);
   const staffPassword = 'E1' + randomUUID(), adminPassword = 'E2' + randomUUID(), password = 'E3' + randomUUID();
   await prepareTestDatabase(t, { DEMO_STAFF_PASSWORD: staffPassword, DEMO_ADMIN_PASSWORD: adminPassword });
-  const db = new Database(), app = await createApp();
+  const db = new Database();
+  let app;
+  try {
+    app = await createApp();
+    await checkExports(t, db, app, { staffPassword, adminPassword, password });
+  } finally {
+    try { await app?.close(); } finally { await db.$disconnect(); }
+  }
+});
+
+async function checkExports(t, db, app, { staffPassword, adminPassword, password }) {
   await app.listen(0, '127.0.0.1');
   const origin = (await app.getUrl()) + '/api/v1';
   const owner = browser(origin), other = browser(origin), teacher = browser(origin),
@@ -170,8 +177,7 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
   }, ownerAccount.id);
 
   let rosterExportId;
-  try {
-    await t.test('跨页名单按筛选导出、逐行核对并限制发起人', async () => {
+  await t.test('跨页名单按筛选导出、逐行核对并限制发起人', async () => {
     const job = await createExport(owner, { type: 'activity_roster', activity_id: rosterActivity.id, registration_status: 'accepted' });
     rosterExportId = job.id;
     const ready = await waitExport(owner, job.id);
@@ -179,12 +185,12 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     const file = await download(owner, job.id);
     assert.equal(file.status, 200);
     assert.match(decodeURIComponent(file.headers.get('content-disposition') ?? ''), /报名名单/);
-    const rows = rowsWithoutHeader(file.body, '报名名单');
+    const rows = await rowsWithoutHeader(file.body, '报名名单');
     assert.deepEqual(rows.map((row) => row[1]), acceptedExpected.map((row) => row.student_no));
     assert.deepEqual(rows.map((row) => row[0]), acceptedExpected.map((row) => row.student_name));
     assert(rows.every((row) => row[3] === '已录取'));
     assert(rows.every((row) => /^0\d{9}$/.test(row[1])));
-    const rosterCells = sheetCells(file.body, '报名名单');
+    const rosterCells = await sheetCells(file.body, '报名名单');
     assert.equal(rosterCells[1].find((cell) => cell.column === 1).type, 'text');
 
     const selected = acceptedExpected.slice(0, 2);
@@ -193,12 +199,12 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
       registration_ids: selected.map((row) => row.id),
     });
     const selectedFile = await download(owner, (await waitExport(owner, selectedJob.id)).id);
-    assert.deepEqual(rowsWithoutHeader(selectedFile.body, '报名名单').map((row) => row[1]),
+    assert.deepEqual((await rowsWithoutHeader(selectedFile.body, '报名名单')).map((row) => row[1]),
       selected.map((row) => row.student_no));
 
     const filtered = await createExport(owner, { type: 'activity_roster', activity_id: rosterActivity.id, registration_status: 'accepted', q: '合成学生07' });
     const filteredFile = await download(owner, (await waitExport(owner, filtered.id)).id);
-    const filteredRows = rowsWithoutHeader(filteredFile.body, '报名名单');
+    const filteredRows = await rowsWithoutHeader(filteredFile.body, '报名名单');
     assert.equal(filteredRows.length, 1);
     assert.equal(filteredRows[0][0], '合成学生07');
 
@@ -226,7 +232,7 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
       type: 'admin_students', cohort: '本科生', grade: '2026', q: '合成学生0',
     });
     const file = await download(teacher, (await waitExport(teacher, job.id)).id);
-    const rows = sheetRows(file.body, '学生档案');
+    const rows = await sheetRows(file.body, '学生档案');
     assert.deepEqual(rows[0], ['学号', '姓名', '级部', '年级', '班级', '学院', '账号状态']);
     assert.deepEqual(rows.slice(1).map((row) => row[0]), expected.items.map((row) => row.student_no));
     assert.equal(rows.length, 3);
@@ -234,7 +240,7 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     const selectedJob = await createExport(teacher, {
       type: 'admin_students', student_ids: expected.items.slice(0, 2).map((row) => row.id),
     });
-    const selectedRows = sheetRows((await download(teacher, (await waitExport(teacher, selectedJob.id)).id)).body, '学生档案');
+    const selectedRows = await sheetRows((await download(teacher, (await waitExport(teacher, selectedJob.id)).id)).body, '学生档案');
     assert.deepEqual(selectedRows.slice(1).map((row) => row[0]), expected.items.slice(0, 2).map((row) => row.student_no));
     assert.equal((await teacher.write('POST', '/exports', {
       type: 'admin_students', student_ids: [randomUUID()],
@@ -251,7 +257,7 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     const ready = await waitExport(owner, job.id);
     assert.equal(ready.status, 'ready');
     const file = await download(owner, job.id);
-    const rows = sheetRows(file.body, '通知回执');
+    const rows = await sheetRows(file.body, '通知回执');
     assert.deepEqual(rows[0], ['通知：集合信息导出测试']);
     assert.deepEqual(rows[1], ['版本：第 1 版']);
     const data = rows.slice(3);
@@ -268,7 +274,7 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     const activityJob = await createExport(owner,
       { type: 'activity_hours', activity_id: hoursActivity.id, include_history: true });
     const activityFile = await download(owner, (await waitExport(owner, activityJob.id)).id);
-    const activityRows = sheetRows(activityFile.body, '志愿时长');
+    const activityRows = await sheetRows(activityFile.body, '志愿时长');
     assert.deepEqual(activityRows[0], ['姓名', '学号', '活动名称', '活动编号', '服务日期', '时长（小时）', '记录状态']);
     assert.equal(activityRows.length, activityExpected.items.length + 2);
     assert.equal(activityRows.at(-1)[0], '合计（仅当前有效记录）');
@@ -282,7 +288,7 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     assert.equal(myExpected.total_hours, '3.0');
     const myJob = await createExport(alice, { type: 'my_hours', include_history: true });
     const myFile = await download(alice, (await waitExport(alice, myJob.id)).id);
-    const myRows = sheetRows(myFile.body, '志愿时长');
+    const myRows = await sheetRows(myFile.body, '志愿时长');
     assert.deepEqual(myRows[0], ['学生：体验学生（0000000001）']);
     assert.deepEqual(myRows[1], ['活动名称', '活动编号', '服务日期', '时长（小时）', '记录状态']);
     assert.equal(myRows.at(-1)[3], '3');
@@ -295,7 +301,7 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     const adminJob = await createExport(teacher,
       { type: 'admin_student_hours', student_id: aliceStudent.id, include_history: true });
     const adminFile = await download(teacher, (await waitExport(teacher, adminJob.id)).id);
-    const adminRows = sheetRows(adminFile.body, '志愿时长');
+    const adminRows = await sheetRows(adminFile.body, '志愿时长');
     assert.deepEqual(adminRows[0], ['学生：体验学生（0000000001）']);
     assert.equal(adminRows.at(-1)[3], '3');
   });
@@ -317,11 +323,8 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
       });
       let body = await uploaded.json();
       assert.equal(uploaded.status, 202, JSON.stringify(body));
-      let batch = body.data;
-      for (let attempt = 0; attempt < 100 && batch.status === 'validating'; attempt++) {
-        batch = result(await owner.request('/hour-imports/' + batch.id), 200);
-        await delay(30);
-      }
+      const batch = await pollUntil(() => owner.request('/hour-imports/' + body.data.id).then(reply => result(reply, 200)),
+        item => item.status !== 'validating', '时长校验');
       result(await owner.write('POST', '/hour-imports/' + batch.id + '/submit',
         { expected_version: batch.version, source_hash: batch.source_hash }), 200);
       const pending = result(await teacher.request('/hour-imports/' + batch.id), 200);
@@ -344,10 +347,10 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
       from_date: day, to_date: day, include_history: true,
     });
     const file = await download(owner, (await waitExport(owner, job.id)).id);
-    const rows = sheetRows(file.body, '志愿时长');
+    const rows = await sheetRows(file.body, '志愿时长');
     assert.equal(rows.at(-1)[5], '3');
     assert.equal(rows.at(-1)[0], '合计（仅当前有效记录）');
-    const cells = sheetCells(file.body, '志愿时长');
+    const cells = await sheetCells(file.body, '志愿时长');
     assert.equal(cells[1].find((cell) => cell.column === 1).type, 'text');
     assert.equal(cells[1].find((cell) => cell.column === 5).type, 'number');
     assert.equal(cells.at(-1).find((cell) => cell.column === 5).type, 'number');
@@ -369,10 +372,10 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     const ready = await waitExport(owner, job.id);
     assert.equal(ready.status, 'ready');
     const file = await download(owner, job.id);
-    const rows = sheetRows(file.body, '学生时长汇总');
+    const rows = await sheetRows(file.body, '学生时长汇总');
     assert.deepEqual(rows[0], ['姓名', '学号', '合计时长（小时）']);
     assert.equal(rows.length, 3);
-    const summaryCells = sheetCells(file.body, '学生时长汇总');
+    const summaryCells = await sheetCells(file.body, '学生时长汇总');
     assert.equal(summaryCells[1].find((cell) => cell.column === 1).type, 'text');
     assert.equal(summaryCells[1].find((cell) => cell.column === 2).type, 'number');
     const byNo = new Map(rows.slice(1).map((row) => [row[1], row]));
@@ -432,6 +435,36 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     }
   });
 
+  await t.test('数据库、Prisma 和审计筛选读取同一带偏移的毫秒时刻', async () => {
+    const [{ clock, epoch, timezone }] = await db.$queryRaw`
+      SELECT CURRENT_TIMESTAMP(3) AS clock, (extract(epoch FROM CURRENT_TIMESTAMP(3)) * 1000)::bigint AS epoch,
+             current_setting('TimeZone') AS timezone`;
+    assert.equal(timezone, 'UTC');
+    assert.equal(clock.getTime(), Number(epoch));
+
+    const offset = '2026-11-25T00:00:00.123+08:00';
+    const at = new Date(offset), resource_id = randomUUID(), sqlId = randomUUID();
+    await db.$executeRaw`
+      INSERT INTO audit_event(id, actor_id, resource_type, resource_id, action, created_at)
+      VALUES (${sqlId}::uuid, ${ownerAccount.id}::uuid, 'activity', ${resource_id}::uuid, 'sql_time', ${offset}::timestamptz)`;
+    const fromSql = await db.auditEvent.findUniqueOrThrow({ where: { id: sqlId } });
+    assert.equal(fromSql.created_at.toISOString(), at.toISOString());
+    const fromPrisma = await db.auditEvent.create({ data: {
+      actor_id: ownerAccount.id, resource_type: 'activity', resource_id, action: 'prisma_time', created_at: at,
+    } });
+    const [stored] = await db.$queryRaw`
+      SELECT (extract(epoch FROM created_at) * 1000)::bigint AS epoch FROM audit_event WHERE id = ${fromPrisma.id}::uuid`;
+    assert.equal(Number(stored.epoch), at.getTime());
+    const endpoint = '/admin/audit-events?';
+    const range = new URLSearchParams({ resource_id, from: offset, to: at.toISOString() });
+    const exact = result(await teacher.request(endpoint + range), 200);
+    assert.equal(exact.total, 2);
+    assert.ok(exact.items.every(row => row.created_at === at.toISOString()));
+    range.set('from', new Date(at.getTime() + 1).toISOString());
+    range.delete('to');
+    assert.equal(result(await teacher.request(endpoint + range), 200).total, 0);
+  });
+
   await t.test('后台审计按操作者、对象和时间查询，展示脱敏前后值', async () => {
     const page = result(await teacher.request('/admin/audit-events?actor_id=' + ownerAccount.id +
       '&resource_id=' + rosterExportId + '&page_size=100'), 200);
@@ -459,8 +492,4 @@ test('业务导出、受控下载与审计查询', { timeout: 120000 }, async (t
     assert.deepEqual(JSON.parse(redacted.before), { password: '[已脱敏]', token: '[已脱敏]' });
     assert.deepEqual(JSON.parse(redacted.after), { contents: '[已脱敏]', normal: 'ok' });
   });
-  } finally {
-    await app.close();
-    await db.$disconnect();
-  }
-});
+}

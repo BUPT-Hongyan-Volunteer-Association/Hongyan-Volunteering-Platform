@@ -30,14 +30,14 @@ export async function checkHourPages(page, web, db, sampleId, { pickOption, fits
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(web + '/managed/' + fixture.activityId);
   await page.getByRole('link', { name: '时长批次', exact: true }).click();
-  await text('本活动还没有上传批次。').waitFor();
+  await text('本活动还没有上传批次').waitFor();
   await pickOption(page, '导入模式', '更正时长');
-  await text('更正绑定原记录的获批安排。').waitFor();
+  await text('更正绑定原记录的获批安排').waitFor();
   await pickOption(page, '导入模式', '新增时长');
   await page.getByLabel('工作簿', { exact: true }).setInputFiles({
     name: '表格.csv', mimeType: 'text/csv', buffer: Buffer.from('abcd'),
   });
-  await text('请选择不超过 5 MB 的 .xlsx 工作簿。').waitFor();
+  await text('请选择不超过 5 MB 的 .xlsx 工作簿').waitFor();
   assert.ok(await button('上传并预览').isDisabled());
   await pickOption(page, '获批安排', /^版本 1 ·/);
   await upload('合成时长表.xlsx', bytes);
@@ -67,6 +67,7 @@ export async function checkHourPages(page, web, db, sampleId, { pickOption, fits
   await page.getByLabel('只看违纪待核实行').check();
   await text('当前条件共 1 行').waitFor();
   await text('第 804 行').waitFor();
+  await page.getByRole('row', { name: /^第 804 行 / }).locator('summary').click();
   await text('当日预计 25.0 小时').waitFor();
   await text('待核实').waitFor();
   assert.ok(await fullTotal.isVisible());
@@ -127,7 +128,9 @@ export async function checkHourPages(page, web, db, sampleId, { pickOption, fits
   await button('重读安排').waitFor();
   await upload('按当前安排.xlsx', fixture.legacyWorkbook(2));
   await text('内容有误').waitFor();
-  await text('获批版本 2').first().waitFor();
+  const source = page.locator('tbody details').filter({ has: text('获批版本 2') }).first();
+  await source.locator('summary').click();
+  await source.getByText('获批版本 2', { exact: true }).waitFor();
   await page.getByRole('link', { name: '返回时长批次' }).click();
   await pickOption(page, '获批安排', /^版本 1 ·/);
   await upload('旧六列.xlsx', fixture.legacyWorkbook(2));

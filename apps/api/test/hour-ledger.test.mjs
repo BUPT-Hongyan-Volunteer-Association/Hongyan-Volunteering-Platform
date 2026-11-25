@@ -1,10 +1,13 @@
+import { withFlowAccounts } from './flow-accounts-fixture.mjs';
+import { checkHourPreview, prepareHourPreviewFixture } from './hour-preview-fixture.mjs';
+import { checkHourHttp } from './hour-http-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Logger } from '@nestjs/common';
 import { createApp } from '../dist/app.js';
-import { validate } from '../dist/activities/validation.js';
+import { validate } from '../dist/validation.js';
 import { Database } from '../dist/database.js';
 import { authorizeHourLedger, readHourLedger } from '../dist/hours/read-ledger.js';
 import { NoticeWorker } from '../dist/notices/notice.worker.js';
@@ -200,7 +203,7 @@ test('独立 PostgreSQL 时长账务、警告、并发与更正结案', { timeou
       assert.deepEqual(bExport.items.map((row) => row.id), [target]);
       const r1 = result(await alice.request('/me/appeals?appeal_id=' + wrong.id), 200).items[0];
       const r2 = result(await bob.request('/me/appeals?appeal_id=' + missing.id), 200).items[0];
-      assert.deepEqual([r1.resolution, r2.resolution], ['本人错记时长已撤销。', '本人 2.0 小时已补记。']);
+      assert.deepEqual([r1.resolution, r2.resolution], ['本人错记时长已撤销', '本人 2.0 小时已补记']);
       assert.doesNotMatch(JSON.stringify(r1), new RegExp(target + '|' + b.account.display_name));
       assert.equal(result(await alice.request('/me/appeals?appeal_id=' + missing.id), 200).total, 0);
       await worker.drain();
@@ -392,7 +395,9 @@ test('独立 PostgreSQL 时长账务、警告、并发与更正结案', { timeou
     await t.test('送审时按锁内累计复核空备注，冻结最新批次和行警告', async () => {
       const day = ledgerDay(18), target = await ledgerActivity(db, o.account_id, '送审重新核账');
       await db.registration.create({ data: { activity_id: target.id, student_id: a.id, status: 'accepted',
-        submitted_at: new Date(ledgerDay(20)) } });
+        submitted_at: new Date(ledgerDay(20)), history: { create: {
+          version: 1, status: 'accepted', submitted_at: new Date(ledgerDay(20)), changed_at: new Date(ledgerDay(20)),
+        } } } });
       const clean = await preview(owner, target, [{ student: a, day, note: '' }]);
       const explained = await preview(owner, target, [{ student: a, day, note: '另参加晚场' }]);
       assert.equal(clean.warnings.length, 0);
@@ -472,3 +477,12 @@ test('独立 PostgreSQL 时长账务、警告、并发与更正结案', { timeou
     await db.$disconnect();
   }
 });
+
+test('负责人工作簿验证、权限与重试', t => withFlowAccounts(t, async ({
+  db, owner, other, student, teacher, sample,
+}) => {
+  const fixture = await prepareHourPreviewFixture(db, sample);
+  await t.test('混合工作簿重复预览保持逐行结果和正式时长一致', () => checkHourPreview(db, fixture));
+  await t.test('独立库混合工作簿：HTTP 上传、报告、权限回收和失败重试均不入账', () =>
+    checkHourHttp(db, fixture, { owner, other, student, teacher }));
+}));

@@ -13,10 +13,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  basic:
-    name: 基础检查
+  verify:
+    name: ${{ matrix.suite }}
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [database, pages]
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:18
@@ -42,6 +46,20 @@ jobs:
       - run: pnpm --filter @hongyan/api exec prisma validate
       - run: pnpm db:generate
       - run: pnpm typecheck
-      - run: pnpm --filter @hongyan/api build
-      - run: pnpm --filter @hongyan/api exec node --test test/hour-workbook.test.mjs test/hour-preview.test.mjs test/activity-flow.test.mjs test/notice-flow.test.mjs test/attendance-flow.test.mjs test/recruitment.test.mjs test/hour-ledger.test.mjs test/timeline.test.mjs
-      - run: pnpm --filter @hongyan/api exec node --test test/exports-and-audit.test.mjs
+      - run: pnpm build
+      - if: matrix.suite == 'database'
+        run: pnpm --filter @hongyan/api test:offline
+      - if: matrix.suite == 'pages'
+        run: pnpm exec playwright-core install --with-deps chromium
+      - run: pnpm --filter @hongyan/api test:${{ matrix.suite }}
+
+  basic:
+    name: 基础检查
+    needs: verify
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 核对数据库和浏览器回归结果
+        env:
+          SUITE_RESULT: ${{ needs.verify.result }}
+        run: test "$SUITE_RESULT" = success
