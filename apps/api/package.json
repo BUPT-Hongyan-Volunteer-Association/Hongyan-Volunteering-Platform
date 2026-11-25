@@ -23,6 +23,7 @@
     "test:database": "node --env-file-if-exists=.env --test --test-concurrency=2 test/demo-data.test.mjs test/account-lifecycle.test.mjs test/account-teams.test.mjs test/activity-flow.test.mjs test/attendance-flow.test.mjs test/recruitment.test.mjs test/student-import.test.mjs test/notice-flow.test.mjs test/hour-ledger.test.mjs test/exports-and-audit.test.mjs test/timeline.test.mjs"
   },
   "dependencies": {
+    "@hongyan/contracts": "workspace:*",
     "@nestjs/common": "11.2.10",
     "@nestjs/core": "11.2.10",
     "@nestjs/platform-express": "11.2.10",
@@ -40,7 +41,6 @@
     "yauzl": "3.4.0"
   },
   "devDependencies": {
-    "@hongyan/contracts": "workspace:*",
     "@types/express": "5.0.6",
     "@types/yauzl": "3.4.0",
     "prisma": "7.10.1"

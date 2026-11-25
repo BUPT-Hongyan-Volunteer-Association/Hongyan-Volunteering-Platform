@@ -833,6 +833,10 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       assert(listed.items.some((item) => item.student_no === '2026123401'));
       const none = (await teacher.request('/admin/students?grade=2001')).data;
       assert.equal(none.total, 0);
+      assert.deepEqual(none.grade_options, listed.grade_options);
+      assert.deepEqual(none.grade_options, [...new Set(none.grade_options)].sort().reverse());
+      assert.deepEqual(none.cohort_options, listed.cohort_options);
+      assert.equal(new Set(none.cohort_options).size, none.cohort_options.length);
       assert.equal((await teacher.request('/admin/students?grade=26')).status, 422);
     });
 

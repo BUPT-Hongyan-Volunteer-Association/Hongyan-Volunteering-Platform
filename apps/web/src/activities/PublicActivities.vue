@@ -278,7 +278,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
         </div>
         <p v-if="selectedDay" class="date-filter">
           <UiIcon name="Calendar" />{{
-            unit === 'month' || unit === 'week'
+            unit !== 'day'
               ? windowLabel(range!.start, range!.end, unit)
               : selectedDay
           }}<button

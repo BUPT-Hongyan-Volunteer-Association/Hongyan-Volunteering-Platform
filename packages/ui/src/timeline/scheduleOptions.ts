@@ -9,9 +9,7 @@ export const revisionOptions: readonly { value: 'working' | 'published'; label: 
 ];
 
 export function unitArrows(unit: TimeUnit): [string, string] {
-  if (unit === 'week') return ['上一周', '下一周'];
-  if (unit === 'month') return ['上个月', '下个月'];
-  return ['前一天', '后一天'];
+  return unit === 'week' ? ['上一周', '下一周'] : ['上个月', '下个月'];
 }
 
 export function statusOptionsFor(managed: boolean): { value: string; label: string }[] {

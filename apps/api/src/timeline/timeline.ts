@@ -1,15 +1,14 @@
 import { parseActivityFilters, publishedActivityFilter } from '../activities/filters.js';
-import { slots } from '../activities/schedule.js';
+import { servicePeriods } from '../activities/schedule.js';
 import { localDate, serviceDates } from '@hongyan/contracts/activity';
 import { createHash } from 'node:crypto';
 import type {
   Activity,
-  ActivityInput,
   TimelineActivity,
   TimelineActivityPage,
 } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
-import type { Database } from '../database.js';
+import type { Database, Tx } from '../database.js';
 import type { Actor } from '../auth/session.guard.js';
 import { invalid } from '../http.js';
 import { managedScope } from '../activities/read.js';
@@ -30,35 +29,17 @@ export function colorIndex(id: string) {
 
 type Period = { activityId: string; start: number; end: number };
 
-/** 仅在本人已录取活动的实际服务时间相交时标记重叠。 */
-async function plannedOverlapIds(db: Database, studentId: string, from: number, to: number) {
-  const activities = await db.activity.findMany({
-    where: {
-      status: { in: overlappingStatuses }, published_revision: { not: null },
-      registrations: { some: { student_id: studentId, status: 'accepted' } },
-    },
-    include: { revisions: { where: { revision_state: 'approved' } } },
-  });
-  const periods: Period[] = [];
-  for (const activity of activities) {
-    const revision = activity.revisions.find(r => r.revision === activity.published_revision);
-    if (!revision) continue;
-    for (const slot of slots((revision.content as unknown as ActivityInput).schedule)) {
-      const start = Date.parse(slot.starts_at), end = Date.parse(slot.ends_at);
-      if (start < to && end > from) periods.push({ activityId: activity.id, start, end });
-    }
-  }
+function plannedOverlapIds(periods: Period[]) {
   const overlapping = new Set<string>();
   periods.sort((a, b) => a.start - b.start);
-  let active: Period[] = [];
+  let longest: Period | undefined;
   for (const period of periods) {
-    active = active.filter(other => other.end > period.start);
-    for (const other of active) {
-      if (other.activityId === period.activityId) continue;
-      overlapping.add(other.activityId);
+    // 其余仍有效的区间已经与最晚结束的区间相交，只需标记活动，无需枚举所有区间对。
+    if (longest && period.start < longest.end && period.activityId !== longest.activityId) {
       overlapping.add(period.activityId);
+      overlapping.add(longest.activityId);
     }
-    active.push(period);
+    if (!longest || period.end > longest.end) longest = period;
   }
   return overlapping;
 }
@@ -92,14 +73,13 @@ function toActivity(view: Activity, scope: TimelineScope, overlaps?: Set<string>
 }
 
 /** 负责人候选按当前身份的授权范围独立计算，不受分页、窗口和筛选影响。 */
-async function ownerChoices(db: Database, actor: Actor, scope: TimelineScope) {
-  const rows = await db.activityMember.findMany({
-    where: { member_role: 'owner', activity: managedScope(actor, scope) },
-    select: { account_id: true, account: { select: { display_name: true } } },
-    distinct: ['account_id'],
+async function ownerChoices(db: Tx, actor: Actor, scope: TimelineScope) {
+  const rows = await db.account.findMany({
+    where: { members: { some: { member_role: 'owner', activity: managedScope(actor, scope) } } },
+    select: { id: true, display_name: true },
   });
   return rows
-    .map((row) => ({ account_id: row.account_id, display_name: row.account.display_name }))
+    .map(({ id, display_name }) => ({ account_id: id, display_name }))
     .sort(
       (a, b) =>
         a.display_name.localeCompare(b.display_name, 'zh-Hans-CN') ||
@@ -121,9 +101,12 @@ export async function timelinePage(
   const studentId = scope === 'mine' ? actor.student?.id : undefined;
 
   let where: Prisma.ActivityWhereInput;
-  if (scope === 'public' || scope === 'mine')
+  if (scope === 'public' || scope === 'mine') {
     where = publishedActivityFilter(scope, q.status, studentId);
-  else
+    // 已发布与已结束活动之间也可能重叠。先读两者的当前获批版本，再按用户所选状态展示。
+    if (scope === 'mine' && overlappingStatuses.includes(q.status))
+      where.status = { in: overlappingStatuses };
+  } else
     where = {
       AND: [
         managedScope(actor, scope),
@@ -146,14 +129,19 @@ export async function timelinePage(
     if (start >= to) nextStart = Math.min(nextStart, start);
     if (end <= from) lastEnd = Math.max(lastEnd, end);
   }
-  const views = await activityViews(db, where, management ? revision : 'public', q, { studentId, range, outsideWindow }, (a) => {
-    digest.update(JSON.stringify(toActivity(a, scope)));
-  });
-  const overlaps =
-    scope === 'mine' && studentId
-      ? await plannedOverlapIds(db, studentId, from, to)
-      : undefined;
-  const owners = management ? await ownerChoices(db, actor, scope) : undefined;
+  const periods: Period[] = [];
+  const { views, owners } = await db.$transaction(async tx => {
+    const views = await activityViews(tx, where, management ? revision : 'public', q, { range, outsideWindow }, (view, matched) => {
+      if (scope === 'mine' && overlappingStatuses.includes(view.status)) {
+        for (const period of servicePeriods(view.schedule, from, to))
+          periods.push({ activityId: view.id, ...period });
+      }
+      if (matched) digest.update(JSON.stringify(toActivity(view, scope)));
+    });
+    const owners = management ? await ownerChoices(tx, actor, scope) : undefined;
+    return { views, owners };
+  }, { isolationLevel: 'RepeatableRead' });
+  const overlaps = scope === 'mine' ? plannedOverlapIds(periods) : undefined;
   const items = views.items
     .map((view) => toActivity(view, scope, overlaps))
     .filter((item): item is TimelineActivity => item !== null);

@@ -10,7 +10,7 @@
   "dependencies": {
     "@hongyan/contracts": "workspace:*",
     "@hongyan/ui": "workspace:*",
-    "vue": "3.5.45",
-    "vue-router": "4.6.4"
+    "vue": "catalog:",
+    "vue-router": "catalog:"
   }
 }

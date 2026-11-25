@@ -17,7 +17,7 @@
 
 ## 本地运行
 
-1. 准备 Node.js 24、pnpm 10.32.1 和 PostgreSQL 18。启动数据库并创建开发库，将 [环境变量示例](apps/api/.env.example) 复制为 `apps/api/.env`，填写 `DATABASE_URL`。
+1. 准备 Node.js 24、pnpm 10.32.1 和 PostgreSQL 18.7（18 系列）。启动数据库并创建开发库，将 [环境变量示例](apps/api/.env.example) 复制为 `apps/api/.env`，填写 `DATABASE_URL`。
 2. 在仓库根目录依次运行以下命令。Windows PowerShell 可使用 `pnpm.cmd`。
 
    ```sh

@@ -1,4 +1,4 @@
-import { slots } from './schedule.js';
+import { servicePeriods } from './schedule.js';
 import type { Activity as View, ActivityInput } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Actor } from '../auth/session.guard.js';
@@ -101,7 +101,7 @@ export function project(
     revision_state: rev.revision_state as View['revision_state'],
     state_evaluated_at: now.toISOString(),
     is_ongoing:
-      row.status === 'published' && slots(schedule).some(slot => Date.parse(slot.starts_at) <= t && t < Date.parse(slot.ends_at)),
+      row.status === 'published' && !servicePeriods(schedule, t, t + 1).next().done,
     ...(management && {
       has_pending_review: row.reviews.some((r) => r.status === 'pending'),
       current_review_id: row.reviews.find((r) => r.status === 'pending')?.id,

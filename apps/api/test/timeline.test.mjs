@@ -2,6 +2,7 @@ import { demoActivities } from '../scripts/demo-scenarios.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { servicePeriods } from '../dist/activities/schedule.js';
 import { createApp } from '../dist/app.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { Database } from '../dist/database.js';
@@ -18,6 +19,22 @@ function hash(id) {
     value = Math.imul(value ^ byte, 16777619);
   return (value >>> 0) % 6;
 }
+
+test('受限窗口包含上周跨夜服务，保留暂停日和补充安排的实际边界', () => {
+  const schedule = {
+    schedule_type: 'weekly', duration_start_date: '2026-01-01', duration_end_date: '2027-01-01',
+    weekly_slots: [{ weekday: 7, start_time: '23:00', end_time: '01:00', end_day_offset: 1 }],
+    excluded_dates: ['2026-12-13'],
+    additional_slots: [{ starts_at: at('2026-12-14', '00:15'), ends_at: at('2026-12-14', '00:45') }],
+  };
+  const periods = (date, start, end) => [...servicePeriods(schedule, Date.parse(at(date, start)), Date.parse(at(date, end)))];
+  assert.deepEqual(periods('2026-12-07', '00:00', '00:10'), [
+    { start: Date.parse(at('2026-12-06', '23:00')), end: Date.parse(at('2026-12-07', '01:00')) },
+  ]);
+  assert.deepEqual(periods('2026-12-07', '01:00', '02:00'), []);
+  assert.deepEqual(periods('2026-12-14', '00:00', '00:15'), []);
+  assert.equal(periods('2026-12-14', '00:15', '00:45').length, 1);
+});
 
 test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180000 }, async (t) => {
   const staffPassword = randomUUID();
@@ -381,7 +398,7 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
         duration_start_date: anchor,
         duration_end_date: anchor,
         slots: [{ starts_at: at(anchor, '10:00'), ends_at: at(anchor, '12:00') }],
-      });
+      }, 'completed');
       await db.registration.create({
         data: { activity_id: clash.id, student_id: studentRow2.id, status: 'accepted' },
       });
@@ -391,6 +408,12 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       const item = mine.data.items.find((row) => row.activity_code === 'TL-0001');
       assert.equal(item.has_planned_overlap, true);
       assert.equal(mine.data.items.find(row => row.activity_id === clash.id).has_planned_overlap, true);
+      for (const [status, activity] of [['published', multi], ['completed', clash]]) {
+        const filters = new URLSearchParams({ status, q: activity.activity_code });
+        const filtered = await timeline(shared, 'scope=mine&' + window + '&' + filters);
+        assert.deepEqual(codes(filtered), [activity.activity_code]);
+        assert.equal(filtered.data.items[0].has_planned_overlap, true, '重叠对方可以在当前筛选之外');
+      }
       const publicItem = (await publicQuery())
         .data.items.find((row) => row.activity_code === 'TL-0001');
       assert.equal(publicItem.has_planned_overlap, undefined);

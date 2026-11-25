@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { TimelineActivity } from '@hongyan/contracts';
-import { localDate, serviceDateText, serviceWindow } from '@hongyan/contracts/activity';
+import { serviceDateText, serviceWindow } from '@hongyan/contracts/activity';
 import { timelineColors } from '../activityDisplay';
 import type { TimeUnit } from './window';
 
@@ -24,7 +24,7 @@ const ticks = computed(() => Array.from({ length: columns.value }, (_, i) => {
   const at = props.start + i * day;
   const date = new Date(at + 8 * 3600000);
   const label = props.unit === 'week' ? '周' + '日一二三四五六'[date.getUTCDay()] + ' ' + date.getUTCDate()
-    : props.unit === 'month' ? String(date.getUTCDate()) : localDate(at);
+    : String(date.getUTCDate());
   return { at, label, x: i * width.value / columns.value };
 }));
 function x(time: number) {
@@ -44,7 +44,7 @@ const nowX = computed(() => props.now !== undefined && props.now >= props.start 
 function positionWindow() {
   if (!scroller.value) return;
   const left = bars.value.find(b => b.row.activity_id === props.selected)?.left ?? Math.min(...bars.value.map(b => b.left));
-  scroller.value.scrollLeft = props.unit === 'month' && Number.isFinite(left) ? left : 0;
+  scroller.value.scrollLeft = Number.isFinite(left) ? left : 0;
 }
 const resize = new ResizeObserver(([entry]) => {
   if (!entry.contentRect.width) return;

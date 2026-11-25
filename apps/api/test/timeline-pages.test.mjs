@@ -34,14 +34,14 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
         admin +
         '/schedule?date=' +
         date +
-        '&unit=day&view=list&revision=' +
+        '&unit=week&view=list&revision=' +
         revision +
         '&q=' +
         encodeURIComponent(title);
       const detail = teacher.getByRole('complementary', { name: '日程详情' });
       const row = teacher.locator('.schedule-list li').filter({ hasText: title });
       const mineAt =
-        web + '/mine/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent(title);
+        web + '/mine/schedule?date=' + date + '&unit=week&view=list&q=' + encodeURIComponent(title);
       const mineRow = student.locator('.schedule-list li').filter({ hasText: title });
 
       const changedDates = date + ' 至 ' + pair.pending.duration_end_date;
@@ -131,7 +131,7 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
         admin +
           '/schedule?date=' +
           date +
-          '&unit=day&view=list&pending=1&q=' +
+          '&unit=week&view=list&pending=1&q=' +
           encodeURIComponent(title),
       );
       await visible(teacher.getByText('该窗口和筛选条件下没有活动'));
@@ -189,7 +189,7 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       await student.setViewportSize({ width: 1440, height: 900 });
       await presetRegistration(db, { activityCode: 'TL-9411', studentNo: '0000000001', status: 'accepted' });
       await student.goto(
-        web + '/mine/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent('范围变化甲'),
+        web + '/mine/schedule?date=' + date + '&unit=week&view=list&q=' + encodeURIComponent('范围变化甲'),
       );
       const mineRow = student.locator('.schedule-list li').filter({ hasText: '范围变化甲' });
       await visible(mineRow);
@@ -206,7 +206,7 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
         web +
         '/managed-schedule?date=' +
         date +
-        '&unit=day&view=' +
+        '&unit=week&view=' +
         view +
         '&q=' +
         encodeURIComponent('交接演示');
@@ -258,7 +258,7 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       student.on('request', record);
       t.after(() => student.off('request', record));
       await student.goto(
-        web + '/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent(title),
+        web + '/schedule?date=' + date + '&unit=week&view=list&q=' + encodeURIComponent(title),
       );
       const rows = student.locator('.schedule-list li');
       await visible(student.getByText('41 项（已显示 20）', { exact: false }));
@@ -273,8 +273,8 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
             title: title + ' 01',
             schedule: {
               schedule_type: 'continuous',
-              starts_at: atTime(shiftDay(date, 5), '10:00'),
-              ends_at: atTime(shiftDay(date, 5), '12:00'),
+              starts_at: atTime(shiftDay(date, 7), '10:00'),
+              ends_at: atTime(shiftDay(date, 7), '12:00'),
             },
           },
         },
@@ -357,7 +357,7 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       t.after(() => db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-95' } } }));
 
       await teacher.setViewportSize({ width: 1440, height: 900 });
-      const query = 'date=' + date + '&unit=day&view=list&q=' + encodeURIComponent(title);
+      const query = 'date=' + date + '&unit=week&view=list&q=' + encodeURIComponent(title);
       const timeline = (url) =>
         url.pathname === '/api/v1/timeline' && url.searchParams.get('q') === title;
       const last = await db.activity.findUniqueOrThrow({ where: { activity_code: created.codes.at(-1) } });
@@ -469,7 +469,7 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
             request_id: randomUUID(),
           }),
         });
-      const at = web + '/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent(title);
+      const at = web + '/schedule?date=' + date + '&unit=week&view=list&q=' + encodeURIComponent(title);
       const loadTwoPages = async () => {
         await student.locator('.schedule-more button').click();
         await visible(student.getByText('41 项（已显示 40）', { exact: false }));
@@ -499,11 +499,11 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       const title = '替换演示';
       await createScheduleDataset(db, { codePrefix: 'TL-970', titlePrefix: title, date, count: 41 });
       t.after(() => db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-97' } } }));
-      await student.goto(web + '/schedule?' + new URLSearchParams({ date, unit: 'day', view: 'list', q: title }));
+      await student.goto(web + '/schedule?' + new URLSearchParams({ date, unit: 'week', view: 'list', q: title }));
       const more = student.locator('.schedule-more button');
       await more.click();
       await visible(student.getByText('41 项（已显示 40）', { exact: false }));
-      await moveActivityTo(db, { activityCode: 'TL-97021', date: shiftDay(date, 5) });
+      await moveActivityTo(db, { activityCode: 'TL-97021', date: shiftDay(date, 7) });
       await createScheduleDataset(db, { codePrefix: 'TL-979', titlePrefix: title + ' 移入', date, count: 1 });
       await more.click();
       await more.waitFor({ state: 'detached' });
@@ -520,7 +520,7 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       t.after(() => db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-98' } } }));
       await student.setViewportSize({ width: 1440, height: 900 });
       await student.goto(
-        web + '/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent(title),
+        web + '/schedule?date=' + date + '&unit=week&view=list&q=' + encodeURIComponent(title),
       );
       const rows = student.locator('.schedule-list li');
       await visible(student.getByText('41 项（已显示 20）', { exact: false }));
@@ -549,7 +549,7 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       });
       t.after(() => db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-88' } } }));
       const shrinkAt =
-        web + '/schedule?date=' + shrink + '&unit=day&view=list&q=' + encodeURIComponent(shrinkTitle);
+        web + '/schedule?date=' + shrink + '&unit=week&view=list&q=' + encodeURIComponent(shrinkTitle);
       const [target] = (await publicSchedulePage(student, shrink, shrinkTitle, 3)).items;
       // 首屏拿的是收缩前的快照，期间的删除让补读读到空页。
       const held = await holdResponse(
@@ -581,7 +581,7 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       ).content;
       await createScheduleDataset(db, { codePrefix: 'TL-87', titlePrefix: title, date, count: 41 });
       t.after(() => db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-87' } } }));
-      const at = web + '/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent(title);
+      const at = web + '/schedule?date=' + date + '&unit=week&view=list&q=' + encodeURIComponent(title);
       const timeline = (url) =>
         url.pathname === '/api/v1/timeline' && url.searchParams.get('q') === title;
 
@@ -657,7 +657,7 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       });
       t.after(() => db.activity.deleteMany({ where: { activity_code: { startsWith: 'TL-99' } } }));
       await student.setViewportSize({ width: 1440, height: 900 });
-      const at = web + '/schedule?date=' + date + '&unit=day&view=list&q=' + encodeURIComponent(title);
+      const at = web + '/schedule?date=' + date + '&unit=week&view=list&q=' + encodeURIComponent(title);
 
       // 跨午夜项按编码排在第 21 位，落在首屏之后。
       await student.goto(at);

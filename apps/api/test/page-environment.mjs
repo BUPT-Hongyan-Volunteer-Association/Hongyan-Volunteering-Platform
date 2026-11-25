@@ -24,8 +24,9 @@ export const visible = (locator) => locator.first().waitFor({ state: 'visible' }
 
 export async function publicSchedulePage(browserPage, date, q, page) {
   const url = new URL('/api/v1/timeline', browserPage.url());
+  const monday = shiftDay(date, -((new Date(date).getUTCDay() + 6) % 7));
   url.search = new URLSearchParams({
-    scope: 'public', from: atTime(date, '00:00'), to: atTime(shiftDay(date, 1), '00:00'),
+    scope: 'public', from: atTime(monday, '00:00'), to: atTime(shiftDay(monday, 7), '00:00'),
     q, page: String(page), page_size: '20',
   }).toString();
   const response = await browserPage.request.get(url.href);

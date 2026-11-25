@@ -1,4 +1,5 @@
 import type { ActivitySchedule, ScheduleSlot } from '@hongyan/contracts/types';
+import { localDate } from '@hongyan/contracts/activity';
 import { invalid } from '../http.js';
 
 const day = 86_400_000;
@@ -21,6 +22,7 @@ export function serviceDayMilliseconds(times: readonly ScheduleSlot[], serviceDa
 
 export function* occurrences(
   schedule: ActivitySchedule,
+  weeklyWindow?: { from: number; to: number },
 ): Generator<{ slot: ScheduleSlot; field: string }> {
   if (schedule.schedule_type === 'date_range') {
     const { duration_start_date: start, duration_end_date: end } = schedule;
@@ -44,9 +46,15 @@ export function* occurrences(
   }
   for (const [i, slot] of (schedule.additional_slots ?? []).entries())
     yield { slot, field: 'schedule.additional_slots.' + i };
-  const lastDay = Date.parse(schedule.duration_end_date);
+  let firstDay = Date.parse(schedule.duration_start_date);
+  let lastDay = Date.parse(schedule.duration_end_date);
+  if (weeklyWindow) {
+    // 周规则允许次日结束，窗口首日需一并检查前一天开始的服务。
+    firstDay = Math.max(firstDay, Date.parse(localDate(weeklyWindow.from)) - day);
+    lastDay = Math.min(lastDay, Date.parse(localDate(weeklyWindow.to - 1)));
+  }
   const excluded = new Set(schedule.excluded_dates);
-  for (let t = Date.parse(schedule.duration_start_date); t <= lastDay; t += day) {
+  for (let t = firstDay; t <= lastDay; t += day) {
     const date = new Date(t);
     const localDay = date.toISOString().slice(0, 10);
     if (excluded.has(localDay)) continue;
@@ -61,6 +69,14 @@ export function* occurrences(
         },
       };
     }
+  }
+}
+
+export function* servicePeriods(schedule: ActivitySchedule | undefined, from: number, to: number) {
+  if (!schedule) return;
+  for (const { slot } of occurrences(schedule, { from, to })) {
+    const start = Date.parse(slot.starts_at), end = Date.parse(slot.ends_at);
+    if (start < to && end > from) yield { start, end };
   }
 }
 

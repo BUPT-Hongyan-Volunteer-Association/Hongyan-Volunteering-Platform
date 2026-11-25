@@ -1,3 +1,4 @@
+import type { StudentPage } from '@hongyan/contracts/types';
 import type { Database } from '../database.js';
 import { pagination } from '../activities/read.js';
 import { invalid } from '../http.js';
@@ -45,24 +46,11 @@ export async function listStudents(db: Database, query: Record<string, string>) 
   return db.$transaction(
     async (tx) => {
       const total = await tx.student.count({ where });
-      const gradeRows = await tx.student.findMany({
-        where: { grade: { not: null } },
-        select: { grade: true },
-        distinct: ['grade'],
-        orderBy: { grade: 'desc' },
-      });
-      const grade_options = gradeRows
-        .map((row) => row.grade)
-        .filter((value): value is string => !!value);
-      const cohortRows = await tx.student.findMany({
-        where: { cohort: { not: null } },
-        select: { cohort: true },
-        distinct: ['cohort'],
-        orderBy: { cohort: 'asc' },
-      });
-      const cohort_options = cohortRows
-        .map((row) => row.cohort)
-        .filter((value): value is string => !!value);
+      const [options] = await tx.$queryRaw<Pick<StudentPage, 'grade_options' | 'cohort_options'>[]>`
+        SELECT COALESCE(array_agg(DISTINCT grade ORDER BY grade DESC) FILTER (WHERE grade <> ''), '{}') AS grade_options,
+               COALESCE(array_agg(DISTINCT cohort ORDER BY cohort) FILTER (WHERE cohort <> ''), '{}') AS cohort_options
+        FROM student
+      `;
       const items =
         skip < total
           ? await tx.student.findMany({
@@ -78,8 +66,7 @@ export async function listStudents(db: Database, query: Record<string, string>) 
         page,
         page_size,
         total,
-        grade_options,
-        cohort_options,
+        ...options,
       };
     },
     { isolationLevel: 'RepeatableRead' },

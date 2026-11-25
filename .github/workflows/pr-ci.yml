@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 25
     services:
       postgres:
-        image: postgres:18
+        image: postgres:18.7
         env:
           POSTGRES_DB: ci
           POSTGRES_PASSWORD: ci_only

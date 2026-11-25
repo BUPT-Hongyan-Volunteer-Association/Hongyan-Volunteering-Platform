@@ -45,9 +45,7 @@ const managed = computed(() => props.scope === 'managed' || props.scope === 'all
 const revision = computed<'working' | 'published'>(() =>
   managed.value && route.query.revision !== 'published' ? 'working' : 'published',
 );
-const unit = computed(() =>
-  validUnit(route.query.unit) ? route.query.unit : route.query.unit === 'hour' || mobile.value ? 'day' : 'week',
-);
+const unit = computed(() => validUnit(route.query.unit) ? route.query.unit : 'week');
 const filterOpen = ref(false);
 const chart = computed(() => (route.query.view || (mobile.value ? 'list' : 'chart')) === 'chart');
 const date = computed(() =>
@@ -263,8 +261,8 @@ function resized() {
 watch(
   [() => route.query.unit, () => route.query.slot],
   ([oldUnit, slot]) => {
-    if (oldUnit === 'hour' || slot !== undefined)
-      void router.replace({ query: { ...route.query, unit: oldUnit === 'hour' ? 'day' : oldUnit, slot: undefined } });
+    if ((oldUnit !== undefined && !validUnit(oldUnit)) || slot !== undefined)
+      void router.replace({ query: { ...route.query, unit: unit.value, slot: undefined } });
   },
   { immediate: true },
 );
@@ -447,7 +445,6 @@ onUnmounted(() => {
           <ScheduleDatePicker
             :date="date"
             :period="periodLabel"
-            :highlighted="!!selected && unit === 'day'"
             @select="set('date', $event)"
           />
           <button class="icon-button" :aria-label="arrows[1]" :title="arrows[1]" @click="shift(1)">
