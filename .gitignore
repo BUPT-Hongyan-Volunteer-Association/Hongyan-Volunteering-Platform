@@ -6,3 +6,4 @@ dist/
 .DS_Store
 packages/contracts/src/generated/
 apps/api/src/generated/
+*PRD*.docx
