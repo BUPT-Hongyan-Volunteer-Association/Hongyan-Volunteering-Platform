@@ -7,7 +7,7 @@
 | 审核员 | 审批活动、修订和时长批次，处理错账修复及申诉。从「建档导入」批量建档，在「学生档案」查人，在「账号与角色」办理普通学生的负责人授权和凭证重置，在「活动团队」维护成员和接管活动。支持按授权范围导出记录、查询审计。 |
 | 技术管理员 | 在「账号与角色」按角色、状态查找账号，创建后台账号、调整高权限角色，办理启停和凭证重置。 |
 
-[产品需求（PRD v1.3.4）](docs/志愿服务平台_PRD_v1.3.4_20261118.docx) · [活动日程与验收用例](docs/timeline.md) · [三端界面规范](DESIGN.md) · [页面截图](docs/ui-samples/README.md) · [工程协作约定](AGENTS.md) · [OpenAPI 契约](packages/contracts/openapi_v1.2.5.yaml) · [导入模板](packages/contracts/templates/)
+[活动日程与验收用例](docs/timeline.md) · [三端界面规范](DESIGN.md) · [页面截图](docs/ui-samples/README.md) · [工程协作约定](AGENTS.md) · [OpenAPI 契约](packages/contracts/openapi_v1.2.5.yaml) · [导入模板](packages/contracts/templates/)
 
 ## 账号与活动团队
 
