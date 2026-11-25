@@ -18,6 +18,24 @@ scheme=http
 if [[ "${HY_LOCAL_HTTPS:-0}" == 1 ]]; then scheme=https; fi
 # Readiness probes only connect to the local development services.
 ready() { curl --insecure --noproxy '*' --max-time 2 -fsS "$1" 2>/dev/null | grep -Fq "$2"; }
+frontend_ready() {
+  ready "$1" '/src/main.ts' && curl --insecure --noproxy '*' --max-time 4 -fsS "${1}@id/@hongyan/ui/theme.css" -o /dev/null 2>/dev/null
+}
+start_frontend() {
+  local app="$1" port="$2" url="$scheme://localhost:$2/" pid cmd cwd
+  if ! frontend_ready "$url" && ready "$url" '/src/main.ts'; then
+    pid=$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN)
+    cmd=$(ps -p "$pid" -o command=)
+    cwd=$(lsof -a -p "$pid" -d cwd -Fn | sed -n 's/^n//p')
+    if [[ "$cwd" == "$PWD/apps/$app" && "$cmd" == *"/vite/bin/vite.js" ]]; then
+      echo "正在重启样式加载失败的 $app 前端…"
+      kill -TERM "$pid"
+      for ((i=0;i<20;i++)); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
+    fi
+  fi
+  start "dev:$app" "$port" "$url" '/src/main.ts'
+  frontend_ready "$url" || fail "$app 前端资源加载失败，请查看 .local/start-logs/dev-$app.log"
+}
 start() {
   local task="$1" port="$2" url="$3" marker="$4" log=".local/start-logs/${1/:/-}.log"
   if ready "$url" "$marker"; then echo "$task 已就绪"; return; fi
@@ -47,8 +65,8 @@ start() {
   fail "$task 启动失败，请查看 $PWD/${log}"
 }
 start dev:api 3000 http://127.0.0.1:3000/api/v1/auth/csrf csrf_token
-start dev:web 5173 "$scheme://localhost:5173/" '/src/main.ts'
-start dev:admin 5174 "$scheme://localhost:5174/" '/src/main.ts'
+start_frontend web 5173
+start_frontend admin 5174
 start demo:open 5180 http://127.0.0.1:5180/ 选择测试身份
 open http://127.0.0.1:5180/
 echo "身份选择页已打开"
