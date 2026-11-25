@@ -1,4 +1,5 @@
-import { readXlsxSheet, XlsxContentError, type SheetCell, type SheetRow } from './xlsx.js';
+import { BusinessError } from '../http.js';
+import { readXlsxSheet, type SheetCell, type SheetRow } from './xlsx.js';
 
 export const importSheetName = '学生建档';
 export const maxImportBytes = 5_242_880;
@@ -224,20 +225,20 @@ function importColumns(rows: SheetRow[]) {
 }
 
 /** 确认时从原文件读取实际表头，兼容此前已预览的批次。 */
-export function readImportFields(buffer: Buffer) {
-  const columns = importColumns(readXlsxSheet(buffer, importSheetName, true).rows);
-  if (!columns) throw new XlsxContentError('已就绪批次的原文件表头无效');
+export async function readImportFields(buffer: Buffer) {
+  const columns = importColumns((await readXlsxSheet(buffer, importSheetName, true)).rows);
+  if (!columns) throw new Error('已就绪批次的原文件表头无效');
   return [...columns.keys()];
 }
 
 /** 解析工作簿结构、工作表、表头和数据行；只做文件与行内格式校验。 */
-export function parseImportWorkbook(buffer: Buffer): ParsedImport {
+export async function parseImportWorkbook(buffer: Buffer): Promise<ParsedImport> {
   let rows: SheetRow[];
   let truncated: boolean;
   try {
-    ({ rows, truncated } = readXlsxSheet(buffer, importSheetName));
+    ({ rows, truncated } = await readXlsxSheet(buffer, importSheetName));
   } catch (error) {
-    if (!(error instanceof XlsxContentError)) throw error;
+    if (!(error instanceof BusinessError)) throw error;
     return { file_error: error.message, rows: [], row_count: 0 };
   }
   if (truncated)

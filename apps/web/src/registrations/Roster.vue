@@ -3,8 +3,9 @@
 let selectionClearedOnLeave = false;
 </script>
 <script setup lang="ts">
+import StatusFilter from '@hongyan/ui/StatusFilter.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
-import { computed, onUnmounted, ref, shallowReactive, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, shallowReactive, watch } from 'vue';
 import { onBeforeRouteLeave, useRoute } from 'vue-router';
 import {
   ApiError,
@@ -29,7 +30,7 @@ const route = useRoute(),
   q = ref(''),
   state = ref<Registration['status'] | ''>('submitted'),
   page = ref(1),
-  notice = ref(selectionClearedOnLeave ? '离开上次名单时已清空选择。' : ''),
+  notice = ref(selectionClearedOnLeave ? '离开上次名单时已清空选择' : ''),
   inspected = ref<Registration>();
 selectionClearedOnLeave = false;
 const time = new Intl.DateTimeFormat('zh-CN', {
@@ -63,6 +64,25 @@ const selectedExportInput = computed(() => ({
   activity_id: String(route.params.id),
   registration_ids: [...selected.value],
 }));
+const exportScope = ref<'filter' | 'selection'>('filter');
+watch(() => selected.value.size, count => { if (!count) exportScope.value = 'filter'; });
+const filterOptions = computed(() => Object.fromEntries(filters.map(key => [
+  key, (key ? labels[key] : '全部') + ' ' + (key ? result.value?.status_counts[key] ?? 0
+    : Object.values(result.value?.status_counts ?? {}).reduce((sum, count) => sum + count, 0)),
+])));
+const detailHeading = ref<HTMLElement>();
+let opener: HTMLElement | undefined;
+async function inspect(row: Registration, target: EventTarget | null) {
+  opener = target as HTMLElement;
+  inspected.value = row;
+  await nextTick();
+  detailHeading.value?.focus();
+}
+async function closeDetail() {
+  inspected.value = undefined;
+  await nextTick();
+  opener?.focus();
+}
 let serial = 0;
 let filterVersion = 0;
 let mounted = true;
@@ -80,7 +100,7 @@ async function load() {
         q: q.value.trim() || undefined,
         status: state.value || undefined,
         page: page.value,
-        page_size: 5,
+        page_size: 20,
       },
       throwOnError: true,
     });
@@ -128,6 +148,11 @@ function allowed(decision: Decision, rows: Registration[]) {
     (decision !== 'accepted' || rows.length <= result.value.capacity - result.value.accepted_count);
 }
 const batch = computed(() => [...snapshots.values()]);
+const batchActions = computed(() => result.value?.can_decide
+  ? (Object.keys(actions) as Decision[]).filter(decision => batch.value.length &&
+    batch.value.every(row => canChangeRegistration(row.status, decision)))
+  : []);
+
 async function decide(decision: Decision, single?: Registration) {
   if (paused.value) return;
   const rows = single ? [single] : batch.value;
@@ -153,8 +178,8 @@ async function decide(decision: Decision, single?: Registration) {
     if (!mounted || activityId !== route.params.id) return;
     if (filterKey !== filterVersion) { await load(); return; }
     const who = single ? single.student_name : rows.length + ' 人';
-    notice.value = decision === 'waitlisted' ? '已将' + who + '设为候补。'
-      : decision === 'accepted' ? '已录取' + who + '。' : who + '已标为未录取。';
+    notice.value = decision === 'waitlisted' ? '已将' + who + '设为候补'
+      : decision === 'accepted' ? '已录取' + who : who + '已标为未录取';
     const remaining = new Set(selected.value);
     for (const r of rows) remaining.delete(r.id);
     selected.value = remaining;
@@ -196,7 +221,7 @@ function clear() {
   filterVersion++;
   conflicts.value = [];
   batchReason.value = '';
-  notice.value = selected.value.size ? '筛选或活动已变更，已清空选择。' : '';
+  notice.value = selected.value.size ? '筛选或活动已变更，已清空选择' : '';
   inspected.value = undefined;
   writeError.value = '';
   selected.value.clear();
@@ -224,14 +249,8 @@ onUnmounted(() => {
     <RouterLink class="button" :to="{ path: '/managed/' + route.params.id + '/requests', query: { page: route.query.page } }">退出与恢复</RouterLink>
   </div>
   <div v-if="result" class="status-filters" aria-label="报名状态">
-    <button v-for="key in filters" :key="key" :aria-pressed="state === key" @click="state = key">
-      {{ key ? labels[key] : '全部' }}
-      <b>{{
-        key
-          ? result.status_counts[key]
-          : Object.values(result.status_counts).reduce((a, b) => a + b, 0)
-      }}</b>
-    </button>
+    <StatusFilter label="报名状态" :model-value="state" :options="filterOptions"
+      @update:model-value="state = $event as typeof state" />
     <UiSelect
       label="其他报名状态"
       :model-value="lessCommon.some((k) => k === state) ? state : ''"
@@ -247,31 +266,25 @@ onUnmounted(() => {
         placeholder="搜索姓名或学号"
         v-model="q"
     /></label>
+    <label v-if="selected.size">导出范围
+      <UiSelect label="导出范围" v-model="exportScope"
+        :options="[{ value: 'filter', label: '当前筛选全部' }, { value: 'selection', label: '所选人员' }]" />
+    </label>
+    <ExportButton :input="exportScope === 'selection' ? selectedExportInput : filterExportInput"
+      :disabled="saving || writesPaused || !result" create-label="导出名单" download-label="下载名单文件" @recheck="load" />
+  </div>
+  <div v-if="selected.size" class="page-actions roster-batch" aria-label="批量办理">
     <span class="state-chip attention">已选 {{ selected.size }} 人</span>
-    <label v-if="selected.size">所选人员的处理说明（选填）<input v-model="batchReason" maxlength="1000" /></label>
-    <button v-for="(label, key) in actions" :key="key" :disabled="paused || !allowed(key, batch)"
-      @click="decide(key)">{{ key === 'waitlisted' ? '所选设为候补' : label + '所选' }}</button>
-    <ExportButton
-      :input="filterExportInput"
-      :disabled="saving || writesPaused || !result"
-      create-label="导出筛选结果"
-      download-label="下载名单文件"
-      @recheck="load"
-    />
-    <ExportButton
-      :input="selectedExportInput"
-      :disabled="!selected.size || saving || writesPaused || !result"
-      :create-label="'导出所选名单' + (selected.size ? '（' + selected.size + '）' : '')"
-      download-label="下载所选名单"
-      @recheck="load"
-    />
+    <label v-if="batchActions.length">所选人员的处理说明（选填）<input v-model="batchReason" maxlength="1000" /></label>
+    <button v-for="key in batchActions" :key="key" :disabled="paused || !allowed(key, batch)"
+      @click="decide(key)">{{ key === 'waitlisted' ? '所选设为候补' : actions[key] + '所选' }}</button>
   </div>
   <p v-if="result && selected.size && selected.size <= 100">
-    <template v-if="!result.can_decide">本活动的报名决定已关闭。</template>
+    <template v-if="!result.can_decide">本活动的报名决定已关闭</template>
     <template v-else-if="batch.every(r => canChangeRegistration(r.status, 'accepted')) && selected.size > result.capacity - result.accepted_count">
-      当前余量不足以录取全部所选人员。<button @click="load">刷新余量</button>
+      当前余量不足以录取全部所选人员<button @click="load">刷新余量</button>
     </template>
-    <template v-else-if="!Object.keys(actions).some(k => allowed(k as Decision, batch))">所选状态无法统一办理，请调整选择或导出名单。</template>
+    <template v-else-if="!batchActions.length">所选状态无法统一办理，请调整选择或导出名单</template>
   </p>
   <p v-if="notice" role="status">{{ notice }}</p>
   <p v-if="writeError" role="alert">
@@ -336,7 +349,7 @@ onUnmounted(() => {
               <span class="icon-label"><UiIcon name="Document" />{{ labels[r.status] }}</span>
             </td>
             <td>
-              <button class="view-row" :aria-label="'查看' + r.student_name" @click="inspected = r">
+              <button class="button compact" :aria-label="'查看' + r.student_name" @click="inspect(r, $event.currentTarget)">
                 查看
               </button>
             </td>
@@ -352,7 +365,7 @@ onUnmounted(() => {
       </div>
       <Pager
         :page="page"
-        :size="5"
+        :size="result.page_size"
         :total="result.total"
         @change="
           (p) => {
@@ -365,8 +378,8 @@ onUnmounted(() => {
   </template>
   <section v-if="inspected" class="record">
     <div class="page-title">
-      <h3>{{ inspected.student_name }}的报名记录</h3>
-      <button @click="inspected = undefined">收起记录</button>
+      <h3 ref="detailHeading" tabindex="-1">{{ inspected.student_name }}的报名记录</h3>
+      <button @click="closeDetail">收起记录</button>
     </div>
     <dl>
       <dt>学号</dt>
@@ -414,9 +427,6 @@ onUnmounted(() => {
 .capacity .ui-icon,
 .icon-label .ui-icon {
   color: var(--brand);
-}
-.status-filters button b {
-  font-variant-numeric: tabular-nums;
 }
 .roster-tools .search-field {
   margin-right: auto;
@@ -466,20 +476,11 @@ onUnmounted(() => {
 .status-filters {
   border-bottom: 1px solid var(--line);
 }
-.status-filters button {
-  border: 0;
-  border-radius: 0;
-  color: var(--muted);
-  padding: 10px 6px;
-}
-.status-filters button[aria-pressed='true'] {
-  color: var(--brand);
-  box-shadow: inset 0 -3px var(--brand);
-  font-weight: 650;
-}
+
 .status-filters {
   --select-width: 7rem;
 }
+.roster-batch { padding: 12px; background: var(--surface); border-radius: var(--radius); margin-bottom: 16px; }
 .roster-tools {
   margin: 16px 0;
 }
@@ -491,11 +492,6 @@ input[type='checkbox'] {
   width: 16px;
   height: 16px;
   accent-color: var(--brand);
-}
-.view-row {
-  border: 0;
-  background: transparent;
-  font-weight: 600;
 }
 .roster-pager {
   justify-content: space-between;

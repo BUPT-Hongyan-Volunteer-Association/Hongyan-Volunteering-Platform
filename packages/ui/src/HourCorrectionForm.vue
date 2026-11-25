@@ -53,12 +53,12 @@ function add() {
   draftError.value = '';
   const row = sourceRow.value;
   if (!row || !targetSelected.value || !itemReason.value.trim() || !studentName.value.trim()) {
-    draftError.value = '请选择源记录、获批安排并补齐目标信息。';
+    draftError.value = '请选择源记录、获批安排并补齐目标信息';
     return;
   }
   if (items.value.some(({ item }) => item.source_record_id === row.id ||
     (item.target_student_no === studentNo.value && item.target_activity_id === targetActivity.value && item.target_service_date === targetDay.value))) {
-    draftError.value = '源记录和目标键在组内均须唯一。';
+    draftError.value = '源记录和目标键在组内均须唯一';
     return;
   }
   items.value.push({
@@ -112,8 +112,8 @@ async function submit() {
               </select>
             </label>
             <p v-if="sourceError" role="alert">{{ sourceError }} <button type="button" @click="refreshSource()">重读源台账</button></p>
-            <p v-else-if="source && !source.total">所选活动与日期没有有效记录。</p>
-            <Pager v-if="source && source.total > size" :page="sourcePage" :size="size" :total="source.total" @change="sourcePage = $event" />
+            <p v-else-if="source && !source.total">所选活动与日期没有有效记录</p>
+            <Pager v-if="source && source.total > source.page_size" :page="sourcePage" :size="source.page_size" :total="source.total" @change="sourcePage = $event" />
           </div>
           <div>
             <h3>记入正确账目</h3>
@@ -125,7 +125,7 @@ async function submit() {
               </select>
             </label>
             <p v-if="revisionError" role="alert">{{ revisionError }} <button type="button" @click="refreshRevisions()">重读获批安排</button></p>
-            <Pager v-if="revisions && revisions.total > size" :page="revisionPage" :size="size" :total="revisions.total" @change="revisionPage = $event" />
+            <Pager v-if="revisions && revisions.total > revisions.page_size" :page="revisionPage" :size="revisions.page_size" :total="revisions.total" @change="revisionPage = $event" />
             <div class="target-fields">
               <label>目标学号<input v-model="studentNo" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" required /></label>
               <label>目标姓名<input v-model="studentName" maxlength="100" required /></label>

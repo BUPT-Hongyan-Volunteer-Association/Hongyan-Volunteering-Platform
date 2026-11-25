@@ -22,7 +22,7 @@ import { ReviewController } from './activities/review.controller.js';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { GroupImageController } from './activities/group-image.js';
 import { DraftController } from './activities/draft.controller.js';
-import { Workflow } from './activities/workflow.js';
+import { Workflow } from './workflow.js';
 import { Database } from './database.js';
 import { PublicController } from './activities/public.controller.js';
 import { RecruitmentRequests } from './registrations/requests.controller.js';

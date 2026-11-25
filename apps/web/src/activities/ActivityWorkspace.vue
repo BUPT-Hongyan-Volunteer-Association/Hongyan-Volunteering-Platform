@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { serviceDateText } from '@hongyan/contracts/activity';
 import ActivityMemberListView from '@hongyan/ui/ActivityMemberListView.vue';
 import TransferOwner from './TransferOwner.vue';
 import AddCollaborator from './AddCollaborator.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
-import { serviceTime } from '@hongyan/ui/activityDisplay';
+
 import { useRoute } from 'vue-router';
 import {
   ApiError,
@@ -31,6 +32,8 @@ function showDetail(next: ManagedActivityDetail) {
     detail.value = next;
 }
 const sections = [
+  ['', '活动团队'],
+  ['edit', '编辑与送审'],
   ['roster', '报名名单'],
   ['notices', '通知与回执'],
   ['attendance', '现场人员记录'],
@@ -54,8 +57,8 @@ const transferMessage = computed(() => {
   if (!transferTarget.value || self.value?.member_role !== 'collaborator') return '';
   const owner = members.value.find(member => member.member_role === 'owner');
   if (!owner) return '';
-  return owner.account_id === transferTarget.value ? '主负责人已交接给' + owner.display_name + '。'
-    : '已核对活动成员，当前主负责人是' + owner.display_name + '。';
+  return owner.account_id === transferTarget.value ? '主负责人已交接给' + owner.display_name
+    : '已核对活动成员，当前主负责人是' + owner.display_name;
 });
 let generation = 0;
 function denyAccess() {
@@ -120,33 +123,25 @@ onUnmounted(() => {
   >
   <p v-if="error" role="alert">{{ error }} <button @click="refresh">重试</button></p>
   <p v-else-if="inaccessible" class="notice" role="alert">{{ access === 'lost'
-    ? '你已不在本活动团队，个人功能不受影响。' : '当前账号无法访问此活动。' }}</p>
+    ? '你已不在本活动团队，个人功能不受影响' : '当前账号无法访问此活动' }}</p>
   <p v-else-if="!self" role="status">正在核验活动成员…</p>
   <template v-if="self && activity">
     <header class="section-heading">
       <h1>{{ activity.title }}</h1>
       <span class="state-chip">{{ self.member_role === 'owner' ? '主负责人' : '协作者' }}</span>
-      <div class="workspace-tools">
-        <RouterLink class="button" :to="{ path: base, query: sourceQuery }"
-          ><UiIcon name="List" />活动概览</RouterLink
-        >
-        <RouterLink class="button" :to="{ path: base + '/edit', query: sourceQuery }"
-          ><UiIcon name="EditPen" />编辑与送审</RouterLink
-        >
-      </div>
     </header>
     <p class="activity-meta meta-line">
       <span>{{ activity.activity_code }}</span
       ><span v-if="activity.campus"><UiIcon name="Location" />{{ activity.campus }}</span
-      ><span><UiIcon name="Clock" />{{ serviceTime(activity) }}</span>
+      ><span><UiIcon name="Calendar" />{{ serviceDateText(activity.schedule) }}</span>
     </p>
     <nav class="section-nav" aria-label="活动工作区">
       <RouterLink
         v-for="[path, label] in sections"
         :key="path"
-        :class="{ current: route.meta.area === path }"
-        :aria-current="route.meta.area === path ? 'page' : undefined"
-        :to="{ path: base + '/' + path, query: sourceQuery }"
+        :class="{ current: (route.meta.area ?? '') === path }"
+        :aria-current="(route.meta.area ?? '') === path ? 'page' : undefined"
+        :to="{ path: path ? base + '/' + path : base, query: sourceQuery }"
         >{{ label }}</RouterLink
       >
     </nav>
@@ -174,7 +169,7 @@ onUnmounted(() => {
         :team="team" :paused="verifying || !!error" @saved="applyTeam" @refresh="refresh" />
       <TransferOwner v-if="self.member_role === 'owner'" :key="activity.id + team.version" :activity="activity"
         :team="team" :paused="verifying || !!error" @target="transferTarget = $event" @saved="applyTeam" @refresh="refresh" />
-      <p v-else>你是本活动的协作者。成员变更由主负责人或授权后台办理。</p>
+      <p v-else>你是本活动的协作者。成员变更由主负责人或授权后台办理</p>
     </section>
   </template>
 </template>

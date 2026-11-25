@@ -40,7 +40,7 @@ const { data: selected, error: detailError, loading: detailLoading, refresh: loa
   id, async (signal) => {
     if (!id.value) return;
     const result = await read(signal, id.value);
-    if (!result.items[0]) throw new Error('反馈不存在或不可见。');
+    if (!result.items[0]) throw new Error('反馈不存在或不可见');
     return result.items[0];
   }, () => emit('denied'),
 );
@@ -96,7 +96,7 @@ async function decide(decision: AppealDecision['decision']) {
   if (!current || !open.value || busy.value || !reason.value.trim()) return;
   problem.value = ''; result.value = '';
   if (decision === 'resolved' && (action.value === 'none' || (origin.value && !originId.value))) {
-    problem.value = '请选择处理方式及已经批准的结果。'; return;
+    problem.value = '请选择处理方式及已经批准的结果'; return;
   }
   const body: AppealDecision = {
     expected_version: current.version, decision, reason: reason.value.trim(), resolution_action: decision === 'resolved' ? action.value : 'none',
@@ -109,8 +109,8 @@ async function decide(decision: AppealDecision['decision']) {
       headers: command.headers('decide_appeal', current.id, body), throwOnError: true });
     if (!live || id.value !== current.id) return;
     command.confirmed(); selected.value = data.data; reason.value = '';
-    result.value = decision === 'resolved' ? '反馈已结案，学生可查看本人的处理结果。'
-      : decision === 'rejected' ? '反馈已驳回。' : '已受理反馈。';
+    result.value = decision === 'resolved' ? '反馈已结案，学生可查看本人的处理结果'
+      : decision === 'rejected' ? '反馈已驳回' : '已受理反馈';
     await loadList(false);
   } catch (error) {
     if (!live || id.value !== current.id) return;
@@ -130,7 +130,7 @@ async function decide(decision: AppealDecision['decision']) {
       </div>
       <p v-if="listError" role="alert">{{ listError }} <button @click="loadList()">重读反馈</button></p>
       <p v-else-if="loading && !items" role="status">正在读取反馈…</p>
-      <p v-else-if="!items?.total">当前没有反馈。</p>
+      <p v-else-if="!items?.total">当前没有反馈</p>
       <div v-else class="entry-list">
         <RouterLink v-for="item in items.items" :key="item.id" :to="{ path: base + '/' + item.id, query: listQuery }"
           :class="{ selected: item.id === id }">
@@ -163,7 +163,7 @@ async function decide(decision: AppealDecision['decision']) {
           <RouterLink v-if="selected.target_type === 'hours'" class="button" :to="{ path: '/managed/' + activityId + '/corrections',
             query: { new: '1', appeal_id: selected.id, source_record: selected.target_id, source_date: selected.service_date } }">新建关联修复组</RouterLink>
         </div>
-        <RouterLink v-if="mode === 'self' && selected.result_hour_record_ids?.length" :to="{ path: '/mine/hours', query: {
+        <RouterLink class="button compact" v-if="mode === 'self' && selected.result_hour_record_ids?.length" :to="{ path: '/mine/hours', query: {
           include_history: 'true', record: selected.result_hour_record_ids[0],
         } }">查看本人时长记录</RouterLink>
         <p v-if="result" role="status">{{ result }}</p>
@@ -184,7 +184,7 @@ async function decide(decision: AppealDecision['decision']) {
             </select>
           </label>
           <p v-if="originsError" role="alert">{{ originsError }} <button @click="loadOrigins()">重读批准记录</button></p>
-          <p v-else-if="origin && origins && !origins.items.length">本页没有符合条件的已批准结果。</p>
+          <p v-else-if="origin && origins && !origins.items.length">本页没有符合条件的已批准结果</p>
           <Pager v-if="origin && origins && origins.total > originSize" :page="originPage" :size="originSize" :total="origins.total" @change="originPage = $event" />
           <RouterLink class="button" v-if="action === 'revoke_incident'" :to="{ path: '/manage/incidents', query: { student_id: selected.student_id } }">进入异常复核</RouterLink>
           <label>处理意见

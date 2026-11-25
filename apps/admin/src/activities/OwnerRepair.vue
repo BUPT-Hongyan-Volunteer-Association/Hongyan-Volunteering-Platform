@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import MemberCandidateSearch from '@hongyan/ui/MemberCandidateSearch.vue';
+import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { computed, onUnmounted, ref } from 'vue';
-import { ApiError, createCommand, findActivityMemberCandidate, setActivityMembers,
+import { ApiError, createCommand, setActivityMembers,
   type Activity, type ActivityMemberList } from '@hongyan/contracts';
 
 const props = defineProps<{ activity: Activity; team: ActivityMemberList }>();
 const emit = defineEmits<{ saved: [string, ActivityMemberList, string]; refresh: [string] }>();
 const number = ref(''), reason = ref(''), message = ref('');
-const match = ref<Pick<ActivityMemberList['items'][number], 'account_id' | 'display_name' | 'student_no'>>(), looking = ref(false), saving = ref(false);
+const match = ref<Pick<ActivityMemberList['items'][number], 'account_id' | 'display_name' | 'student_no'>>(), saving = ref(false);
 const member = computed(() => props.team.items.find(m => m.account_id === match.value?.account_id));
 const collaborators = computed(() => props.team.items.filter(person => person.member_role === 'collaborator'));
 function chooseCollaborator(id: string) {
@@ -19,24 +21,9 @@ let serial = 0;
 function clear() {
   serial++;
   match.value = undefined;
-  looking.value = false;
   reason.value = message.value = '';
 }
 onUnmounted(() => { serial++; });
-async function lookup() {
-  clear();
-  const turn = serial;
-  if (!/^[0-9]{10}$/.test(number.value)) { message.value = '请输入完整十位学号。'; return; }
-  looking.value = true;
-  try {
-    const { data } = await findActivityMemberCandidate({ path: { id: props.activity.id },
-      query: { student_no: number.value }, throwOnError: true });
-    if (turn !== serial) return;
-    match.value = data.data.items[0];
-    if (!match.value) message.value = '未找到具有有效负责人资格的学生。';
-  } catch (e) { if (turn === serial) message.value = e instanceof Error ? e.message : '核对失败，请重试'; }
-  finally { if (turn === serial) looking.value = false; }
-}
 async function submit() {
   if (!match.value || saving.value || member.value?.member_role === 'owner' || !reason.value.trim()) return;
   const turn = serial, id = props.activity.id, target = match.value.account_id, name = match.value.display_name;
@@ -53,14 +40,14 @@ async function submit() {
     command.confirmed();
     reason.value = message.value = '';
     if (transfer) { match.value = undefined; number.value = ''; }
-    emit('saved', id, data.data, transfer ? name + '已接任主负责人。' : name + '已加入活动，请核对交接信息并填写交接原因。');
+    emit('saved', id, data.data, transfer ? name + '已接任主负责人' : name + '已加入活动，请核对交接信息并填写交接原因');
   } catch (e) {
     if (turn !== serial) return;
     if (e instanceof ApiError && e.status === 422) {
       message.value = e.message;
     } else if (e instanceof ApiError && [401, 403, 404, 409].includes(e.status ?? 0)) {
-      emit('refresh', e.status === 409 ? e.message + '，请重新核对后办理。' : e.message);
-    } else message.value = '提交结果未确认，请重试。';
+      emit('refresh', e.status === 409 ? e.message + '，请重新核对后办理' : e.message);
+    } else message.value = '提交结果未确认，请重试';
   } finally { saving.value = false; }
 }
 </script>
@@ -68,21 +55,18 @@ async function submit() {
 <template>
   <section class="repair">
     <h2>{{ team.owner_unavailable_reason ? '重新指定主负责人' : '添加协作者或交接主负责人' }}</h2>
-    <form @submit.prevent="lookup">
-      <label>接任人学号<input v-model="number" autocomplete="off" inputmode="numeric" :disabled="saving" @input="clear" /></label>
-      <button :disabled="looking || saving">{{ looking ? '正在核对…' : '核对接任人' }}</button>
-    </form>
+    <MemberCandidateSearch v-model="number" :activity-id="activity.id" label="接任人学号" action="核对接任人" :disabled="saving"
+      @clear="clear" @found="match = $event" @error="e => message = e instanceof Error ? e.message : '查找失败，请重试'" />
     <label v-if="collaborators.length">从现有协作者中选择
-      <select :value="member?.account_id ?? ''" :disabled="saving" @change="chooseCollaborator(($event.target as HTMLSelectElement).value)">
-        <option value="">请选择协作者</option>
-        <option v-for="person in collaborators" :key="person.account_id" :value="person.account_id">{{ person.display_name }} {{ person.student_no }}</option>
-      </select>
+      <UiSelect label="从现有协作者中选择" :model-value="member?.account_id ?? ''" :disabled="saving"
+        :options="[{ value: '', label: '请选择协作者' }, ...collaborators.map(person => ({ value: person.account_id, label: [person.display_name, person.student_no].filter(Boolean).join(' · ') }))]"
+        @update:model-value="chooseCollaborator" />
     </label>
     <div v-if="match" class="candidate">
       <strong>{{ match.display_name }}<template v-if="match.student_no"> · {{ match.student_no }}</template></strong>
-      <p v-if="member?.member_role === 'owner'">该学生已是主负责人，请刷新查看最新资格。</p>
+      <p v-if="member?.member_role === 'owner'">该学生已是主负责人，请刷新查看最新资格</p>
       <form v-else @submit.prevent="submit">
-        <p>{{ member ? '确认后，该协作者将接任主负责人，原主负责人保留为协作者。' : '该学生尚未加入本活动，请先添加为协作者。' }}</p>
+        <p>{{ member ? '确认后，该协作者将接任主负责人，原主负责人保留为协作者' : '该学生尚未加入本活动，请先添加为协作者' }}</p>
         <label>{{ member ? '交接原因' : '添加原因' }}<input v-model="reason" required maxlength="500" :disabled="saving" /></label>
         <button class="primary" :disabled="saving || !reason.trim()">{{ saving ? '正在提交…' : member ? '确认重新指定' : '确认添加协作者' }}</button>
       </form>

@@ -19,10 +19,10 @@ import type {
 import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
 import type { Prisma } from '../generated/prisma/client.js';
 import { Database } from '../database.js';
-import { BusinessError, denied, envelope, invalid, invisible } from '../http.js';
+import { BusinessError, denied, envelope, invalid, invisible, checkVersion, wrongState } from '../http.js';
 import { managedScope, pagination, staff } from '../activities/read.js';
-import { validate } from '../activities/validation.js';
-import { Workflow, checkVersion, wrongState } from '../activities/workflow.js';
+import { validate } from '../validation.js';
+import { Workflow } from '../workflow.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { eventView, noticeView, receiptView } from './notice.js';
 import { attendanceKinds, followUpEmpty, receiptStatus, receiptWhere } from './receipts.js';
@@ -276,7 +276,7 @@ export class NoticeController {
     const { page, page_size, skip } = pagination(q);
     if (q.status && !['pending', 'running', 'delivered', 'failed', 'superseded'].includes(q.status))
       invalid('status', '事件状态无效');
-    const where = { status: q.status, activity_id: uuid(q, 'activity_id') };
+    const where = { id: uuid(q, 'id'), status: q.status, activity_id: uuid(q, 'activity_id') };
     const [rows, total] = await this.db.$transaction(
       [
         this.db.notificationEvent.findMany({

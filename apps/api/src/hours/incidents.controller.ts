@@ -3,13 +3,13 @@ import { Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Req } fro
 import type { Incident as View, IncidentDecision, IncidentInput, ReasonAction } from '@hongyan/contracts/types';
 import { managedScope, pagination, staff } from '../activities/read.js';
 import { parseCalendarDate } from '../activities/schedule.js';
-import { validate } from '../activities/validation.js';
-import { checkVersion, Workflow, wrongState } from '../activities/workflow.js';
+import { validate } from '../validation.js';
+import { checkVersion, wrongState, denied, envelope, invalid, invisible } from '../http.js';
+import { Workflow } from '../workflow.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { audit } from '../audit.js';
 import { Database } from '../database.js';
 import type { Incident, Prisma } from '../generated/prisma/client.js';
-import { denied, envelope, invalid, invisible } from '../http.js';
 import { enqueueHourNotices } from './events.js';
 import { dateText, lockLedger } from './ledger-data.js';
 import { beijingDay, normalizeFact } from './values.js';
@@ -19,7 +19,7 @@ export function incidentView(row: Incident, own = false): View {
     source_type, source_batch_id, source_row_number, reviewed_by, review_reason, revoked_at, created_at, updated_at } = row;
   return {
     id, version, activity_id, student_id, submitted_by, status: status as View['status'],
-    facts: own && source_type === 'hour_import' ? '该日现场异常已核实，可在本人记录与反馈中提交说明。' : facts,
+    facts: own && source_type === 'hour_import' ? '该日现场异常已核实，可在本人记录与反馈中提交说明' : facts,
     service_date: dateText(service_date), source_type: source_type as View['source_type'],
     discipline_status: 'not_enabled', created_at: created_at.toISOString(), updated_at: updated_at.toISOString(),
     ...(occurred_at && { occurred_at: occurred_at.toISOString() }),
@@ -132,7 +132,7 @@ export class HourIncidentsController {
         before: { status: row.status, version: row.version }, after: { status, version: updated.version } });
       if (status !== 'rejected') await enqueueHourNotices(tx, 'hours_result', id, actor.account_id, [{
         student_id: row.student_id, activity_id: row.activity_id, title: '现场异常核实结果',
-        body: service_date + (status === 'revoked' ? ' 的现场异常记录已撤销。' : ' 的现场异常已核实，详情见本人记录。'),
+        body: service_date + (status === 'revoked' ? ' 的现场异常记录已撤销' : ' 的现场异常已核实，详情见本人记录'),
       }], updated.version);
       return incidentView(updated);
     });

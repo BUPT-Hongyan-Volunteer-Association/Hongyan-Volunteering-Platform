@@ -63,9 +63,9 @@ async function submit(action: 'login' | 'change' | 'logout') {
   } catch (e) {
     if (action === 'login' && e instanceof ApiError && e.body?.code === 'unauthorized') {
       await restore();
-      if (stage.value === 'login') message.value = '登录页面已过期，会话已更新，请再次登录。';
+      if (stage.value === 'login') message.value = '登录页面已过期，会话已更新，请再次登录';
     } else if (action === 'login' && e instanceof ApiError && e.body?.code === 'invalid_credentials') {
-      message.value = '登录失败，请核对账号和密码。如果你刚办理过凭证重置，旧密码已失效，请联系办理老师确认发放进度。';
+      message.value = '登录失败，请核对账号和密码。如果你刚办理过凭证重置，旧密码已失效，请联系办理老师确认发放进度';
     } else {
       if (e instanceof ApiError && e.status === 401 && action !== 'login') await restore();
       message.value = e instanceof Error ? e.message : '请求失败';
@@ -115,7 +115,7 @@ onUnmounted(() => {
       <main class="auth-state">
         <UiIcon name="Lock" />
         <h1>后台访问受限</h1>
-        <p role="alert">当前账号无后台权限。</p>
+        <p role="alert">当前账号无后台权限</p>
       </main>
     </template>
     <slot
@@ -151,8 +151,8 @@ onUnmounted(() => {
             <p>
               {{
                 admin
-                  ? '使用分配的审核员或技术管理员账号登录。'
-                  : '使用十位学号登录，保留开头的零。'
+                  ? '使用分配的审核员或技术管理员账号登录'
+                  : '使用十位学号登录，保留开头的零'
               }}
             </p>
           </div>
@@ -164,8 +164,8 @@ onUnmounted(() => {
             <p>
               {{
                 admin
-                  ? '在待办中查看活动版本，并进入对应审核页面。'
-                  : '初始密码为学号后六位，首次登录后需设置新密码。'
+                  ? '在待办中查看活动版本，并进入对应审核页面'
+                  : '初始密码为学号后六位，首次登录后需设置新密码'
               }}
             </p>
           </div>
@@ -174,7 +174,7 @@ onUnmounted(() => {
           <UiIcon name="Calendar" />
           <div>
             <h3>活动负责人</h3>
-            <p>登录后可从导航栏直接管理活动。</p>
+            <p>登录后可从导航栏直接管理活动</p>
           </div>
         </div>
       </aside>

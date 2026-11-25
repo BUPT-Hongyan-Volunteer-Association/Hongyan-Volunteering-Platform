@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { HourBatch, HourBatchReviewDecision, HourBatchSubmit, HourMisconductReview, HourRow, HourWarning, ReasonAction } from '@hongyan/contracts/types';
-import { checkVersion, json, wrongState, type Reauthorize, type Tx } from '../activities/workflow.js';
+import { checkVersion, wrongState, BusinessError, denied, invalid, invisible } from '../http.js';
+import { json, type Tx } from '../database.js';
+import { type Reauthorize } from '../workflow.js';
 import type { LoadedActivity } from '../activities/read.js';
 import type { Actor } from '../auth/session.guard.js';
 import type { HourImportBatch, Prisma } from '../generated/prisma/client.js';
-import { BusinessError, denied, invalid, invisible } from '../http.js';
 import { audit } from '../audit.js';
 import { batchView, digest, emptySummary, type SourceInfo } from './batch-data.js';
 import { approvedCoverage, dateText, factKey, indexHistory, lockLedger, projectWarnings, readFactReviews,
@@ -62,10 +63,11 @@ async function checkedRows(tx: Tx, batch: HourImportBatch, activity: LoadedActiv
   const { existing, daily } = indexHistory(await readHistory(tx, rows));
   const facts = await readFactReviews(tx, rows);
   const coverage = approvedCoverage(activity.revisions);
+  const today = beijingDay(now);
   const entries = rows.map((row) => {
     const record = existing.get(recordKey(row));
     const duration = coverage(row.bound_schedule_revision, row.service_date);
-    if (duration === 0 || row.service_date > beijingDay(now)) versionConflict();
+    if (duration === 0 || row.service_date > today) versionConflict();
     if (row.action === 'add') {
       if (record || row.bound_schedule_revision !== (batch.metadata as unknown as SourceInfo).schedule_revision)
         versionConflict();
@@ -225,7 +227,7 @@ async function applyRows(tx: Tx, batch: HourImportBatch, entries: Entry[], input
   await enqueueHourNotices(tx, 'hours_result', batch.id, actor.account_id,
     [...recipients].map(([student_id, lines]) => ({
       student_id, activity_id: batch.activity_id, revision: info.schedule_revision, title: info.activity_title + '时长审核结果',
-      body: lines.length > 20 ? '你的 ' + lines.length + ' 条时长或异常事项已有审核结果，请查看本人记录。' : lines.join('\n'),
+      body: lines.length > 20 ? '你的 ' + lines.length + ' 条时长或异常事项已有审核结果，请查看本人记录' : lines.join('\n'),
     })));
   return changes;
 }

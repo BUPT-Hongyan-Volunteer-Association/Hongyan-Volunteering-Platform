@@ -1,7 +1,9 @@
+import { browser } from './api-client.mjs';
+import { pollUntil } from './poll-until.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { strFromU8, unzipSync } from 'fflate';
-import { scan, attr } from '../dist/hours/ooxml.js';
+import { scan, attr } from '../dist/ooxml.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createApp } from '../dist/app.js';
@@ -25,81 +27,12 @@ test('下载模板的输入校验与五列表头对齐', () => {
   });
 });
 
-function browser(base) {
-  let cookie = '',
-    csrf = '';
-  async function request(path, { method = 'GET', body, key, form } = {}) {
-    const headers = { Cookie: cookie, 'X-CSRF-Token': csrf };
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
-    if (key) headers['Idempotency-Key'] = key;
-    const response = await fetch(base + path, {
-      method,
-      headers,
-      body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
-    });
-    const fresh = response.headers.get('set-cookie');
-    if (fresh) cookie = fresh.split(';')[0];
-    const payload = await response.json();
-    if (path === '/auth/csrf' && response.ok) csrf = payload.data.csrf_token;
-    return { status: response.status, ...payload };
-  }
-  async function signIn(username, password, newPassword) {
-    await request('/auth/csrf');
-    const login = await request('/auth/login', { method: 'POST', body: { username, password } });
-    assert.equal(login.status, 200, JSON.stringify(login));
-    await request('/auth/csrf');
-    if (newPassword) {
-      assert.equal((await request('/me')).code, 'password_change_required');
-      assert.equal(
-        (
-          await request('/auth/change-password', {
-            method: 'POST',
-            body: { current_password: password, new_password: newPassword },
-          })
-        ).status,
-        200,
-      );
-      await request('/auth/csrf');
-    }
-    return login;
-  }
-  async function upload(path, bytes, filename = '学生建档导入模板.xlsx', key = randomUUID()) {
-    const form = new FormData();
-    form.append(
-      'file',
-      new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-      filename,
-    );
-    return request(path, { method: 'POST', key, form });
-  }
-  async function raw(path, { method = 'GET', body, form, key, csrfToken, omitCsrf = false } = {}) {
-    const headers = { Cookie: cookie };
-    if (!omitCsrf) headers['X-CSRF-Token'] = csrfToken ?? csrf;
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
-    if (key) headers['Idempotency-Key'] = key;
-    const response = await fetch(base + path, {
-      method,
-      headers,
-      body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
-    });
-    const fresh = response.headers.get('set-cookie');
-    if (fresh) cookie = fresh.split(';')[0];
-    return { status: response.status, ...(await response.json()) };
-  }
-  const write = (method, path, body, key = randomUUID()) => request(path, { method, body, key });
-  return { request, signIn, upload, write, raw };
-}
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 async function waitImport(client, id) {
-  for (let attempt = 0; attempt < 400; attempt++) {
+  return pollUntil(async () => {
     const response = await client.request('/admin/student-imports/' + id);
     assert.equal(response.status, 200, JSON.stringify(response));
-    if (response.data.status !== 'validating') return response.data;
-    await sleep(25);
-  }
-  throw new Error('批次校验超时');
+    return response.data;
+  }, batch => batch.status !== 'validating', '学生建档');
 }
 
 async function uploadImport(client, workbook, filename = '名单.xlsx') {
@@ -900,6 +833,10 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       assert(listed.items.some((item) => item.student_no === '2026123401'));
       const none = (await teacher.request('/admin/students?grade=2001')).data;
       assert.equal(none.total, 0);
+      assert.deepEqual(none.grade_options, listed.grade_options);
+      assert.deepEqual(none.grade_options, [...new Set(none.grade_options)].sort().reverse());
+      assert.deepEqual(none.cohort_options, listed.cohort_options);
+      assert.equal(new Set(none.cohort_options).size, none.cohort_options.length);
       assert.equal((await teacher.request('/admin/students?grade=26')).status, 422);
     });
 
@@ -1062,7 +999,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
 
       // CSRF：缺令牌或伪造令牌均拒绝；GET 不要求 CSRF
       const body = { expected_version: batch.version, source_hash: batch.source_hash };
-      const missing = await teacher.raw('/admin/student-imports/' + batch.id + '/commit', {
+      const missing = await teacher.request('/admin/student-imports/' + batch.id + '/commit', {
         method: 'POST',
         body,
         key: randomUUID(),
@@ -1070,7 +1007,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       });
       assert.equal(missing.status, 403);
       assert.equal(missing.code, 'forbidden');
-      const forged = await teacher.raw('/admin/student-imports/' + batch.id + '/commit', {
+      const forged = await teacher.request('/admin/student-imports/' + batch.id + '/commit', {
         method: 'POST',
         body,
         key: randomUUID(),
@@ -1079,7 +1016,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       assert.equal(forged.status, 403);
       assert.equal(
         (
-          await teacher.raw('/admin/student-imports', {
+          await teacher.request('/admin/student-imports', {
             method: 'POST',
             form: multipart(template),
             key: randomUUID(),
@@ -1167,12 +1104,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const recoveryApp = await createApp();
       await recoveryApp.listen(0, '127.0.0.1');
       try {
-        let result;
-        for (let attempt = 0; attempt < 200; attempt++) {
-          result = (await teacher.request('/admin/student-imports/' + stuck.id)).data;
-          if (result.status !== 'validating') break;
-          await sleep(25);
-        }
+        const result = await waitImport(teacher, stuck.id);
         assert.equal(result.status, 'ready');
         assert.equal(result.created_count, 1);
         const committed = await teacher.write(

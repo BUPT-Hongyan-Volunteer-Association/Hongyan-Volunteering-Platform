@@ -14,21 +14,21 @@ test('活动时间按北京时间显示，入群信息只在正文里提示更�
     ends_at: `2026-11-${day}T10:00:00Z`,
   });
   const version = (day, secret) => ({
-    schedule: { schedule_type: 'custom', slots: [slot(day)] },
+    schedule: { schedule_type: 'custom', duration_start_date: '2026-11-' + day, duration_end_date: '2026-11-' + day, slots: [slot(day)] },
     registration_closes_at: slot(day).starts_at,
     group_join_instructions: secret,
   });
   const body = changeNoticeBody([version(25, '旧群号'), version(26, '新群号')]);
-  assert.match(body, /活动时间：2026\/11\/25 14:00 至 2026\/11\/25 18:00（多时段） → 2026\/11\/26/);
+  assert.match(body, /活动时间：2026-11-25 → 2026-11-26/);
   assert.match(body, /报名截止时间：2026\/11\/25 14:00 → 2026\/11\/26 14:00/);
   assert.match(body, /入群方式：已更新/);
   assert.doesNotMatch(body, /旧群号|新群号/);
 });
 
-test('旧结果时刻按北京时间比较，同类联系方式按顺序显示', () => {
+test('时长导入日期和联系方式依当前快照显示', () => {
   const message = changeNoticeBody([
-    { phone: '13800000000', result_expected_at: '2026-11-24T21:30:00Z' },
-    { contacts: ['13800000000', '13900000000'], result_expected_date: '2026-11-26' },
+    { contacts: ['13800000000'], hours_import_date: '2026-11-25' },
+    { contacts: ['13800000000', '13900000000'], hours_import_date: '2026-11-26' },
   ]);
   assert.match(message, /2026-11-25 → 2026-11-26/);
   assert.match(message, /联系方式：13800000000 → 13800000000、13900000000/);
@@ -297,6 +297,25 @@ test('站内通知、确认回执与事件队列', async (t) => {
     assert.equal((await a.current()).source_event_id, id);
   });
 
+  await t.test('不认识的申请种类和报名决定进入失败队列，不生成通知', async () => {
+    const a = await publish('事件格式校验', []);
+    const { id: student_id } = await studentRow('0000000001');
+    for (const [event_type, detail] of [
+      ['request_decided', { kind: 'unknown', status: 'approved' }],
+      ['registration_decided', { status: 'unknown', registration_version: 2 }],
+    ]) {
+      const event = await db.notificationEvent.create({ data: {
+        event_type, event_key: randomUUID(), activity_id: a.id, resource_id: randomUUID(), attempt_count: 5,
+        payload: { student_id, ...detail },
+      } });
+      await worker.drain();
+      const exact = await teacher.request('/admin/notification-events?id=' + event.id);
+      assert.equal(exact.data.total, 1);
+      assert.equal(exact.data.items[0].status, 'failed');
+      assert.equal(await db.notice.count({ where: { source_event_id: event.id } }), 0);
+    }
+  });
+
   await t.test('租约过期后旧消费者的成功或失败都不会改写新消费者的投递', async () => {
     for (const fails of [true, false]) {
       const a = await publish('租约');
@@ -346,12 +365,11 @@ test('站内通知、确认回执与事件队列', async (t) => {
       },
     );
     assert.equal(decided.status, 200);
-    const decision = await db.registrationDecisionEvent.findFirstOrThrow({
-      where: { registration_id: registration.id },
+    const event = await db.notificationEvent.findFirstOrThrow({
+      where: { resource_id: registration.id, event_type: 'registration_decided' },
     });
-    const event = await eventById(decision.event_id);
     assert.equal(event.status, 'pending');
-    assert.equal(event.payload.registration_version, decision.registration_version);
+    assert.equal(event.payload.registration_version, decided.data.version);
     await worker.drain();
     await db.notificationEvent.update({ where: { id: event.id }, data: { status: 'pending' } });
     await worker.drain();

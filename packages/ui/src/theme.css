@@ -18,7 +18,25 @@
   --yellow-tint: #fff7d6;
   --danger: #9c3327;
   --radius: 6px;
-  --date-field-height: 40px;
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --text-small: 13px;
+  --text-control: 14px;
+  --text-body: 15px;
+  --text-subheading: 16px;
+  --text-heading: 18px;
+  --weight-medium: 600;
+  --weight-heading: 700;
+  --control-height: 40px;
+  --compact-height: 32px;
+  --form-width: 42rem;
+  --success: #246741;
+  --warning: #795913;
+  --date-field-height: var(--control-height);
   --el-color-primary: var(--brand);
   --el-color-primary-light-3: #335caf;
   --el-border-radius-base: var(--radius);
@@ -31,7 +49,7 @@
 body {
   margin: 0;
   background: #fff;
-  font-size: 15px;
+  font-size: var(--text-body);
   line-height: 1.55;
 }
 main,
@@ -55,32 +73,32 @@ h3 {
   overflow-wrap: anywhere;
 }
 h1 {
-  margin-bottom: 24px;
+  margin-bottom: var(--space-24);
   font-size: clamp(23px, 2vw, 28px);
   line-height: 1.35;
-  font-weight: 700;
+  font-weight: var(--weight-heading);
   letter-spacing: -0.035em;
 }
 h2 {
-  margin: 0 0 12px;
-  font-size: 19px;
+  margin: 0 0 var(--space-12);
+  font-size: var(--text-heading);
   line-height: 1.45;
-  font-weight: 650;
+  font-weight: var(--weight-heading);
 }
 h3 {
-  margin: 0 0 8px;
-  font-size: 16px;
+  margin: 0 0 var(--space-8);
+  font-size: var(--text-subheading);
   line-height: 1.5;
 }
 p {
-  margin-block: 8px;
+  margin-block: var(--space-8);
 }
 small {
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 a {
   color: var(--brand);
-  text-underline-offset: 3px;
+  text-decoration: none;
 }
 a:hover {
   color: var(--brand-hover);
@@ -96,9 +114,9 @@ button,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  min-height: 36px;
-  padding: 6px 14px;
+  gap: var(--space-8);
+  min-height: var(--control-height);
+  padding: var(--space-8) var(--space-16);
   vertical-align: middle;
   color: var(--brand);
   border: 1px solid var(--field-line);
@@ -106,8 +124,8 @@ button,
   background: #fff;
   text-decoration: none;
   line-height: 1.4;
-  font-size: 14px;
-  font-weight: 550;
+  font-size: var(--text-control);
+  font-weight: var(--weight-medium);
   cursor: pointer;
   transition:
     background-color 0.14s,
@@ -159,9 +177,9 @@ button.icon-button,
 }
 button.compact,
 .compact {
-  min-height: 32px;
-  padding: 4px 10px;
-  font-size: 13px;
+  min-height: var(--compact-height);
+  padding: var(--space-4) var(--space-12);
+  font-size: var(--text-small);
 }
 button,
 .button,
@@ -177,13 +195,13 @@ select,
 textarea {
   max-width: 100%;
   min-width: 0;
-  min-height: 36px;
-  padding: 6px 11px;
+  min-height: var(--control-height);
+  padding: var(--space-8) var(--space-12);
   color: var(--ink);
   border: 1px solid var(--field-line);
   border-radius: var(--radius);
   background-color: #fff;
-  font-size: 14px;
+  font-size: var(--text-control);
   line-height: 1.45;
 }
 select {
@@ -204,7 +222,7 @@ input[type='radio'] {
   height: 16px;
   accent-color: var(--brand);
   vertical-align: -0.18em;
-  margin: 0 6px 0 0;
+  margin: 0 var(--space-8) 0 0;
   cursor: pointer;
 }
 input:disabled,
@@ -241,8 +259,8 @@ select:disabled {
 dl {
   display: grid;
   grid-template-columns: minmax(5.5em, auto) minmax(0, 1fr);
-  gap: 10px 20px;
-  margin-block: 16px;
+  gap: var(--space-12) var(--space-24);
+  margin-block: var(--space-16);
 }
 dt {
   color: var(--muted);
@@ -254,12 +272,13 @@ dd {
 summary {
   cursor: pointer;
   color: var(--brand);
-  font-weight: 550;
+  font-weight: var(--weight-medium);
 }
 @media (max-width: 700px), (pointer: coarse) {
   :root { --date-field-height: 44px; }
   button,
   .button,
+  .button.compact,
   button.compact,
   .icon-button,
   button.icon-button,

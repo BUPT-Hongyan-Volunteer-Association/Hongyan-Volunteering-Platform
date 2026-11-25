@@ -1,10 +1,11 @@
 import type { HourCorrectionGroup as GroupView, HourCorrectionGroupInput, HourRekeyItem, HourReviewDecision, ReasonAction } from '@hongyan/contracts/types';
-import { checkVersion, json, wrongState, type Reauthorize, type Tx } from '../activities/workflow.js';
+import { checkVersion, wrongState, BusinessError, denied, invalid, invisible } from '../http.js';
+import { json, type Tx } from '../database.js';
+import { type Reauthorize } from '../workflow.js';
 import { parseCalendarDate } from '../activities/schedule.js';
 import { staff } from '../activities/read.js';
 import type { Actor } from '../auth/session.guard.js';
 import type { HourCorrectionGroup } from '../generated/prisma/client.js';
-import { BusinessError, denied, invalid, invisible } from '../http.js';
 import { audit } from '../audit.js';
 import { approvedCoverage, dateText, indexHistory, lockLedger, projectWarnings, readHistory, recordKey, tenths,
   versionConflict, type Projection } from './ledger-data.js';
@@ -199,7 +200,7 @@ export async function reviewGroup(tx: Tx, id: string, input: HourReviewDecision,
     }
     await enqueueHourNotices(tx, 'hours_result', id, actor.account_id, [...recipients.values()].map(({ lines, ...recipient }) => ({
       ...recipient, title: '时长错帐修复结果', body: lines.length > 20
-        ? '你的 ' + lines.length + ' 条时长变更已生效，请查看我的时长。' : lines.join('\n'),
+        ? '你的 ' + lines.length + ' 条时长变更已生效，请查看我的时长' : lines.join('\n'),
     })));
   }
   const updated = await tx.hourCorrectionGroup.update({ where: { id }, data: {

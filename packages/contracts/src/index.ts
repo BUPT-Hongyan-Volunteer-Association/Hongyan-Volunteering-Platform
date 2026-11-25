@@ -22,7 +22,7 @@ function isContractError(value: unknown): value is ContractError {
 
 export class ApiError extends Error {
   constructor(readonly status: number | undefined, readonly body?: ContractError) {
-    super(body?.message ?? '未能连接平台服务，请重试。');
+    super(body?.message ?? '未能连接平台服务，请重试');
   }
 }
 
@@ -39,7 +39,7 @@ export async function openSession() {
   const { data } = await getCsrf({ throwOnError: true, cache: 'no-store' });
   const session = data?.data;
   if (!session?.csrf_token || !Number.isFinite(Date.parse(session.expires_at)) || !data.request_id) {
-    throw new Error('会话响应格式有误，请重新连接。');
+    throw new Error('会话响应格式有误，请重新连接');
   }
   csrfToken = session.csrf_token;
   return { expiresAt: session.expires_at };
@@ -48,7 +48,7 @@ export async function openSession() {
 export * from './generated/sdk.gen';
 export type * from './generated/types.gen';
 
-export const passwordRequirement = '至少 8 个字符，包含英文字母和数字。';
+export const passwordRequirement = '至少 8 个字符，包含英文字母和数字';
 
 export function writeHeaders() {
   if (!csrfToken) throw new Error('会话尚未建立，请刷新后重试');
@@ -60,8 +60,11 @@ export async function changeOwnPassword(current_password: string, new_password: 
     body: { current_password, new_password }, headers: writeHeaders(), throwOnError: true,
   });
   csrfToken = response.headers.get('X-CSRF-Token') ?? undefined;
-  // Older API versions rotate the cookie without returning its token.
-  if (!csrfToken) window.dispatchEvent(new Event('hongyan-session-expired'));
+  // 改密已经提交。仅恢复配套会话，不能再次提交改密命令。
+  if (!csrfToken) {
+    try { await openSession(); }
+    catch { window.dispatchEvent(new Event('hongyan-session-expired')); }
+  }
 }
 
 /** 每个表单实例持有一个命令。原请求结果未知时保留相同的幂等键。 */

@@ -27,6 +27,6 @@ export async function launchBrowser({ headless }) {
   }
   throw new AggregateError(
     errors,
-    '无法启动浏览器（' + name + '）。请按 README 安装对应引擎或选择本机可用的浏览器。',
+    '无法启动浏览器（' + name + '）。请按 README 安装对应引擎或选择本机可用的浏览器',
   );
 }

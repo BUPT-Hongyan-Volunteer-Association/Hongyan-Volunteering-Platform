@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { serviceDates, serviceDateText } from '@hongyan/contracts/activity';
 import { hasStudentAccess } from '../identity';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
@@ -13,16 +14,14 @@ import {
 } from '@hongyan/contracts';
 import { dateWindow, validDate, validUnit, windowLabel } from '@hongyan/ui/timeWindow';
 import {
-  activityTypes,
   localDate,
-  localDateTime,
   phaseLabels,
   phaseOptions,
-  serviceTime,
 } from '@hongyan/ui/activityDisplay';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import ActivityDetail from './ActivityDetail.vue';
 import ServiceCalendar from '@hongyan/ui/ServiceCalendar.vue';
+import { pageNumber } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 
 defineProps<{ profile: Profile }>();
@@ -31,11 +30,13 @@ const route = useRoute(),
 const rows = ref<Activity[]>([]),
   detail = ref<Activity>(),
   total = ref(0),
+  pageSize = ref(20),
   busy = ref(true),
   error = ref('');
 const search = ref('');
 const filtersOpen = ref(false);
-const page = computed(() => Number(route.query.page || 1));
+const cards = computed(() => rows.value.map(row => ({ row, firstDay: serviceDates(row.schedule).duration_start_date })));
+const page = computed(() => pageNumber(route.query.page));
 const selectedDay = computed(() => (validDate(route.query.date) ? route.query.date : ''));
 const unit = computed(() => (validUnit(route.query.unit) ? route.query.unit : 'day'));
 const range = computed(() =>
@@ -74,11 +75,6 @@ const listQuery = computed(() => ({
   slot: undefined,
   detail: undefined,
   view: undefined,
-}));
-const scheduleQuery = computed(() => ({
-  ...listQuery.value,
-  page: undefined,
-  unit: selectedDay.value ? (validUnit(route.query.unit) ? unit.value : 'hour') : undefined,
 }));
 let serial = 0;
 let scrollPosition = 0;
@@ -121,6 +117,7 @@ async function load(keepDetail = false) {
       if (index === serial) {
         rows.value = response.data.data.items;
         total.value = response.data.data.total;
+        pageSize.value = response.data.data.page_size;
       }
     }
   } catch (e) {
@@ -197,13 +194,6 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
   <template v-else>
     <header class="page-heading discover-heading">
       <h1>活动发现</h1>
-      <RouterLink
-        class="button"
-        aria-label="活动日程"
-        :to="{ path: '/schedule', query: scheduleQuery }"
-      >
-        <UiIcon name="Calendar" />活动日程<small>按时间</small>
-      </RouterLink>
     </header>
     <div class="discovery">
       <section class="results" aria-label="公开活动">
@@ -288,7 +278,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
         </div>
         <p v-if="selectedDay" class="date-filter">
           <UiIcon name="Calendar" />{{
-            unit === 'month' || unit === 'week'
+            unit !== 'day'
               ? windowLabel(range!.start, range!.end, unit)
               : selectedDay
           }}<button
@@ -306,15 +296,15 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
           <p>暂无匹配的公开活动</p>
         </div>
         <ul v-else class="activity-list">
-          <li v-for="row in rows" :key="row.id">
+          <li v-for="{ row, firstDay } in cards" :key="row.id">
             <time
               class="date-tile"
-              v-if="row.starts_at"
-              :datetime="row.starts_at"
-              :title="'首个服务日期 ' + localDate(row.starts_at)"
+              v-if="firstDay"
+              :datetime="firstDay"
+              :title="'活动开始日期 ' + firstDay"
             >
-              <span>{{ Number(localDate(row.starts_at).slice(5, 7)) }} 月</span
-              ><strong>{{ localDate(row.starts_at).slice(8) }}</strong>
+              <span>{{ Number(firstDay.slice(5, 7)) }} 月</span
+              ><strong>{{ firstDay.slice(8) }}</strong>
             </time>
             <div class="activity-entry">
               <div class="activity-title">
@@ -337,22 +327,19 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
                     [row.campus, row.location].filter(Boolean).join(' · ')
                   }}</span
                 >
-                <span><UiIcon name="Clock" />{{ serviceTime(row) }}</span>
+                <span><UiIcon name="Calendar" />{{ serviceDateText(row.schedule) }}</span>
               </div>
               <div class="entry-foot">
-                <span>{{ row.schedule && activityTypes[row.schedule.schedule_type] }} · {{ row.capacity }} 人</span>
-                <span v-if="row.registration_closes_at"
-                  >报名截止 {{ localDateTime(row.registration_closes_at) }}</span
-                >
+                <span>名额 {{ row.capacity }} 人</span>
               </div>
             </div>
             <UiIcon name="ArrowRight" class="entry-arrow" />
           </li>
         </ul>
         <Pager
-          v-if="!busy && !error && total > 20"
+          v-if="!busy && !error && total > pageSize"
           :page="page"
-          :size="20"
+          :size="pageSize"
           :total="total"
           @change="
             (p) => {
@@ -374,12 +361,6 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
 .discover-heading {
   border-bottom: 1px solid var(--line);
   padding-bottom: 20px;
-}
-.discover-heading .button small {
-  font-size: 12px;
-  color: var(--muted);
-  border-left: 1px solid var(--line);
-  padding-left: 8px;
 }
 .discovery {
   display: grid;

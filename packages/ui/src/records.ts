@@ -1,5 +1,5 @@
-/** 示例详情的展示字段。各模块负责把契约对象转换为可阅读的文本。 */
-export interface PreviewRecord {
+/** 记录表的展示字段。各模块负责把契约对象转换为可阅读的文本。 */
+export interface TableRecord {
   id: string;
   title: string;
   status: string;
@@ -7,6 +7,7 @@ export interface PreviewRecord {
 }
 
 export interface SummaryRecord {
+  to?: import('vue-router').RouteLocationRaw;
   id: string;
   title: string;
   status: string;

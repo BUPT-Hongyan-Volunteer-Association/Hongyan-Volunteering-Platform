@@ -37,11 +37,11 @@ const pages = computed(() => Math.max(1, Math.ceil(props.total / props.size)));
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  margin: 16px 0;
+  gap: var(--space-12);
+  margin: var(--space-16) 0;
 }
 span {
-  font-size: 13px;
+  font-size: var(--text-small);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }

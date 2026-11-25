@@ -1,8 +1,8 @@
 import { Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
 import type { HourCorrectionGroupInput, HourReviewDecision, ReasonAction } from '@hongyan/contracts/types';
 import { managedScope, pagination, staff } from '../activities/read.js';
-import { validate } from '../activities/validation.js';
-import { Workflow } from '../activities/workflow.js';
+import { validate } from '../validation.js';
+import { Workflow } from '../workflow.js';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import type { Prisma } from '../generated/prisma/client.js';

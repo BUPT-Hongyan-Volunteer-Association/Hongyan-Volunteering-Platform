@@ -6,14 +6,16 @@ const workbook = (rows) =>
   buildWorkbook({ sheets: [rosterSheet(rows, { includeCohort: false })], prefix: true, sharedStrings: true });
 
 /** 老师从后台真实上传名单、按原表行定位错误、修正后确认，并在学生档案中查到新学生。 */
-export async function checkStudentImportPages(page, admin, { fits, pickOption, db }) {
+export async function checkStudentImportPages(page, admin, { fits, pickOption, db, holdResponse }) {
   const button = (name) => page.getByRole('button', { name, exact: true });
   const chip = (text) =>
     page.locator('.page-heading .state-chip').filter({ hasText: text }).first();
   const upload = async file => {
-    // A committed batch can already be visible while its final reread still holds the picker busy.
-    await page.getByRole('button', { name: '选择或拖入学生建档模板' }).filter({ hasText: '拖拽文件到此处' }).waitFor();
-    await page.getByLabel('名单文件', { exact: true }).setInputFiles(file);
+    const picker = page.getByRole('button', { name: /选择或拖入学生建档模板|开始新批次|重新选择文件/ });
+    await picker.waitFor();
+    const chooser = page.waitForEvent('filechooser');
+    await picker.click();
+    await (await chooser).setFiles(file);
   };
   const profile = ['0000001201', '页面导入学生', '本科生', '2026', '0000001301'];
   const invalid = workbook([
@@ -28,7 +30,8 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(admin);
-  await page.getByRole('navigation', { name: '后台导航' }).getByRole('link', { name: '建档导入', exact: true }).click();
+  await page.getByRole('navigation', { name: '后台导航' }).getByRole('link', { name: '学生档案', exact: true }).click();
+  await page.getByRole('link', { name: '导入学生名单建档' }).click();
   await page.waitForURL('**/manage/imports');
   await page.getByRole('heading', { name: '建档导入' }).waitFor();
   await page.getByRole('button', { name: '选择或拖入学生建档模板' }).waitFor();
@@ -43,6 +46,11 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   const errorRow = page.locator('tr[data-row="3"]');
   await errorRow.waitFor();
   assert.match(await errorRow.innerText(), /错误/);
+  for (const width of [390, 700, 701, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await errorRow.getByText(/错误/).first().waitFor();
+    await fits(page);
+  }
   assert.match(await errorRow.innerText(), /G/);
   assert.match(await errorRow.innerText(), /多余列|未知列|表格之外/);
   const badGradeRow = page.locator('tr[data-row="4"]');
@@ -73,7 +81,7 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   await chip('待确认').waitFor();
   await button('确认建档').click();
   await chip('已建档').waitFor();
-  await page.getByText('已确认建档，可在学生档案中查到新学生。').waitFor();
+  await page.getByText('已确认建档，可在学生档案中查到新学生').waitFor();
   await fits(page);
 
   // 切换批次：旧批次详情响应较慢时不得覆盖新批次，确认必须作用于当前批次
@@ -93,12 +101,7 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   };
   const firstId = await uploadReady('切换甲.xlsx', '0000001202');
   const secondId = await uploadReady('切换乙.xlsx', '0000001203');
-  let delayedDetail = false;
-  await page.route('**/admin/student-imports/' + firstId, async (route) => {
-    delayedDetail = true;
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    await route.continue();
-  }, { times: 1 });
+  const slowDetail = await holdResponse(page, '**/admin/student-imports/' + firstId);
   const navigateInApp = async (path) => {
     await page.evaluate((target) => {
       window.history.pushState({}, '', target);
@@ -106,12 +109,11 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
     }, path);
   };
   await navigateInApp('/manage/imports/' + firstId);
-  await page.waitForTimeout(120);
+  await slowDetail.received;
   await navigateInApp('/manage/imports/' + secondId);
   await page.waitForURL('**/manage/imports/' + secondId);
   await chip('待确认').waitFor();
-  await page.waitForTimeout(1600);
-  assert.ok(delayedDetail);
+  await slowDetail.release();
   const batchHeading = page.locator('.batch-summary h2');
   await batchHeading.waitFor();
   assert.match(await batchHeading.innerText(), new RegExp(secondId.slice(0, 8)));
@@ -138,12 +140,18 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
       student: { create: { student_no: conflictNo } },
     },
   });
-  await button('确认建档').click();
+  const conflictId = new URL(page.url()).pathname.split('/').at(-1);
+  const refresh = await holdResponse(page, '**/admin/student-imports/' + conflictId);
   const conflict = page.locator('.conflict-panel');
-  await conflict.waitFor();
-  assert.match(await conflict.innerText(), /原表第 2 行/);
-  assert.match(await conflict.innerText(), /不一致/);
-  await page.waitForTimeout(600);
+  await button('确认建档').click();
+  try {
+    await refresh.received;
+    assert.match(await conflict.innerText(), /原表第 2 行/);
+    assert.match(await conflict.innerText(), /不一致/);
+  } finally {
+    await refresh.release();
+  }
+  await page.getByRole('button', { name: '确认建档', exact: true, disabled: false }).waitFor();
   assert.ok(await conflict.isVisible());
   assert.equal(await chip('待确认').count(), 1);
 

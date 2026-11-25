@@ -1,61 +1,5 @@
 // 测试用最小 XLSX 生成器：按模板的命名空间前缀、表格范围与共享文本形态生成工作簿。
-import { deflateRawSync } from 'node:zlib';
-
-const crcTable = new Uint32Array(256);
-for (let n = 0; n < 256; n++) {
-  let value = n;
-  for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-  crcTable[n] = value >>> 0;
-}
-function crc32(buffer) {
-  let value = 0xffffffff;
-  for (const byte of buffer) value = crcTable[(value ^ byte) & 0xff] ^ (value >>> 8);
-  return (value ^ 0xffffffff) >>> 0;
-}
-
-function zip(files) {
-  const locals = [];
-  const centrals = [];
-  let offset = 0;
-  for (const file of files) {
-    const name = Buffer.from(file.name, 'utf8');
-    const data = Buffer.isBuffer(file.data) ? file.data : Buffer.from(file.data, 'utf8');
-    const compressed = file.compress ? deflateRawSync(data) : data;
-    const method = file.compress ? 8 : 0;
-    const crc = crc32(data);
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0x0800, 6);
-    local.writeUInt16LE(method, 8);
-    local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(compressed.length, 18);
-    local.writeUInt32LE(data.length, 22);
-    local.writeUInt16LE(name.length, 26);
-    locals.push(local, name, compressed);
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(20, 4);
-    central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(0x0800, 8);
-    central.writeUInt16LE(method, 10);
-    central.writeUInt32LE(crc, 16);
-    central.writeUInt32LE(compressed.length, 20);
-    central.writeUInt32LE(data.length, 24);
-    central.writeUInt16LE(name.length, 28);
-    central.writeUInt32LE(offset, 42);
-    centrals.push(central, name);
-    offset += local.length + name.length + compressed.length;
-  }
-  const centralSize = centrals.reduce((sum, part) => sum + part.length, 0);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(files.length, 8);
-  end.writeUInt16LE(files.length, 10);
-  end.writeUInt32LE(centralSize, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...locals, ...centrals, end]);
-}
+import { zipSync, strToU8 } from 'fflate';
 
 const escape = (value) =>
   String(value)
@@ -167,7 +111,7 @@ export function buildWorkbook({ sheets, prefix = true, sharedStrings = false, co
     {
       name: '[Content_Types].xml',
       data:
-        '<?xml version="1.0" encoding="utf-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/></Types>',
+        '<?xml version="1.0" encoding="utf-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/></Types>',
     },
     {
       name: '_rels/.rels',
@@ -202,6 +146,7 @@ export function buildWorkbook({ sheets, prefix = true, sharedStrings = false, co
               '<Relationship Id="rId' + (index + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (index + 1) + '.xml"/>',
           )
           .join('') +
+        (sharedStrings ? '<Relationship Id="shared" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>' : '') +
         '</Relationships>',
     },
     ...sheets.map((sheet, index) => ({
@@ -238,7 +183,10 @@ export function buildWorkbook({ sheets, prefix = true, sharedStrings = false, co
         shared.map((value) => '<' + p + 'si><' + p + 't>' + escape(value) + '</' + p + 't></' + p + 'si>').join('') +
         '</' + p + 'sst>',
     });
-  return zip(files.map((file) => ({ ...file, compress })));
+  const entries = Object.fromEntries(files.map(({ name, data }) => [
+    name, typeof data === 'string' ? strToU8(data) : data,
+  ]));
+  return Buffer.from(zipSync(entries, { level: compress ? 6 : 0 }));
 }
 
 /** 生成“学生建档”工作表：rows 为 {number, values:[学号,姓名,级部,年级,班级,学院], extra?:Record<string,any>}；includeCollege=false 时生成五列旧版表头；includeCohort=false 时生成不含级部的新版表头；columnOrder 可自定义列顺序。 */

@@ -1,6 +1,8 @@
+import { demoActivities } from '../scripts/demo-scenarios.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { servicePeriods } from '../dist/activities/schedule.js';
 import { createApp } from '../dist/app.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { Database } from '../dist/database.js';
@@ -17,6 +19,22 @@ function hash(id) {
     value = Math.imul(value ^ byte, 16777619);
   return (value >>> 0) % 6;
 }
+
+test('受限窗口包含上周跨夜服务，保留暂停日和补充安排的实际边界', () => {
+  const schedule = {
+    schedule_type: 'weekly', duration_start_date: '2026-01-01', duration_end_date: '2027-01-01',
+    weekly_slots: [{ weekday: 7, start_time: '23:00', end_time: '01:00', end_day_offset: 1 }],
+    excluded_dates: ['2026-12-13'],
+    additional_slots: [{ starts_at: at('2026-12-14', '00:15'), ends_at: at('2026-12-14', '00:45') }],
+  };
+  const periods = (date, start, end) => [...servicePeriods(schedule, Date.parse(at(date, start)), Date.parse(at(date, end)))];
+  assert.deepEqual(periods('2026-12-07', '00:00', '00:10'), [
+    { start: Date.parse(at('2026-12-06', '23:00')), end: Date.parse(at('2026-12-07', '01:00')) },
+  ]);
+  assert.deepEqual(periods('2026-12-07', '01:00', '02:00'), []);
+  assert.deepEqual(periods('2026-12-14', '00:00', '00:15'), []);
+  assert.equal(periods('2026-12-14', '00:15', '00:45').length, 1);
+});
 
 test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180000 }, async (t) => {
   const staffPassword = randomUUID();
@@ -43,7 +61,7 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
     const ownerId = first.members.find((m) => m.member_role === 'owner').account_id;
     const now = Date.now();
     const from = now - 2 * day,
-      to = now + 12 * day;
+      to = now + (demoActivities.pending.serviceDay + 1) * day;
     const anchor = beijing(now + 3 * day);
     const before = beijing(now + 2 * day);
     const window = 'from=' + iso(from) + '&to=' + iso(to);
@@ -152,6 +170,24 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       'cancelled',
     );
     const timeline = (client, query) => client.request('/timeline?' + query);
+
+    await t.test('空窗口只提示本范围、本筛选下的服务日期', async () => {
+      const query = async (client, scope, name, date) => {
+        const start = Date.parse(date + 'T00:00:00+08:00');
+        const params = new URLSearchParams({ scope, q: name, from: iso(start), to: iso(start + day) });
+        const result = await timeline(client, params);
+        assert.equal(result.status, 200);
+        assert.equal(result.data.total, 0);
+        return result.data.suggested_date;
+      };
+      assert.equal(await query(student, 'public', '多时段演示', '2000-01-01'), before);
+      assert.equal(await query(student, 'public', '多时段演示', '2099-01-01'), anchor);
+      assert.equal(await query(student, 'public', '没有此活动', '2000-01-01'), undefined);
+      const pendingTitle = demoActivities.pending.title;
+      assert.equal(await query(student, 'public', pendingTitle, '2000-01-01'), undefined);
+      assert.equal(await query(owner, 'managed', pendingTitle, '2000-01-01'), undefined);
+      assert.equal(await query(teacher, 'all', pendingTitle, '2000-01-01'), beijing(now + demoActivities.pending.serviceDay * day));
+    });
     const codes = (response) => response.data.items.map((item) => item.activity_code).sort();
     const publicQuery = (extra = '') => timeline(student, 'scope=public&' + window + extra);
 
@@ -165,26 +201,23 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
         assert.equal(item.has_pending_review, undefined);
         assert.equal(item.current_review_id, undefined);
         assert.equal(item.revision_state, 'approved');
-        assert.ok(item.segments.every((segment) => segment.revision_state === 'approved'));
-        assert.equal(item.state_evaluated_at, response.data.state_evaluated_at);
+        for (const key of ['segments', 'schedule_type', 'state_evaluated_at']) assert.equal(key in item, false);
       }
       const multiItem = items.find((item) => item.activity_code === 'TL-0001');
-      assert.equal(multiItem.segments.length, 3);
-      assert.deepEqual(
-        multiItem.segments.map((segment) => segment.starts_at),
-        [at(before, '09:15'), at(anchor, '09:30'), at(anchor, '14:15')],
-      );
+      assert.equal(multiItem.duration_start_date, before);
+      assert.equal(multiItem.duration_end_date, anchor);
       assert.equal(multiItem.color_index, hash(multi.id));
-      assert.equal(multiItem.schedule_type, 'custom');
+      assert.ok(Number.isFinite(Date.parse(response.data.state_evaluated_at)));
     });
 
     await t.test('普通学生不能经参数读取工作稿或后台筛选', async () => {
-      assert.equal((await publicQuery('&revision_scope=working')).status, 403);
-      assert.equal((await publicQuery('&review_status=pending_review')).status, 403);
-      assert.equal(
-        (await publicQuery('&owner_account_id=' + ownerId)).status,
-        403,
-      );
+      for (const [filter, expected] of [
+        ['revision_scope=working',403], ['review_status=pending_review',403],
+        ['owner_account_id='+ownerId,403], ['status=draft',422], ['registration_phase=typo',422],
+      ]) {
+        assert.equal((await publicQuery('&'+filter)).status, expected);
+        assert.equal((await student.request('/activities?'+window+'&'+filter)).status, expected);
+      }
       assert.equal((await timeline(student, 'scope=managed&' + window)).status, 403);
       assert.equal((await timeline(outsider, 'scope=all&' + window)).status, 403);
     });
@@ -244,7 +277,8 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       const [activity] = pending.data.items;
       assert.equal(activity.activity_id, multi.id);
       assert.equal(activity.revision_state, 'approved');
-      assert.deepEqual(activity.segments, mine.data.items[0].segments);
+      assert.equal(activity.duration_start_date, before);
+      assert.equal(activity.duration_end_date, anchor);
 
       await db.$transaction([
         db.exitRequest.update({ where: { id: request.id }, data: { status: 'approved', version: 2 } }),
@@ -279,7 +313,7 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       assert.equal(codes(published).includes('TL-0004'), false);
     });
 
-    await t.test('进行中始终按获批安排，内容与分段取所选版本', async () => {
+    await t.test('进行中始终按获批安排，内容与日期取所选版本', async () => {
       const working = await timeline(teacher, 'scope=all&' + window);
       const item = working.data.items.find((row) => row.activity_code === 'TL-0005');
       assert.equal(item.revision_state, 'pending_review');
@@ -287,7 +321,7 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       assert.equal(item.has_pending_review, true);
       assert.equal(item.current_review_id, review.id);
       assert.equal(item.is_ongoing, true);
-      assert.equal(Date.parse(item.segments[0].starts_at) > Date.now(), true);
+      assert.equal(item.duration_start_date, beijing(now + 5 * day));
 
       const approved = await timeline(
         teacher,
@@ -297,7 +331,7 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       assert.equal(published.revision_state, 'approved');
       assert.equal(published.schedule_revision, 1);
       assert.equal(published.is_ongoing, true);
-      assert.equal(published.segments.length, 1);
+      assert.equal(published.duration_start_date, beijing(now - 1800_000));
     });
 
     await t.test('审核状态筛选按当前工作版本，独立于展示版本', async () => {
@@ -331,22 +365,16 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       assert.deepEqual(codes(searched), ['TL-0001']);
     });
 
-    await t.test('分段按窗口相交返回完整真实起止', async () => {
+    await t.test('与窗口相交时返回一次完整服务日期', async () => {
       const narrow = await timeline(
         student,
         'scope=public&from=' + iso(Date.parse(at(anchor, '00:00')) - 3600_000) +
           '&to=' + iso(Date.parse(at(anchor, '23:59'))),
       );
       const item = narrow.data.items.find((row) => row.activity_code === 'TL-0001');
-      assert.equal(item.segments.length, 2);
-      assert.deepEqual(
-        item.segments.map((segment) => [segment.starts_at, segment.ends_at]),
-        [
-          [at(anchor, '09:30'), at(anchor, '10:45')],
-          [at(anchor, '14:15'), at(anchor, '15:45')],
-        ],
-      );
-      assert.equal(item.segments[0].occurrence_key.startsWith(multi.id + '/1/'), true);
+      assert.equal(item.duration_start_date, before);
+      assert.equal(item.duration_end_date, anchor);
+      assert.equal(narrow.data.items.filter(row => row.activity_id === multi.id).length, 1);
     });
 
     await t.test('后台按负责人筛选，兼管范围不外扩', async () => {
@@ -370,7 +398,7 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
         duration_start_date: anchor,
         duration_end_date: anchor,
         slots: [{ starts_at: at(anchor, '10:00'), ends_at: at(anchor, '12:00') }],
-      });
+      }, 'completed');
       await db.registration.create({
         data: { activity_id: clash.id, student_id: studentRow2.id, status: 'accepted' },
       });
@@ -379,20 +407,23 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       const mine = await timeline(shared, 'scope=mine&' + window);
       const item = mine.data.items.find((row) => row.activity_code === 'TL-0001');
       assert.equal(item.has_planned_overlap, true);
-      assert.equal(
-        item.segments.find((segment) => segment.starts_at === at(anchor, '09:30')).has_planned_overlap,
-        true,
-      );
-      assert.equal(
-        item.segments.find((segment) => segment.starts_at === at(before, '09:15')).has_planned_overlap,
-        false,
-      );
+      assert.equal(mine.data.items.find(row => row.activity_id === clash.id).has_planned_overlap, true);
+      for (const [status, activity] of [['published', multi], ['completed', clash]]) {
+        const filters = new URLSearchParams({ status, q: activity.activity_code });
+        const filtered = await timeline(shared, 'scope=mine&' + window + '&' + filters);
+        assert.deepEqual(codes(filtered), [activity.activity_code]);
+        assert.equal(filtered.data.items[0].has_planned_overlap, true, '重叠对方可以在当前筛选之外');
+      }
       const publicItem = (await publicQuery())
         .data.items.find((row) => row.activity_code === 'TL-0001');
       assert.equal(publicItem.has_planned_overlap, undefined);
-      assert.ok(publicItem.segments.every((segment) => segment.has_planned_overlap === undefined));
 
-      // 取消活动作为当前活动：自身分段与汇总都不提示重叠。
+      const evening = await create('TL-EVENING', '同日错峰服务', {
+        schedule_type: 'continuous', starts_at: at(anchor, '18:00'), ends_at: at(anchor, '19:00'),
+      });
+      await db.registration.create({ data: { activity_id: evening.id, student_id: studentRow2.id, status: 'accepted' } });
+
+      // 取消活动及当天没有实际服务时间冲突的活动均不提示重叠。
       await db.registration.create({
         data: { activity_id: cancelled.id, student_id: studentRow2.id, status: 'accepted' },
       });
@@ -400,20 +431,16 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       const cancelledItem = withCancelled.data.items.find(
         (row) => row.activity_code === 'TL-0007',
       );
+      assert.equal(withCancelled.data.items.find(row => row.activity_id === evening.id).has_planned_overlap, false);
       assert.equal(cancelledItem.status, 'cancelled');
       assert.equal(cancelledItem.has_planned_overlap, false);
-      assert.ok(cancelledItem.segments.every((segment) => segment.has_planned_overlap === false));
       // 取消活动作为比较对象：仍不影响本人其他活动的重叠提示。
       const still = withCancelled.data.items.find((row) => row.activity_code === 'TL-0001');
       assert.equal(still.has_planned_overlap, true);
-      assert.equal(
-        still.segments.find((segment) => segment.starts_at === at(anchor, '14:15'))
-          .has_planned_overlap,
-        false,
-      );
+
     });
 
-    await t.test('周规则排除日与补充时段按北京时间返回并保留毫秒', async (t) => {
+    await t.test('周期活动的暂停日和最后一日均处于服务日期范围内', async (t) => {
       const weekly = await create('TL-0008', '周常规演示', {
         schedule_type: 'weekly',
         duration_start_date: '2026-12-07',
@@ -432,14 +459,26 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       const response = await timeline(student, params);
       assert.equal(response.status, 200);
       const [item] = response.data.items;
-      assert.equal(item.schedule_type, 'weekly');
-      assert.deepEqual(
-        item.segments.map((segment) => [segment.starts_at, segment.ends_at]),
-        [
-          ['2026-12-07T09:00:00+08:00', '2026-12-07T11:30:00+08:00'],
-          ['2026-12-16T13:00:00.100+08:00', '2026-12-16T13:00:00.900+08:00'],
-        ],
-      );
+      assert.equal(item.duration_start_date, '2026-12-07');
+      assert.equal(item.duration_end_date, '2026-12-20');
+      for (const [date, expected] of [['2026-12-14', 1], ['2026-12-20', 1], ['2026-12-21', 0]]) {
+        params.set('from', at(date, '00:00'));
+        params.set('to', at(date, '23:59'));
+        assert.equal((await timeline(student, params)).data.total, expected);
+      }
+    });
+
+    await t.test('北京时间零点结束的活动只占前一个服务日', async (t) => {
+      const boundary = await create('TL-MIDNIGHT', '零点边界', {
+        schedule_type: 'continuous', starts_at: '2027-01-02T15:00:00Z', ends_at: '2027-01-02T16:00:00Z',
+      });
+      t.after(() => db.activity.delete({ where: { id: boundary.id } }));
+      const params = new URLSearchParams({ scope: 'public', q: boundary.activity_code, from: at('2027-01-02','00:00'), to: at('2027-01-03','00:00') });
+      const [row] = (await timeline(student, params)).data.items;
+      assert.deepEqual([row.duration_start_date, row.duration_end_date], ['2027-01-02', '2027-01-02']);
+      params.set('from', at('2027-01-03','00:00'));
+      params.set('to', at('2027-01-04','00:00'));
+      assert.equal((await timeline(student, params)).data.total, 0);
     });
 
     await t.test('审核状态枚举和带时区时刻不合法时返回 422 并指出字段', async () => {
@@ -454,9 +493,11 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
         const params = new URLSearchParams({ scope: 'public', from: iso(from), to: iso(to) });
         if (value === undefined) params.delete(field);
         else params.set(field, value);
-        const response = await timeline(student, params);
-        assert.equal(response.status, 422, params.toString());
-        assert.equal(response.details[0].field, field);
+        const responses = await Promise.all([timeline(student, params), student.request('/activities?' + params)]);
+        for (const response of responses) {
+          assert.equal(response.status, 422, params.toString());
+          assert.equal(response.details[0].field, field);
+        }
       }
       // 带时区的偏移格式被接受。
       const offset = await timeline(

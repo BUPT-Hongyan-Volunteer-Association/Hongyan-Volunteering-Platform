@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { setTimeout as delay } from 'node:timers/promises';
+import { pollUntil } from './poll-until.mjs';
 import { strFromU8, unzipSync } from 'fflate';
-import { validate } from '../dist/activities/validation.js';
+import { validate } from '../dist/validation.js';
 
 export async function checkHourHttp(db,{activityId,bytes,fixed,ownerId,legacyWorkbook,combinedErrors,mixedKeyErrors,extraCellsWorkbook},{owner,other,student,teacher}) {
   const collection = '/organizer/activities/'+activityId+'/hour-imports';
@@ -20,17 +20,11 @@ export async function checkHourHttp(db,{activityId,bytes,fixed,ownerId,legacyWor
     return payload.data;
   };
   const settled = async (id,status) => {
-    const deadline = Date.now()+20000;
-    do {
-      const detail = await result(await owner.raw('/hour-imports/'+id),200);
-      if (detail.status !== 'validating') {
-        assert.equal(detail.status,status,JSON.stringify(detail));
-        validate('hour_batch',detail);
-        return detail;
-      }
-      await delay(50);
-    } while (Date.now()<deadline);
-    assert.fail('批次一直停留在 validating');
+    const detail = await pollUntil(async () => result(await owner.raw('/hour-imports/' + id), 200),
+      batch => batch.status !== 'validating', '时长校验');
+    assert.equal(detail.status, status, JSON.stringify(detail));
+    validate('hour_batch', detail);
+    return detail;
   };
   const retry = (batch,key,version=batch.version) => owner.raw('/hour-imports/'+batch.id+'/retry',{method:'POST',
     headers:{'Idempotency-Key':key,'Content-Type':'application/json'},body:JSON.stringify({expected_version:version})});

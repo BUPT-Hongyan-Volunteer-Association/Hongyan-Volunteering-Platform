@@ -29,3 +29,11 @@ export function invisible(): never {
 export function expired(): never {
   throw new BusinessError(401, 'unauthorized', '请重新登录');
 }
+
+export function checkVersion(actual: number, expected: number) {
+  if (actual !== expected)
+    throw new BusinessError(409, 'version_conflict', '版本已更新，请刷新后复核');
+}
+export function wrongState(): never {
+  throw new BusinessError(409, 'invalid_state', '当前状态不允许此操作');
+}

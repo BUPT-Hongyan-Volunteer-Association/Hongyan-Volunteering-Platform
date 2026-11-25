@@ -1,13 +1,13 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
 import type { ExitRequestInput, ReviewDecision, VersionAction } from '@hongyan/contracts/types';
 import { pagination, workspaceScope } from '../activities/read.js';
-import { validate } from '../activities/validation.js';
-import { Workflow, checkVersion, wrongState } from '../activities/workflow.js';
+import { validate } from '../validation.js';
+import { Workflow } from '../workflow.js';
+import { checkVersion, wrongState, BusinessError, envelope, invalid, invisible } from '../http.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { audit } from '../audit.js';
 import { Database } from '../database.js';
 import type { ExitRequest, Registration } from '../generated/prisma/client.js';
-import { BusinessError, envelope, invalid, invisible } from '../http.js';
 import {
   approvedContent,
   canRecruit,

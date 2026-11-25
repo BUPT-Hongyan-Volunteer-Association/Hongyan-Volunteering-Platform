@@ -50,8 +50,8 @@ function search() { page.value = 1; term.value = query.value.trim(); }
     </label>
     <p v-if="error" role="alert">{{ error }} <button type="button" @click="refresh()">重读活动</button></p>
     <p v-else-if="loading" role="status">正在读取活动…</p>
-    <p v-else-if="!options.length">没有匹配的获批活动。</p>
-    <Pager v-if="data && data.total > size" :page="page" :size="size" :total="data.total" @change="page = $event" />
+    <p v-else-if="!options.length">没有匹配的获批活动</p>
+    <Pager v-if="data && data.total > data.page_size" :page="page" :size="data.page_size" :total="data.total" @change="page = $event" />
   </div>
 </template>
 <style scoped>

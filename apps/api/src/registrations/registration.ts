@@ -1,6 +1,5 @@
 import { canChangeRegistration } from '@hongyan/contracts/activity';
 import { audit } from '../audit.js';
-import { randomUUID } from 'node:crypto';
 import type {
   ActivityPublicationContent,
   Registration as View,
@@ -10,8 +9,8 @@ import type {
 import type { Prisma, Registration } from '../generated/prisma/client.js';
 import { occurrences } from '../activities/schedule.js';
 import { publishedRevision, type LoadedActivity } from '../activities/read.js';
-import { wrongState, type Tx } from '../activities/workflow.js';
-import { BusinessError, invalid, invisible } from '../http.js';
+import { wrongState, BusinessError, invalid, invisible } from '../http.js';
+import { type Tx } from '../database.js';
 
 export const rosterOrderBy = [
   { submitted_at: 'asc' },
@@ -82,11 +81,6 @@ function history(row: Registration, changed_at: Date | null, actor_id: string | 
 export async function recordChanges(
   tx: Tx, previous: Registration[], current: Registration[], time: Date, actor: string,
 ) {
-  // 旧报名可能尚无版本历史，保留已有事实，再写本次变化。
-  if (previous.length) await tx.registrationHistory.createMany({
-    data: previous.map(r => history(r, r.status === 'submitted' ? r.submitted_at : null, null)),
-    skipDuplicates: true,
-  });
   // 决定与投递共用活动锁。保留已发送通知和回执，关闭旧报名版本的确认。
   const previousIds = previous.filter(r => ['accepted', 'waitlisted', 'rejected'].includes(r.status)).map(r => r.id);
   if (previousIds.length) await tx.$executeRaw`
@@ -222,7 +216,7 @@ export async function decideBatch(
   const occupied = await occupiedSeats(tx, activity.id);
   const accepting = input.decision === 'accepted';
   if (accepting && occupied + rows.length > approved!.capacity) {
-    const message = `剩余 ${Math.max(0, approved!.capacity - occupied)} 个名额，所选 ${rows.length} 人均未录取。`;
+    const message = `剩余 ${Math.max(0, approved!.capacity - occupied)} 个名额，所选 ${rows.length} 人均未录取`;
     throw new BusinessError(
       409,
       'capacity_conflict',
@@ -241,23 +235,13 @@ export async function decideBatch(
     data: { status: input.decision, version: { increment: 1 }, decision_reason: input.reason ?? null },
   });
   await recordChanges(tx, rows, changed, now, actor);
-  const events = changed.map((r) => ({
-    event_id: randomUUID(),
-    activity_id: activity.id,
-    registration_id: r.id,
-    student_id: r.student_id,
-    registration_version: r.version,
-    status: r.status,
-  }));
-  await tx.registrationDecisionEvent.createMany({ data: events });
   await tx.notificationEvent.createMany({
-    data: events.map((e) => ({
-      id: e.event_id,
+    data: changed.map((r) => ({
       event_type: 'registration_decided',
-      event_key: 'registration_decision:' + e.event_id,
-      activity_id: activity.id,
-      resource_id: e.registration_id,
-      payload: { ...e, actor_id: actor, decision_reason: input.reason ?? null },
+      event_key: `registration_decision:${r.id}:${r.version}`,
+      activity_id: activity.id, resource_id: r.id,
+      payload: { student_id: r.student_id, registration_version: r.version, status: r.status,
+        actor_id: actor, decision_reason: input.reason ?? null },
     })),
   });
   await audit(tx, {

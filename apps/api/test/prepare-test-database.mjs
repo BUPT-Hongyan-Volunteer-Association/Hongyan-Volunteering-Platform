@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const manifest = require.resolve('prisma/package.json');
 const cli = resolve(dirname(manifest), require(manifest).bin.prisma);
 
-export async function prepareTestDatabase(t, seedEnvironment) {
+export async function prepareTestDatabase(t, seedEnvironment, { fullDemo = false } = {}) {
   const originalUrl = process.env.DATABASE_URL;
   const url = new URL(originalUrl);
   const maintenance = new Database();
@@ -28,7 +28,7 @@ export async function prepareTestDatabase(t, seedEnvironment) {
   url.pathname = '/' + name;
   process.env.DATABASE_URL = url.href;
   execFileSync(process.execPath, [cli, 'migrate', 'deploy'], { stdio: 'pipe' });
-  execFileSync(process.execPath, ['scripts/seed.mjs'], {
+  execFileSync(process.execPath, ['scripts/seed.mjs', ...(fullDemo ? [] : ['--core-activities'])], {
     env: { ...process.env, DEMO_ADMIN_PASSWORD: randomUUID(), ...seedEnvironment },
   });
 }

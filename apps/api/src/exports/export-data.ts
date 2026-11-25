@@ -1,11 +1,10 @@
 import type { ExportInput } from '@hongyan/contracts/types';
-import type { Actor } from '../auth/session.guard.js';
-import { studentId } from '../auth/session.guard.js';
+import { type Actor, studentId } from '../auth/session.guard.js';
 import type { ExportJob } from '../generated/prisma/client.js';
 import { managedScope, staff, workspaceScope } from '../activities/read.js';
 import { rosterOrderBy, rosterWhere } from '../registrations/registration.js';
 import { studentWhere } from '../students/query.js';
-import type { Tx } from '../activities/workflow.js';
+import type { Tx } from '../database.js';
 import { denied, invalid, invisible } from '../http.js';
 import { approvedOrigin, authorizeHourLedger, ledgerDateRange, readHourLedgerWithScope } from '../hours/read-ledger.js';
 import {
@@ -107,12 +106,13 @@ export async function resolveExportScope(tx: Tx, actor: Actor, input: ExportInpu
     await authorizeHourLedger(tx, actor, { type: 'activity_hours', activity_id });
     const student_ids = input.student_ids;
     if (student_ids) {
-      const found = await tx.hourRecord.findMany({
-        where: { activity_id, student_id: { in: student_ids }, ...approvedOrigin },
-        select: { student_id: true },
-        distinct: ['student_id'],
+      const count = await tx.student.count({
+        where: {
+          id: { in: student_ids },
+          hour_records: { some: { activity_id, ...approvedOrigin } },
+        },
       });
-      if (found.length !== student_ids.length)
+      if (count !== student_ids.length)
         invalid('student_ids', '所选学生不在该活动时长范围内');
     }
     return compact({

@@ -29,7 +29,7 @@ function find() {
   if (q === query.value.q && query.value.page === 1) return void refresh();
   if (!props.forNotice && q !== query.value.q && studentIds.value.length) {
     studentIds.value = [];
-    selectionNotice.value = '搜索条件已变更，已清空选择。';
+    selectionNotice.value = '搜索条件已变更，已清空选择';
   }
   query.value = { q, page: 1 };
 }
@@ -63,7 +63,7 @@ function toggle(ids: string[], event: Event) {
   <p v-if="selectionNotice" role="status">{{ selectionNotice }}</p>
   <p v-if="error" role="alert">{{ error }} <button type="button" @click="refresh()">重读名单</button></p>
   <p v-else-if="!result" role="status">正在读取报名名单…</p>
-  <p v-else-if="!result.total" role="status">未找到报名人员。</p>
+  <p v-else-if="!result.total" role="status">未找到报名人员</p>
   <div v-if="items.length" class="choices">
     <label class="select-page">
       <input

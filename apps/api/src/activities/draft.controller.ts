@@ -19,21 +19,14 @@ import type {
   VersionAction,
 } from '@hongyan/contracts/types';
 import type { SessionRequest } from '../auth/session.guard.js';
-import { Database } from '../database.js';
-import { envelope, invisible } from '../http.js';
+import { Database, json } from '../database.js';
+import { envelope, invisible, checkVersion, wrongState, invalid } from '../http.js';
 import { managedScope, includeView, project, pagination, workingRevision } from './read.js';
-import {
-  Workflow,
-  checkVersion,
-  wrongState,
-  reviewView,
-  detail,
-  snapshot,
-  json,
-} from './workflow.js';
+import { Workflow } from '../workflow.js';
+import { reviewView, detail, snapshot } from './views.js';
 import { parseGroupImage } from './group-image.js';
-import { invalid } from '../http.js';
-import { content, validate } from './validation.js';
+import { content } from './validation.js';
+import { validate } from '../validation.js';
 
 @Controller('organizer')
 export class DraftController {
@@ -161,13 +154,6 @@ export class DraftController {
       const merged = Object.fromEntries(
         Object.entries({ ...(old.content as object), ...changes }).filter(([, v]) => v !== null),
       );
-      if (changes.contacts !== undefined) {
-        delete merged.phone;
-        delete merged.wechat;
-        if (!changes.contact_text) delete merged.contact_text;
-        else if (!changes.contacts.length) delete merged.contacts;
-      }
-      if (changes.result_expected_date !== undefined) delete merged.result_expected_at;
       const next = json(content(merged));
       let revision = old.revision;
       if (old.revision_state === 'draft')

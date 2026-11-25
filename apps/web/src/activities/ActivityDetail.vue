@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { serviceDateText } from '@hongyan/contracts/activity';
 import { computed, ref } from 'vue';
 import UiIcon, { type IconName } from '@hongyan/ui/UiIcon.vue';
-import { activityTypes as types, activityContacts, resultDate, serviceTime, localDateTime as date } from '@hongyan/ui/activityDisplay';
+import { localDateTime as date } from '@hongyan/ui/activityDisplay';
 import {
   applyForActivity,
   createCommand,
@@ -19,8 +20,9 @@ const props = defineProps<{
 const emit = defineEmits<{ applied: [registration: Registration] }>();
 const saving = ref(false);
 const applyError = ref('');
-const statement = ref('');
 const command = createCommand();
+const showSignupDates = computed(() => props.showRegistrations && props.activity.status === 'published' &&
+  (!props.activity.my_registration_status || props.activity.my_registration_status === 'withdrawn'));
 const canApply = computed(
   () =>
     props.showRegistrations &&
@@ -42,12 +44,11 @@ async function submit() {
   saving.value = true;
   applyError.value = '';
   const id = props.activity.id;
-  const body = statement.value.trim() ? { statement: statement.value.trim() } : {};
   try {
     const { data } = await applyForActivity({
       path: { id },
-      body,
-      headers: command.headers('apply_for_activity', id, body),
+      body: {},
+      headers: command.headers('apply_for_activity', id, {}),
       throwOnError: true,
     });
     command.confirmed();
@@ -97,24 +98,23 @@ const conditions: [keyof Activity, string, IconName][] = [
 <template>
   <article class="activity-detail">
     <div class="detail-top">
-      <RouterLink
+      <RouterLink class="button compact"
         :to="noticeReturn || registrationReturn || scheduleReturn || { path: '/', query: $route.query }"
         :aria-label="
           noticeReturn ? '返回通知详情' : registrationReturn ? (/^\/registrations\//.test(registrationReturn) ? '返回报名详情' : '返回我的报名') : scheduleReturn ? '返回日程' : '返回活动列表'
         "
         ><UiIcon name="ArrowLeft" />活动详情</RouterLink
-      ><RouterLink v-if="showRegistrations" to="/registrations">我的报名</RouterLink>
+      ><RouterLink class="button compact" v-if="showRegistrations" to="/registrations">我的报名</RouterLink>
     </div>
     <p v-if="pendingNotices" class="notice-callout">
       <UiIcon name="Bell" />
       本活动有 {{ pendingNotices }} 条通知待确认，
-      <RouterLink :to="{ path: '/notices', query: { pending: '1', activity_id: activity.id } }">去查看并确认</RouterLink>
+      <RouterLink class="button compact" :to="{ path: '/notices', query: { pending: '1', activity_id: activity.id } }">去查看并确认</RouterLink>
     </p>
     <div v-if="activity.schedule" class="detail-columns">
       <div class="detail-intro">
         <div class="page-actions">
-          <span class="state-chip">{{ types[activity.schedule.schedule_type] }}</span
-          ><span v-if="activity.registration_phase" class="phase">{{
+          <span v-if="activity.registration_phase" class="phase">{{
             phases[activity.registration_phase]
           }}</span>
         </div>
@@ -124,58 +124,44 @@ const conditions: [keyof Activity, string, IconName][] = [
           <dd>{{ [activity.campus, activity.location].filter(Boolean).join(' · ') }}</dd>
         </dl>
         <dl class="facts">
-          <template v-if="['weekly', 'custom'].includes(activity.schedule.schedule_type) && 'duration_start_date' in activity.schedule"
-            ><dt><UiIcon name="Calendar" />活动周期</dt>
-            <dd>
-              {{ activity.schedule.duration_start_date }} 至
-              {{ activity.schedule.duration_end_date }}
-            </dd></template
-          >
-          <dt><UiIcon name="Clock" />服务时段</dt>
-          <dd v-if="activity.schedule.schedule_type === 'weekly'">
-            <div
-              v-for="rule in activity.schedule.weekly_slots"
-              :key="rule.weekday + '-' + rule.start_time"
-            >
-              每周{{ '一二三四五六日'[rule.weekday - 1] }} {{ rule.start_time.slice(0, 5) }}–{{
-                rule.end_day_offset ? '次日 ' : ''
-              }}{{ rule.end_time.slice(0, 5) }}
-            </div>
-            <div v-for="d in activity.schedule.excluded_dates" :key="d">{{ d }} 暂停</div>
-            <div v-for="s in activity.schedule.additional_slots" :key="s.starts_at">
-              补充 {{ date(s.starts_at) }} 至 {{ date(s.ends_at) }}
-            </div>
-          </dd>
-          <dd v-else-if="activity.schedule.schedule_type === 'custom'">
-            <div v-for="s in activity.schedule.slots" :key="s.starts_at">
-              {{ date(s.starts_at) }} 至 {{ date(s.ends_at) }}
-            </div>
-          </dd>
-          <dd v-else>{{ serviceTime(activity) }}</dd>
-          <template v-if="activity.registration_closes_at"
-            ><dt><UiIcon name="Calendar" />报名截止</dt>
-            <dd>
-              <mark>{{ date(activity.registration_closes_at) }}</mark>
-            </dd></template
-          >
+          <dt><UiIcon name="Calendar" />活动日期</dt>
+          <dd>{{ serviceDateText(activity.schedule) }}</dd>
           <dt><UiIcon name="User" />录取名额</dt>
           <dd>{{ activity.capacity }} 人</dd>
-          <template v-if="activity.expected_hours"
-            ><dt><UiIcon name="Timer" />预计时长</dt>
-            <dd>
-              {{ activity.expected_hours_basis === 'whole_activity' ? '整期' : '每次' }}
-              {{ activity.expected_hours }} 小时
-            </dd></template
-          >
+          <template v-if="showSignupDates && activity.registration_opens_at">
+            <dt><UiIcon name="Calendar" />报名开放</dt>
+            <dd><time :datetime="activity.registration_opens_at">{{ date(activity.registration_opens_at) }}</time></dd>
+          </template>
+          <template v-if="showSignupDates && activity.registration_closes_at">
+            <dt><UiIcon name="Calendar" />报名截止</dt>
+            <dd><mark><time :datetime="activity.registration_closes_at">{{ date(activity.registration_closes_at) }}</time></mark></dd>
+          </template>
         </dl>
+        <section v-if="activity.expected_hours || activity.hours_import_date || activity.hours_rule_text" class="service-hours">
+          <h2>服务时长</h2>
+          <dl>
+            <template v-if="activity.expected_hours">
+              <dt>预计时长</dt>
+              <dd>{{ activity.expected_hours_basis === 'whole_activity' ? '整期' : '每次' }} {{ activity.expected_hours }} 小时</dd>
+            </template>
+            <template v-if="activity.hours_rule_text">
+              <dt>时长认定</dt>
+              <dd>{{ activity.hours_rule_text }}</dd>
+            </template>
+            <template v-if="activity.hours_import_date">
+              <dt>预计时长导入日期</dt>
+              <dd><time :datetime="activity.hours_import_date">{{ activity.hours_import_date }}</time></dd>
+            </template>
+          </dl>
+        </section>
       </div>
       <div class="detail-body">
         <section v-if="activity.description || activity.beneficiaries">
           <h2>服务内容</h2>
-          <p>{{ activity.description }}</p>
+          <p v-if="activity.description">{{ activity.description }}</p>
           <p v-if="activity.beneficiaries">服务对象 · {{ activity.beneficiaries }}</p>
         </section>
-        <section>
+        <section v-if="activity.group_qr_id || conditions.some(([key]) => activity[key])">
           <h2>集合与参与条件</h2>
           <dl class="conditions">
             <template v-if="activity.group_qr_id"><dt>入群二维码</dt><dd><img width="180" style="max-width:100%" :src="'/api/v1/activity-group-images/' + activity.group_qr_id" alt="活动群二维码" /></dd></template>
@@ -187,46 +173,6 @@ const conditions: [keyof Activity, string, IconName][] = [
             </template>
           </dl>
         </section>
-        <aside class="joining">
-          <h2>报名须知</h2>
-          <p>本活动统一报名，录取后查看入群方式。</p>
-          <p v-if="activity.schedule.schedule_type === 'weekly'">每周参加报名在活动群内完成。</p>
-        </aside>
-        <details v-if="canApply" class="apply-statement">
-          <summary>报名说明（选填）</summary>
-          <label
-            >申请说明<textarea v-model="statement" maxlength="1000" :disabled="saving" />
-          </label>
-        </details>
-        <details
-          v-if="
-            activity.registration_opens_at ||
-            resultDate(activity) ||
-            activity.selection_text ||
-            activity.hours_rule_text
-          "
-        >
-          <summary>录取、时长与报名时间</summary>
-          <dl>
-            <template v-if="activity.selection_text"
-              ><dt>录取说明</dt>
-              <dd>{{ activity.selection_text }}</dd></template
-            >
-            <template v-if="activity.hours_import_date || activity.hours_import_expected_at"><dt>预计时长导入日期</dt><dd>{{ activity.hours_import_date || date(activity.hours_import_expected_at!).split(" ")[0] }}</dd></template>
-            <template v-if="activity.hours_rule_text"
-              ><dt>时长认定</dt>
-              <dd>{{ activity.hours_rule_text }}</dd></template
-            >
-            <template v-if="activity.registration_opens_at"
-              ><dt>报名开放</dt>
-              <dd>{{ date(activity.registration_opens_at) }}</dd></template
-            >
-            <template v-if="resultDate(activity)"
-              ><dt>结果公布</dt>
-              <dd>{{ resultDate(activity) }}</dd></template
-            >
-          </dl>
-        </details>
       </div>
     </div>
     <footer class="detail-footer">
@@ -239,14 +185,13 @@ const conditions: [keyof Activity, string, IconName][] = [
         v-else-if="!activity.my_registration_status && !canApply && activity.registration_phase"
         >{{ phases[activity.registration_phase] }}</small
       >
-      <button v-if="activityContacts(activity).length || activity.contact_text" class="contact-btn" @click="contact?.showModal()">
+      <button v-if="activity.contacts?.length" class="contact-btn" @click="contact?.showModal()">
         <UiIcon name="Message" />联系负责人
       </button>
     </footer>
     <dialog ref="contact" aria-labelledby="contact-title">
       <h2 id="contact-title">联系负责人</h2>
-      <p v-for="(value,index) in activityContacts(activity)" :key="index">{{ value }}</p>
-      <p v-if="activity.contact_text">{{ activity.contact_text }}</p>
+      <p v-for="(value,index) in activity.contacts" :key="index">{{ value }}</p>
       <form method="dialog"><button autofocus>关闭</button></form>
     </dialog>
   </article>
@@ -308,6 +253,7 @@ dl {
   margin-top: 18px;
   grid-template-columns: 6.5em minmax(0, 1fr);
 }
+.facts dt { white-space: nowrap; }
 .facts dt,
 .conditions dt {
   display: flex;
@@ -343,29 +289,15 @@ p {
   font-size: 14px;
   overflow-wrap: anywhere;
 }
-details {
-  margin-top: 8px;
+.service-hours {
+  margin-top: 18px;
 }
-summary {
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.service-hours dl {
+  grid-template-columns: max-content minmax(0, 1fr);
 }
-summary::before {
-  content: '▸';
-}
-details[open] summary::before {
-  content: '▾';
-}
-.joining {
-  background: var(--surface);
-  padding: 12px 14px;
-  border-radius: var(--radius);
-}
-.joining h2 {
-  border-left: 3px solid var(--yellow);
-  padding-left: 9px;
+.service-hours dt,
+.service-hours time {
+  white-space: nowrap;
 }
 .detail-footer {
   display: flex;
@@ -456,11 +388,11 @@ dialog button {
   gap: 8px;
   padding: 10px 14px;
   margin: 0 0 16px;
-  border: 1px solid var(--line, #dfe5ef);
-  border-radius: var(--radius, 8px);
-  background: var(--surface-muted, #f5f8ff);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 .notice-callout a {
-  text-decoration: underline;
+  background-color: var(--brand-tint);
 }
 </style>

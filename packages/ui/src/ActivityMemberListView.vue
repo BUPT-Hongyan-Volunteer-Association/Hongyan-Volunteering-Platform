@@ -31,13 +31,13 @@ async function remove() {
     command.confirmed();
     dialog.value?.close();
     emit('saved', id, data.data);
-    notice.value = '已从本活动移除' + member.display_name + '。';
+    notice.value = '已从本活动移除' + member.display_name;
   } catch (e) {
     if (e instanceof ApiError && [401, 403, 404, 409].includes(e.status ?? 0)) {
       dialog.value?.close();
-      notice.value = e.status === 409 ? '团队已变化，请重新核对成员后操作。' : e.message;
+      notice.value = e.status === 409 ? '团队已变化，请重新核对成员后操作' : e.message;
       emit('refresh');
-    } else failure.value = e instanceof ApiError ? e.message : '移除结果未确认，请重试。';
+    } else failure.value = e instanceof ApiError ? e.message : '移除结果未确认，请重试';
   } finally { saving.value = false; }
 }
 </script>
@@ -60,7 +60,7 @@ async function remove() {
     <form v-if="selected" @submit.prevent="remove">
       <h3 id="remove-title">移除协作者</h3>
       <p>从「{{ activity.title }}」移除 <strong>{{ selected.display_name }}</strong><span v-if="selected.student_no">（{{ selected.student_no }}）</span>？</p>
-      <p>移除后，对方将无法从负责人工作区查看本活动的报名名单和现场记录。学生身份及其他活动权限保留。</p>
+      <p>移除后，对方将无法从负责人工作区查看本活动的报名名单和现场记录。学生身份及其他活动权限保留</p>
       <label>移除原因<input v-model="reason" required maxlength="2000" :disabled="saving" /></label>
       <p v-if="failure" role="alert">{{ failure }}</p>
       <div class="actions">

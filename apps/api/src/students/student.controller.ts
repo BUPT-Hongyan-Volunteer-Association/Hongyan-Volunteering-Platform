@@ -1,8 +1,9 @@
+import { listStudents } from './query.js';
 import type { StudentPatch } from '@hongyan/contracts/types';
-import { Workflow, type Tx } from '../activities/workflow.js';
+import { Workflow } from '../workflow.js';
+import { type Tx, Database } from '../database.js';
 import { managedAccountScope } from '../auth/account-access.js';
-import type { Actor } from '../auth/session.guard.js';
-import { Database } from '../database.js';
+import type { Actor, SessionRequest } from '../auth/session.guard.js';
 import { updateStudent } from './student-profile.js';
 import {
   Body,
@@ -20,8 +21,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { validate } from '../activities/validation.js';
-import type { SessionRequest } from '../auth/session.guard.js';
+import { validate } from '../validation.js';
 import { denied, envelope, invisible } from '../http.js';
 import { maxImportBytes } from './import.js';
 import { StudentImportService, type UploadedStudentFile } from './import.service.js';
@@ -93,6 +93,6 @@ export class StudentController {
 
   @Get('admin/students')
   async students(@Query() query: Record<string, string>) {
-    return envelope(await this.imports.students(query));
+    return envelope(await listStudents(this.db, query));
   }
 }

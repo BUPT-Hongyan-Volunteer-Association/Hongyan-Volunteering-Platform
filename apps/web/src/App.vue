@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { router, studentNav, managedNav } from './router';
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import type { Profile } from '@hongyan/contracts';
@@ -10,37 +11,15 @@ import BrandName from '@hongyan/ui/BrandName.vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 
 const route = useRoute();
-const studentNav = [
-  { to: '/', label: '活动', icon: 'Calendar' },
-  { to: '/registrations', label: '我的报名', icon: 'Tickets' },
-  { to: '/notices', label: '通知', icon: 'Bell' },
-  { to: '/mine', label: '我的', icon: 'User' },
-] as const;
-const managedNav = [
-  { to: '/managed', label: '我的管理活动', icon: 'FolderOpened' },
-  { to: '/managed/new', label: '新建活动', icon: 'Plus' },
-  { to: '/managed-schedule', label: '管理日程', icon: 'Clock' },
-] as const;
 const canManage = (profile: Profile) => profile.roles.includes('organizer');
-function isCurrent(to: string) {
-  if (to === '/')
-    return (
-      route.path === '/' || route.path.startsWith('/activities/') || route.path === '/schedule'
-    );
-  if (to === '/managed' && route.path === '/managed/new') return false;
-  return route.path === to || route.path.startsWith(to + '/');
+const isCurrent = (to: string) => route.meta.nav === to;
+const publicNav = studentNav.filter(item => !router.resolve(item.to).meta.personal);
+function studentDestination(to: string) {
+  if (to !== '/schedule' || route.path !== '/') return to;
+  const { q, campus, phase, status, ongoing, date, unit } = route.query;
+  return { path: to, query: { q, campus, phase, status, ongoing, date, unit: date ? unit || 'day' : undefined } };
 }
-const crumb = computed(() => {
-  if (route.path.startsWith('/activities/')) return '活动详情';
-  if (route.path.endsWith('/schedule') || route.path === '/managed-schedule') return '活动日程';
-  if (route.path === '/managed/new') return '新建活动';
-  if (route.path.startsWith('/managed/')) return '活动工作区';
-  if (route.path === '/managed') return '我的管理活动';
-  if (route.path === '/mine/settings') return '账号管理';
-  if (route.path.startsWith('/mine/hours')) return '我的时长';
-  if (route.path.startsWith('/mine/feedback')) return '本人记录与反馈';
-  return studentNav.find((item) => isCurrent(item.to))?.label || '我的';
-});
+const crumb = computed(() => route.meta.title);
 </script>
 <template>
   <AccountGate v-slot="{ profile, busy, logout }">
@@ -55,9 +34,9 @@ const crumb = computed(() => {
         <BrandName :area="canManage(profile) ? '活动负责人' : '学生端'" />
         <nav class="rail-nav" aria-label="学生导航">
           <RouterLink
-            v-for="item in hasStudentAccess(profile) ? studentNav : studentNav.slice(0, 1)"
+            v-for="item in hasStudentAccess(profile) ? studentNav : publicNav"
             :key="item.to"
-            :to="item.to"
+            :to="studentDestination(item.to)"
             :aria-label="item.label"
             :aria-describedby="item.to === '/notices' ? 'notice-attention-description' : undefined"
             :class="{ current: isCurrent(item.to) }"
@@ -103,11 +82,17 @@ const crumb = computed(() => {
           <AccountIdentity :name="profile.display_name" :busy="busy" @logout="logout" />
         </header>
         <main class="shell-content">
+          <nav v-if="canManage(profile) && $route.meta.organizer" class="section-nav mobile-managed-nav" aria-label="管理页面">
+            <RouterLink v-for="item in managedNav" :key="item.to" :to="item.to"
+              :class="{ current: isCurrent(item.to) }" :aria-current="isCurrent(item.to) ? 'page' : undefined">
+              {{ item.label }}
+            </RouterLink>
+          </nav>
           <p v-if="$route.meta.organizer && !canManage(profile)" role="alert">
-            当前账号无活动管理权限。
+            当前账号无活动管理权限
           </p>
           <p v-else-if="$route.meta.personal && !hasStudentAccess(profile)" role="alert">
-            当前账号无学生个人页面权限。
+            当前账号无学生个人页面权限
           </p>
           <RouterView v-else v-slot="{ Component }"
             ><component
@@ -137,10 +122,12 @@ const crumb = computed(() => {
   font-weight: 550;
   color: var(--muted);
 }
+.mobile-managed-nav,
 .rail-nav .mobile-management {
   display: none;
 }
 @media (max-width: 700px) {
+  .mobile-managed-nav { display: flex; margin-top: 0; }
   .web-rail {
     position: fixed;
     z-index: 5;

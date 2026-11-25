@@ -1,8 +1,7 @@
+import { servicePeriods } from './schedule.js';
 import type { Activity as View, ActivityInput } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Actor } from '../auth/session.guard.js';
-import { campusName } from '@hongyan/contracts/activity';
-import { slots } from './schedule.js';
 import { denied, invalid } from '../http.js';
 
 export const staff = (a: Actor) => a.roles.includes('reviewer') || a.roles.includes('tech_admin');
@@ -80,27 +79,16 @@ export function project(
   const rev = scope === 'working' ? workingRevision(row) : published;
   if (!rev) return null;
   const input = rev.content as unknown as ActivityInput;
-  const times = slots(input.schedule);
-  const live =
-    rev === published
-      ? times
-      : published
-        ? slots((published.content as unknown as ActivityInput).schedule)
-        : [];
+  const schedule = (published?.content as unknown as ActivityInput | undefined)?.schedule;
   const t = now.getTime();
   const item: View = {
     ...input,
-    ...(input.campus && input.campus !== '沙河' && { campus: campusName(input.campus) }),
     id: row.id,
     version: row.version,
     activity_code: row.activity_code,
     status: row.status as View['status'],
     owner_display_name: row.members[0].account.display_name,
     owner_account_id: row.members[0].account_id,
-    ...(times.length > 0 && {
-      starts_at: new Date(Math.min(...times.map((s) => Date.parse(s.starts_at)))).toISOString(),
-      ends_at: new Date(Math.max(...times.map((s) => Date.parse(s.ends_at)))).toISOString(),
-    }),
     registration_phase:
       row.status !== 'published' || !input.registration_opens_at || !input.registration_closes_at
         ? 'unavailable'
@@ -113,8 +101,7 @@ export function project(
     revision_state: rev.revision_state as View['revision_state'],
     state_evaluated_at: now.toISOString(),
     is_ongoing:
-      row.status === 'published' &&
-      live.some((s) => Date.parse(s.starts_at) <= t && t < Date.parse(s.ends_at)),
+      row.status === 'published' && !servicePeriods(schedule, t, t + 1).next().done,
     ...(management && {
       has_pending_review: row.reviews.some((r) => r.status === 'pending'),
       current_review_id: row.reviews.find((r) => r.status === 'pending')?.id,

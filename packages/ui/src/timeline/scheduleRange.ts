@@ -1,7 +1,7 @@
 import { computed, ref, shallowRef } from 'vue';
-import type { TimelineActivity, TimelineActivityPage, TimelineItem } from '@hongyan/contracts';
+import type { TimelineActivity, TimelineActivityPage } from '@hongyan/contracts';
 
-type Page = TimelineActivityPage & { rangeKey: string | null };
+type Page = TimelineActivityPage & { rangeKey: string };
 
 /** 一轮读取的意图：初次进入、刷新、加载更多、失败重试、按选中活动补读。 */
 export type RangeIntent =
@@ -23,9 +23,7 @@ export type RangeOutcome =
 
 export type SelectionState =
   | { kind: 'none' }
-  | { kind: 'kept'; activity: TimelineActivity; slot: TimelineItem }
-  | { kind: 'window-moved' }
-  | { kind: 'schedule-updated' }
+  | { kind: 'kept'; activity: TimelineActivity }
   | { kind: 'activity-missing' };
 
 export interface RangeOptions {
@@ -33,10 +31,7 @@ export interface RangeOptions {
   maxInFlight: number;
   /** 页大小，与服务端请求一致。 */
   pageSize: number;
-  /** 当前窗口 `[from, to)`，用于判断所选时段的开始时刻是否还在窗口内。 */
-  window: () => { from: string; to: string };
-  /** 当前选中身份：`item` 是活动 ID，`slot` 是时段键。 */
-  selection: () => { item?: string; slot?: string };
+  selectedId: () => string | undefined;
 }
 
 const ABORT = Symbol('schedule-range-abort');
@@ -52,11 +47,11 @@ function consistent(pages: Page[], size: number) {
   return pages.every((page, index) => {
     const expectedCount = Math.min(size, Math.max(0, first.total - index * size));
     if (
+      !Number.isFinite(Date.parse(page.state_evaluated_at)) ||
       page.rangeKey !== first.rangeKey || page.total !== first.total ||
       page.page !== index + 1 || page.page_size !== size || page.items.length !== expectedCount
     ) return false;
     for (const item of page.items) {
-      if (item.state_evaluated_at !== page.state_evaluated_at) return false;
       if (previous && (
         previous.activity_code > item.activity_code ||
         (previous.activity_code === item.activity_code && previous.activity_id >= item.activity_id)
@@ -125,11 +120,11 @@ export function createScheduleRange(read: (page: number) => Promise<Page>, optio
       let last = target;
       for (let attempt = 0; attempt < 2; attempt++) {
         // 有全范围摘要时可以复用前页；校验失败或重试时从头读取。
-        const reuse = !retry && attempt === 0 && !!previous[0]?.rangeKey;
+        const reuse = !retry && attempt === 0 && previous.length > 0;
         let candidate: Page[];
         if (intent.kind === 'focus') {
-          const { item, slot } = options.selection();
-          if (item !== intent.activityId || (slot && windowPosition(slot) === 'after'))
+          const item = options.selectedId();
+          if (item !== intent.activityId)
             return { status: 'ok' };
           candidate = reuse ? [...previous] : [await readOne(1)];
           const containsItem = (page: Page) => page.items.some((row) => row.activity_id === item);
@@ -188,27 +183,11 @@ export function createScheduleRange(read: (page: number) => Promise<Page>, optio
     }
   }
 
-  function windowPosition(slot: string) {
-    const start = Date.parse(slot.split('/')[2] ?? '');
-    const { from, to } = options.window();
-    if (start >= Date.parse(to)) return 'after';
-    if (start < Date.parse(from)) return 'before';
-    return 'inside';
-  }
-
   const selection = computed<SelectionState>(() => {
-    const { item, slot } = options.selection();
-    if (!item) return { kind: 'none' };
-    const activity = rows.value.find((row) => row.activity_id === item);
-    // 匹配先于窗口判定：服务端只返回与窗口相交的分段，跨午夜段的键同样在响应里。
-    const found =
-      slot === undefined
-        ? activity?.segments[0]
-        : activity?.segments.find((segment) => segment.occurrence_key === slot);
-    if (activity && found) return { kind: 'kept', activity, slot: found };
-    if (slot !== undefined && windowPosition(slot) !== 'inside') return { kind: 'window-moved' };
-    if (!activity || !activity.segments.length) return { kind: 'activity-missing' };
-    return { kind: 'schedule-updated' };
+    const id = options.selectedId();
+    if (!id) return { kind: 'none' };
+    const activity = rows.value.find(row => row.activity_id === id);
+    return activity ? { kind: 'kept', activity } : { kind: 'activity-missing' };
   });
 
   return {

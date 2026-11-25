@@ -105,7 +105,7 @@ async function enter(id, account) {
   const browser = await launching;
   const https = process.env.HY_LOCAL_HTTPS === '1';
   if (!https && browser.browserType().name() === 'webkit')
-    throw new EntryError('WebKit 登录需要 HTTPS。请按 README 在 HTTPS 模式下启动两个前端和体验入口。');
+    throw new EntryError('WebKit 登录需要 HTTPS。请按 README 在 HTTPS 模式下启动两个前端和体验入口');
   const context = await browser.newContext({ viewport: null, ignoreHTTPSErrors: https });
   const base = (https ? 'https' : 'http') + '://localhost:' + (account.admin ? 5174 : 5173);
   try {
@@ -123,13 +123,13 @@ async function enter(id, account) {
     });
     if (result.status() === 401 && !account.admin)
       result = await post('login', { username: id, password: id.slice(-6) });
-    if (!result.ok()) throw new EntryError('登录未通过，请核对本地体验凭证。');
+    if (!result.ok()) throw new EntryError('登录未通过，请核对本地体验凭证');
     if ((await result.json()).data.must_change_password) {
       result = await post('change-password', {
         current_password: id.slice(-6),
         new_password: account.password,
       });
-      if (!result.ok()) throw new EntryError('首次改密未完成。');
+      if (!result.ok()) throw new EntryError('首次改密未完成');
     }
     const profile = await client.get(base + '/api/v1/me');
     if (!profile.ok() || (await profile.json()).data.username !== id)
@@ -140,7 +140,7 @@ async function enter(id, account) {
     tab.on('close', () => context.close().catch(() => {}));
     await tab.bringToFront();
     await maximizeWindow(tab).catch(() => {
-      console.warn('浏览器未能自动最大化，可手动调整体验窗口大小。');
+      console.warn('浏览器未能自动最大化，可手动调整体验窗口大小');
     });
   } catch (e) {
     await context.close();
@@ -176,7 +176,7 @@ createServer(async (req, res) => {
     const message =
       e instanceof EntryError
         ? e.message
-        : '体验窗口未能打开，请检查 README 中的浏览器配置及本地服务后重试。';
+        : '体验窗口未能打开，请检查 README 中的浏览器配置及本地服务后重试';
     res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' }).end(render(message));
   }
 }).listen(port, '127.0.0.1', () => console.log('本地测试入口 ' + origin));

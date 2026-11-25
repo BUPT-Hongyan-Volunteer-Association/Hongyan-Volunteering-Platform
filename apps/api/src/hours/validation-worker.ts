@@ -1,8 +1,7 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import type { FieldError } from '@hongyan/contracts/types';
-import { Database } from '../database.js';
+import { Database, json, type Tx } from '../database.js';
 import { BusinessError, denied } from '../http.js';
-import { json, type Tx } from '../activities/workflow.js';
 import { previewActivityHours } from './preview-context.js';
 import { emptySummary, type SourceInfo } from './batch-data.js';
 import { warningSnapshot } from './warnings.js';
@@ -47,7 +46,7 @@ export class HourValidationWorker implements OnApplicationBootstrap, OnModuleDes
         Logger.error({ worker: 'hour-validation', batch: claim.id, error: error instanceof Error ? error.name : 'Unknown' });
         await this.db.hourImportBatch.updateMany({ where: { ...claim, status: 'validating' },
           data: { status: 'failed', version: { increment: 1 }, summary: {
-            ...emptySummary(), error_message: '系统校验未完成，可在原批次重试。' } } });
+            ...emptySummary(), error_message: '系统校验未完成，可在原批次重试' } } });
       }
     }
   }
@@ -73,12 +72,12 @@ export class HourValidationWorker implements OnApplicationBootstrap, OnModuleDes
       }
       errors = rows.flatMap((row) => row.errors);
       summary = { ...summaryFields, ...warningSnapshot(summaryFields.warnings),
-        ...(errors.length && { error_message: '请按错误报告修正后重新上传。' }) };
+        ...(errors.length && { error_message: '请按错误报告修正后重新上传' }) };
     } catch (error) {
       if (!(error instanceof BusinessError) || error.getStatus() !== 422) throw error;
       errors = (error.getResponse() as { details?: FieldError[] }).details ??
         [{ field: 'file', code: 'validation_error', message: error.message }];
-      summary = { ...emptySummary(), error_message: error.message + '；请修正后重新上传。' };
+      summary = { ...emptySummary(), error_message: error.message + '；请修正后重新上传' };
     }
     let report_file_id: string | undefined;
     if (errors.length) {

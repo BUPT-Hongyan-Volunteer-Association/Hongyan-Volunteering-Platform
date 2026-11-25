@@ -1,5 +1,5 @@
 import type { ActivitySchedule, HourMisconductReview, HourWarning } from '@hongyan/contracts/types';
-import type { Tx } from '../activities/workflow.js';
+import type { Tx } from '../database.js';
 import { BusinessError } from '../http.js';
 import { hourWarnings } from './warnings.js';
 import { hourTenths, scheduleCoverage } from './values.js';

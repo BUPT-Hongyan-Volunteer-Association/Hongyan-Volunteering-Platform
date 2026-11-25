@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { downloadBlob } from '@hongyan/ui/files';
 import { computed, onScopeDispose, ref, watch } from 'vue';
 import {
   ApiError,
@@ -36,15 +37,15 @@ const labels = computed(() => {
   const fallback = {
     create: '导出筛选结果',
     download: '下载时长文件',
-    failed: '生成时长文件失败。',
+    failed: '生成时长文件失败',
     name: '志愿时长.xlsx',
   };
   const byType = props.input.type === 'activity_roster'
-    ? { create: '导出名单', download: '下载名单文件', failed: '生成名单文件失败。', name: '报名名单.xlsx' }
+    ? { create: '导出名单', download: '下载名单文件', failed: '生成名单文件失败', name: '报名名单.xlsx' }
     : props.input.type === 'notice_receipts'
-      ? { create: '导出回执', download: '下载回执文件', failed: '生成回执文件失败。', name: '通知回执.xlsx' }
+      ? { create: '导出回执', download: '下载回执文件', failed: '生成回执文件失败', name: '通知回执.xlsx' }
       : props.input.type === 'admin_students'
-        ? { create: '批量导出', download: '下载学生档案', failed: '生成学生档案失败。', name: '学生档案.xlsx' }
+        ? { create: '批量导出', download: '下载学生档案', failed: '生成学生档案失败', name: '学生档案.xlsx' }
         : fallback;
   return {
     ...byType,
@@ -53,9 +54,8 @@ const labels = computed(() => {
   };
 });
 function report(reason: unknown) {
-  const missingRoute = reason instanceof ApiError && reason.status === 404 && reason.body?.message === '接口不存在';
-  error.value = missingRoute ? '导出服务暂不可用。' : message(reason);
-  if (noAccess(reason) && !missingRoute) {
+  error.value = message(reason);
+  if (noAccess(reason)) {
     job.value = undefined;
     emit('recheck');
   }
@@ -105,12 +105,7 @@ async function download() {
   try {
     const { data, response } = await downloadExport({ path: { id: job.value.id }, parseAs: 'blob', throwOnError: true });
     if (!active || current !== serial) return;
-    const url = URL.createObjectURL(data);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename(response?.headers.get('Content-Disposition') ?? null);
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    downloadBlob(data, filename(response.headers.get('Content-Disposition')));
   } catch (reason) {
     if (!active || current !== serial) return;
     if (reason instanceof ApiError && reason.status === 409) {
@@ -132,7 +127,7 @@ async function download() {
       <button :disabled="busy" @click="download">{{ labels.download }}</button>
       <span v-if="job.expires_at" class="meta-line">{{ beijing(job.expires_at) }} 到期</span>
     </template>
-    <span v-if="job?.status === 'expired'">文件已过期，请重新导出。</span>
+    <span v-if="job?.status === 'expired'">文件已过期，请重新导出</span>
     <span v-if="job?.status === 'failed'" role="alert">{{ job.error_message ?? labels.failed }}</span>
     <p v-if="error" role="alert">{{ error }}
       <button v-if="job?.status === 'pending' || job?.status === 'running'" @click="readStatus">重查生成状态</button>

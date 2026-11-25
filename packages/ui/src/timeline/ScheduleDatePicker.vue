@@ -7,7 +7,7 @@ import UiIcon from '../UiIcon.vue';
 import { dropdownPosition } from '../dropdownPosition';
 import { validDate } from './window';
 
-const props = defineProps<{ date: string; period: string; highlighted?: boolean; label?: string; disabled?: boolean }>();
+const props = defineProps<{ date: string; period: string; label?: string; disabled?: boolean }>();
 const emit = defineEmits<{ select: [date: string] }>();
 const expanded = ref(false);
 const trigger = ref<HTMLButtonElement>();
@@ -61,7 +61,7 @@ onBeforeUnmount(() => {
 function select(date: string) {
   if (props.disabled) return;
   if (!validDate(date)) {
-    error.value = '请输入有效的年、月、日，格式为 YYYY-MM-DD。';
+    error.value = '请输入有效的年、月、日，格式为 YYYY-MM-DD';
     return;
   }
   dismiss();
@@ -94,7 +94,6 @@ function select(date: string) {
         type="button"
         :disabled="disabled"
         class="date-picker"
-        :class="{ highlighted }"
         :aria-label="label || ('查看日期，' + period)"
         :title="label || '查看日期'"
         :aria-expanded="expanded"
@@ -153,9 +152,6 @@ function select(date: string) {
   font-size: 15px;
   font-weight: 600;
   padding-inline: 9px;
-}
-.date-picker.highlighted {
-  background: var(--yellow-tint);
 }
 .date-picker .ui-icon {
   width: 15px;

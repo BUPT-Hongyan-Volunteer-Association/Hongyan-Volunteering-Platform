@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { PreviewRecord } from './preview';
+import type { TableRecord } from './records';
 const props = defineProps<{
-  records: PreviewRecord[];
+  records: TableRecord[];
   label: string;
   heading: string;
   statusHeading?: string;
@@ -15,7 +15,7 @@ const rows = computed(() =>
 );
 </script>
 <template>
-  <div v-if="records.length" class="scroll-table record-table">
+  <div v-if="records.length" class="scroll-table record-table-stacked record-table">
     <table :aria-label="label">
       <thead>
         <tr>
@@ -57,42 +57,5 @@ const rows = computed(() =>
 }
 .record-table td.actions {
   min-width: 5em;
-}
-@media (max-width: 700px) {
-  .record-table {
-    border: 0;
-    border-radius: 0;
-  }
-  .record-table thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-  .record-table tbody,
-  .record-table tr,
-  .record-table th,
-  .record-table td {
-    display: block;
-  }
-  .record-table tbody tr {
-    border-block-start: 1px solid var(--line);
-    padding: 8px 0 12px;
-  }
-  .record-table tbody tr > * {
-    position: static;
-    border: 0;
-    padding: 4px 0;
-  }
-  .record-table tbody td {
-    display: grid;
-    grid-template-columns: 6em minmax(0, 1fr);
-    gap: 0 12px;
-  }
-  .record-table td::before {
-    content: attr(data-label);
-    color: var(--muted);
-  }
 }
 </style>

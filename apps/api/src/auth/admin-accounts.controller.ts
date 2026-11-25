@@ -2,13 +2,13 @@ import { hashPassword } from './password.js';
 import { guardPermanentAdminLoss, managedAccountScope } from './account-access.js';
 import { Body, Controller, Get, Header, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import type { AccountStatusPatch, CredentialResetWritable, RoleReplacement, StaffAccountInput } from '@hongyan/contracts/types';
-import { checkVersion, Workflow, type Tx } from '../activities/workflow.js';
-import { validate } from '../activities/validation.js';
+import { checkVersion, BusinessError, denied, envelope, invalid, invisible } from '../http.js';
+import { Workflow } from '../workflow.js';
+import { type Tx, Database } from '../database.js';
+import { validate } from '../validation.js';
 import { audit } from '../audit.js';
 import { Prisma, Role } from '../generated/prisma/client.js';
 import { pagination } from '../activities/read.js';
-import { Database } from '../database.js';
-import { BusinessError, denied, envelope, invalid, invisible } from '../http.js';
 import { StaffGuard } from '../students/staff.guard.js';
 import type { Actor, SessionRequest } from './session.guard.js';
 

@@ -95,7 +95,6 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
   const counts = () =>
     Promise.all([
       db.registrationHistory.count(),
-      db.registrationDecisionEvent.count(),
       db.notificationEvent.count(),
     ]);
   const mineSchedule = async () => {
@@ -149,16 +148,16 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     await worker.drain();
     [a, b] = success(await bulk(await Promise.all([registration(a), registration(b)]), 'waitlisted')).items;
     // 候补进入退避时先完成补录，迟到重试必须以报名版本判定。
-    const delayed = await db.registrationDecisionEvent.findUniqueOrThrow({
-      where: { registration_id_registration_version: { registration_id: a.id, registration_version: a.version } },
+    const delayed = await db.notificationEvent.findUniqueOrThrow({
+      where: { event_key: `registration_decision:${a.id}:${a.version}` },
     });
-    await db.notificationEvent.update({ where: { id: delayed.event_id }, data: { next_retry_at: new Date(Date.now() + 60_000) } });
+    await db.notificationEvent.update({ where: { id: delayed.id }, data: { next_retry_at: new Date(Date.now() + 60_000) } });
     a = success(await bulk([a], 'accepted')).items[0];
     assert.equal((await bulk([a], 'rejected')).code, 'invalid_state');
     await worker.drain();
     await worker.drain(new Date(Date.now() + 61_000));
-    assert.equal((await db.notificationEvent.findUniqueOrThrow({ where: { id: delayed.event_id } })).status, 'superseded');
-    assert.equal(await db.notice.count({ where: { source_event_id: delayed.event_id } }), 0);
+    assert.equal((await db.notificationEvent.findUniqueOrThrow({ where: { id: delayed.id } })).status, 'superseded');
+    assert.equal(await db.notice.count({ where: { source_event_id: delayed.id } }), 0);
     for (const [u, expected] of [
       [alice, '已被录取'],
       [bob, '进入候补'],
@@ -250,6 +249,11 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
       activity_id: id,
     }));
     await db.registration.createMany({ data: records });
+    const submitted = await db.registration.findMany({ where: { id: { in: records.map(row => row.id) } } });
+    await db.registrationHistory.createMany({ data: submitted.map(row => ({
+      registration_id: row.id, version: row.version, status: row.status,
+      submitted_at: row.submitted_at, changed_at: row.submitted_at,
+    })) });
     const last = accounts.at(-1);
     await db.account.update({ where: { id: last.id }, data: { active: false } });
     const before = await counts();
@@ -264,7 +268,7 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     assert.deepEqual(await bulk(records, 'waitlisted', owner, key), result);
     assert.deepEqual(
       await counts(),
-      before.map((n, i) => n + (i === 0 ? 200 : 100)),
+      before.map(n => n + 100),
     );
     await worker.drain();
     await worker.drain();

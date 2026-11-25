@@ -26,9 +26,9 @@ defineEmits<{ 'update:modelValue': [value: string] }>();
   display: grid;
   justify-items: start;
   min-width: 0;
-  gap: 5px;
+  gap: var(--space-4);
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--text-control);
 }
 .status-options {
   max-width: 100%;

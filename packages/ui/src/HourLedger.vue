@@ -108,8 +108,8 @@ defineExpose({ refresh, clear });
       <ExportButton v-else :input="exportInput" :disabled="loading || !data" @recheck="refresh(false)" />
     </div>
     <template v-if="data">
-      <p v-if="!data.items.length">当前条件下没有时长记录。</p>
-      <div v-else class="scroll-table ledger-table">
+      <p v-if="!data.items.length">当前条件下没有时长记录</p>
+      <div v-else class="scroll-table record-table-stacked ledger-table">
         <table aria-label="时长明细">
           <thead><tr>
             <th v-if="scope.type === 'activity_hours'" class="select-cell">
@@ -147,11 +147,11 @@ defineExpose({ refresh, clear });
                 <div class="ledger-source">
                   <span v-if="row.reviewed_at">入账 {{ beijing(row.reviewed_at) }}</span>
                   <span v-if="row.batch_id">入账批次
-                    <RouterLink v-if="batchBase" :to="batchBase + '/' + row.batch_id">H-{{ row.batch_id }}</RouterLink>
+                    <RouterLink class="button compact" v-if="batchBase" :to="batchBase + '/' + row.batch_id">H-{{ row.batch_id }}</RouterLink>
                     <span v-else>H-{{ row.batch_id }}</span>
                   </span>
                   <span v-if="row.correction_group_id">补记修复组
-                    <RouterLink v-if="groupBase" :to="groupBase + '/' + row.correction_group_id">{{ row.correction_group_id }}</RouterLink>
+                    <RouterLink class="button compact" v-if="groupBase" :to="groupBase + '/' + row.correction_group_id">{{ row.correction_group_id }}</RouterLink>
                     <span v-else>{{ row.correction_group_id }}</span>
                   </span>
                   <span v-if="row.voided_by_batch_id">撤销批次 H-{{ row.voided_by_batch_id }}</span>
@@ -166,7 +166,7 @@ defineExpose({ refresh, clear });
           </tr></tbody>
         </table>
       </div>
-      <Pager v-if="data.total > size" :page="page" :size="size" :total="data.total" @change="goPage" />
+      <Pager v-if="data.total > data.page_size" :page="page" :size="data.page_size" :total="data.total" @change="goPage" />
     </template>
   </section>
 </template>
@@ -184,12 +184,4 @@ defineExpose({ refresh, clear });
 .ledger-table th, .ledger-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
 .ledger-table small { display: block; color: var(--muted); }
 .ledger-source { display: grid; gap: 4px; min-width: 10rem; max-width: 24rem; font-size: 13px; }
-@media (max-width: 700px) {
-  .ledger-table thead { position: absolute; clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; }
-  .ledger-table tbody, .ledger-table tbody tr, .ledger-table tbody th { display: block; }
-  .ledger-table tr { border-block-end: 1px solid var(--line); padding-block: 8px; }
-  .ledger-table tbody td { display: grid; grid-template-columns: 6em minmax(0, 1fr); gap: 6px; }
-  .ledger-table tbody td::before { content: attr(data-label); color: var(--muted); }
-  .ledger-table tbody :is(td,th) { padding-block: 4px; border: 0; }
-}
 </style>
