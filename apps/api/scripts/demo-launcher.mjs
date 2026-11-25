@@ -35,16 +35,13 @@ const groups = [
   },
 ];
 const seededOrganizers = new Set(['0000000002', '0000000003', '0000000004']);
+function accountArea(id, account) {
+  if (account.admin) return 'admin';
+  return account.area === 'organizer' || seededOrganizers.has(id) ? 'organizer' : 'student';
+}
 const lists = groups
   .map((group) => {
-    const entries = Object.entries(accounts).filter(([id, a]) => {
-      const area = a.admin
-        ? 'admin'
-        : a.area === 'organizer' || seededOrganizers.has(id)
-          ? 'organizer'
-          : 'student';
-      return area === group.id;
-    });
+    const entries = Object.entries(accounts).filter(([id, account]) => accountArea(id, account) === group.id);
     if (!entries.length) return '';
     const buttons = entries
       .map(
@@ -135,7 +132,9 @@ async function enter(id, account) {
     if (!profile.ok() || (await profile.json()).data.username !== id)
       throw new EntryError('身份验证失败');
     const tab = await context.newPage();
-    await tab.goto(base);
+    const organizer = accountArea(id, account) === 'organizer';
+    await tab.goto(organizer ? base + '/managed' : base);
+    if (organizer) await tab.getByRole('heading', { name: '我的管理活动', exact: true }).waitFor();
     await tab.getByRole('button', { name: '退出登录' }).waitFor();
     tab.on('close', () => context.close().catch(() => {}));
     await tab.bringToFront();

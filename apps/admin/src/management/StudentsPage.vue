@@ -18,11 +18,9 @@ const status = computed(
   () => String(route.query.status ?? 'all') as 'all' | 'active' | 'inactive',
 );
 const selectedGrade = computed(() => String(route.query.grade ?? 'all'));
-const selectedCohort = computed(() => String(route.query.cohort ?? 'all'));
 const { data, loading, error, refresh: load } = usePageRead(() => route.query, async signal =>
   (await listStudents({ query: {
     q: typeof route.query.q === 'string' ? route.query.q : undefined,
-    cohort: selectedCohort.value === 'all' ? undefined : selectedCohort.value,
     grade: selectedGrade.value === 'all' ? undefined : selectedGrade.value,
     status: status.value === 'all' ? undefined : status.value,
     page: page.value, page_size: size,
@@ -47,7 +45,6 @@ const {
 const exportInput = computed(() => ({
   type: 'admin_students' as const,
   q: route.query.q ? String(route.query.q) : undefined,
-  cohort: route.query.cohort ? String(route.query.cohort) : undefined,
   grade: selectedGrade.value !== 'all' ? selectedGrade.value : undefined,
   account_status: status.value !== 'all' ? status.value : undefined,
 }));
@@ -55,10 +52,6 @@ const selectedExportInput = computed(() => ({
   type: 'admin_students' as const,
   student_ids: [...selected.value],
 }));
-const cohortChoices = computed(() => [
-  { value: 'all', label: '全部级部' },
-  ...(data.value?.cohort_options ?? []).map((cohort) => ({ value: cohort, label: cohort })),
-]);
 const gradeChoices = computed(() => [
   { value: 'all', label: '全部年级' },
   ...(data.value?.grade_options ?? []).map((grade) => ({ value: grade, label: grade + '级' })),
@@ -69,14 +62,13 @@ function apply() {
   void router.push({
     query: {
       ...(search.value.trim() ? { q: search.value.trim() } : {}),
-      ...(selectedCohort.value !== 'all' ? { cohort: selectedCohort.value } : {}),
       ...(selectedGrade.value !== 'all' ? { grade: selectedGrade.value } : {}),
       ...(status.value !== 'all' ? { status: status.value } : {}),
       page: 1,
     },
   });
 }
-function setFilter(field: 'cohort' | 'grade' | 'status', value: string) {
+function setFilter(field: 'grade' | 'status', value: string) {
   void router.push({
     query: { ...route.query, [field]: value === 'all' ? undefined : value, page: 1 },
   });
@@ -84,7 +76,6 @@ function setFilter(field: 'cohort' | 'grade' | 'status', value: string) {
 watch(
   [
     () => route.query.q,
-    () => route.query.cohort,
     () => route.query.grade,
     () => route.query.status,
   ],
@@ -115,9 +106,6 @@ function goPage(next: number) {
   </div>
   <form class="filter-bar" @submit.prevent="apply">
     <label>学号或姓名<input v-model="search" type="search" placeholder="输入学号或姓名" /></label>
-    <label class="filter-select">级部
-      <UiSelect :model-value="selectedCohort" label="级部" :options="cohortChoices" @update:model-value="setFilter('cohort', $event)" />
-    </label>
     <label class="filter-select">年级
       <UiSelect :model-value="selectedGrade" label="年级" :options="gradeChoices" @update:model-value="setFilter('grade', $event)" />
     </label>
