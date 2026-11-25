@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onScopeDispose, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onScopeDispose, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   ApiError, createCommand, getHourBatch, getHourBatchRows, listHourBatchesForReview,
@@ -54,9 +54,10 @@ const { data: matches, error: matchesError, refresh: loadMatches } = usePageRead
     }, signal, throwOnError: true })).data.data.items;
   },
 );
-function activate(number: number) {
+async function activate(number: number, focus = false) {
   activeNumber.value = number;
   drafts[number] ??= { decision: '', reason: '' };
+  if (focus) { await nextTick(); document.getElementById('hour-row-heading')?.focus(); }
 }
 function linkIncident(event: Event) {
   if (!selected.value) return;
@@ -98,21 +99,21 @@ async function decide(decision: 'approved' | 'rejected') {
     }];
   });
   if (decision === 'approved' && remarks.length !== (current.misconduct_review_required_count ?? 0)) {
-    problem.value = '请为全部待核实行填写结论与意见。';
+    problem.value = '请为全部待核实行填写结论与意见';
     return;
   }
   if (decision === 'approved' && warnings.value.length && !basis.value.trim()) {
-    problem.value = '请填写警告接受依据。';
+    problem.value = '请填写警告接受依据';
     return;
   }
   if (decision === 'rejected' && !reason.value.trim()) {
-    problem.value = '请在整批意见中填写驳回原因。';
+    problem.value = '请在整批意见中填写驳回原因';
     return;
   }
   const decisionReason = decision === 'approved'
     ? [basis.value.trim(), reason.value.trim()].filter(Boolean).join('\n') : reason.value.trim();
   if ([...decisionReason].length > 2000) {
-    problem.value = '审批意见合计须在 2000 字以内。';
+    problem.value = '审批意见合计须在 2000 字以内';
     return;
   }
   const body: HourBatchReviewDecision = decision === 'rejected'
@@ -128,7 +129,7 @@ async function decide(decision: 'approved' | 'rejected') {
     command.confirmed();
     batch.value = data.data;
     reviewWarnings.reset();
-    result.value = decision === 'approved' ? '批次已批准，正式时长已更新。' : '批次已驳回。';
+    result.value = decision === 'approved' ? '批次已批准，正式时长已更新' : '批次已驳回';
     await loadRows(false);
   } catch (error) {
     if (!live || id.value !== target) return;
@@ -153,7 +154,7 @@ async function decide(decision: 'approved' | 'rejected') {
       @update:model-value="setQueue({ status: $event, page: 1 })" />
     <p v-if="queueError" role="alert">{{ queueError }} <button @click="loadQueue()">重读队列</button></p>
     <p v-else-if="queueLoading" role="status">正在读取时长批次…</p>
-    <p v-else-if="!queue?.total">当前条件下没有时长批次。</p>
+    <p v-else-if="!queue?.total">当前条件下没有时长批次</p>
     <template v-else>
       <div class="entry-list reading-area">
         <RouterLink v-for="row in queue.items" :key="row.id" :to="{ path: '/hours/' + row.id, query: route.query }">
@@ -180,8 +181,8 @@ async function decide(decision: 'approved' | 'rejected') {
         <p v-if="batch.source_description">批次说明：{{ batch.source_description }}</p>
         <p v-if="batch.reviewed_at">完成于 {{ beijing(batch.reviewed_at) }}<span v-if="batch.decision_reason"> · {{ batch.decision_reason }}</span></p>
       </header>
+      <p><strong>全批 {{ batch.row_count ?? 0 }} 行 · 预计差额 {{ signed(batch.projected_delta_hours) }} 小时</strong></p>
       <div class="page-actions review-tools">
-        <strong>全批 {{ batch.row_count ?? 0 }} 行 · 预计差额 {{ signed(batch.projected_delta_hours) }} 小时</strong>
         <StatusFilter label="原表行范围" :model-value="only ? 'pending' : 'all'"
           :options="{ all: '全部', pending: '待核实行' }" @update:model-value="only = $event === 'pending'" />
         <label class="size">每页
@@ -190,29 +191,27 @@ async function decide(decision: 'approved' | 'rejected') {
       </div>
       <p v-if="rowsError" role="alert">{{ rowsError }} <button @click="loadRows()">重读明细</button></p>
       <p v-else-if="rowsLoading" role="status">正在读取原表行…</p>
-      <p v-else-if="!rows.length">当前条件下没有明细。</p>
+      <p v-else-if="!rows.length">当前条件下没有明细</p>
       <div v-if="rows.length" class="scroll-table" tabindex="0" aria-label="原表行审核明细">
         <table>
-          <thead><tr><th>原表行</th><th>姓名与学号</th><th>服务日期</th><th>动作</th><th>原值 → 新值（小时）</th><th>获批安排</th><th>备注</th><th>违纪上报与结论</th></tr></thead>
-          <tbody><tr v-for="row in rows" :key="row.row_number" :class="{ selected: row.row_number === activeNumber }">
+          <thead><tr><th>原表行</th><th>姓名与学号</th><th>服务日期</th><th>动作</th><th>原值 → 新值（小时）</th><th>行详情</th><th>违纪上报与结论</th></tr></thead>
+          <tbody><template v-for="row in rows" :key="row.row_number"><tr :class="{ selected: row.row_number === activeNumber }">
             <th scope="row">
               <button v-if="row.misconduct_requires_review && canDecide" :aria-label="'核实原表第' + row.row_number + '行'"
-                :aria-pressed="row.row_number === activeNumber" @click="activate(row.row_number)">{{ row.row_number }}</button>
+                :aria-pressed="row.row_number === activeNumber" @click="activate(row.row_number, true)">{{ row.row_number }}</button>
               <span v-else>{{ row.row_number }}</span>
             </th>
             <td>{{ row.student_name }}<small>{{ row.student_no }}</small></td><td>{{ row.service_date }}</td>
             <td>{{ actions[row.action] }}</td><td>{{ row.previous_hours ?? '—' }} → {{ row.credited_hours ?? '—' }}</td>
-            <td>版本 {{ row.bound_schedule_revision ?? '—' }}</td><td class="long-text">{{ row.remark || '—' }}</td>
+            <td><details><summary>查看安排与备注</summary><div class="long-text">获批版本 {{ row.bound_schedule_revision ?? '—' }}<p>{{ row.remark || '无备注' }}</p></div></details></td>
             <td>{{ row.misconduct_reported ? misconductLabels[row.misconduct_reported] : '—' }}
               <small v-if="row.misconduct_review">{{ row.misconduct_review.decision === 'confirmed' ? '属实' : '不成立' }} · {{ row.misconduct_review.reason }}</small>
               <small v-else-if="row.misconduct_requires_review">{{ drafts[row.row_number]?.reason.trim() && drafts[row.row_number]?.decision ? '已填写' : '待核实' }}</small>
             </td>
-          </tr></tbody>
-        </table>
-      </div>
-      <Pager v-if="detail && detail.total > size" :page="page" :size="size" :total="detail.total" @change="page = $event" />
-      <section v-if="canDecide && active && selected" class="verify">
-        <div class="page-title"><h2>原表第 {{ active.row_number }} 行核实</h2></div>
+          </tr>
+          <tr v-if="canDecide && active?.row_number === row.row_number && selected"><td colspan="7">
+<section class="verify">
+        <div class="page-title"><h2 id="hour-row-heading" tabindex="-1">原表第 {{ active.row_number }} 行核实</h2></div>
         <p><strong>{{ active.student_name }}</strong> · {{ active.remark }}</p>
         <fieldset :disabled="busy">
           <legend>核实结论</legend>
@@ -234,6 +233,11 @@ async function decide(decision: 'approved' | 'rejected') {
         </label>
         <p v-if="matchesError" role="alert">{{ matchesError }} <button @click="loadMatches()">重读已确认异常</button></p>
       </section>
+          </td></tr></template></tbody>
+        </table>
+      </div>
+      <Pager v-if="detail && detail.total > detail.page_size" :page="page" :size="detail.page_size" :total="detail.total" @change="page = $event" />
+
       <HourWarnings :warnings="warnings" />
       <p v-if="result" role="status">{{ result }}</p>
       <p v-if="problem" role="alert">{{ problem }}</p>
@@ -250,7 +254,7 @@ async function decide(decision: 'approved' | 'rejected') {
           <button :disabled="busy" @click="decide('rejected')">驳回整批</button>
         </div>
       </footer>
-      <p v-else-if="batch.status === 'pending_review'">请由另一位审核人处理。</p>
+      <p v-else-if="batch.status === 'pending_review'">请由另一位审核人处理</p>
     </template>
   </article>
 </template>
@@ -262,7 +266,7 @@ async function decide(decision: 'approved' | 'rejected') {
 .scroll-table th:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
 .scroll-table small { display: block; }
 .long-text { min-width: 9rem; max-width: 22rem; white-space: normal; }
-.verify { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; margin-block: 20px; padding: 14px; }
+.verify { width:min(100%, calc(100vw - 72px), var(--form-width)); white-space:normal; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; margin-block: 20px; padding: 14px; }
 .verify fieldset { display: flex; gap: 18px; }
 .review-field { display: grid; gap: 6px; max-width: 55rem; margin-block: 12px; }
 .review-field textarea { width: 100%; }

@@ -39,13 +39,13 @@ const { data: group, error: detailError, loading: detailLoading, refresh: loadGr
     if (!id.value) return;
     const result = (await getHourCorrectionGroup({ path: { id: id.value }, signal, throwOnError: true })).data.data;
     if (!props.admin && !result.items.some((row) => row.source_record.activity_id === activityId.value || row.target_activity_id === activityId.value))
-      throw new Error('该修复组不涉及当前活动。');
+      throw new Error('该修复组不涉及当前活动');
     return result;
   },
 );
 const listQuery = computed(() => ({ page: route.query.page, group_page: route.query.group_page, group_status: route.query.group_status }));
 function saved(next: HourCorrectionGroup) {
-  savedMessage.value = '修复组已提交审核。';
+  savedMessage.value = '修复组已提交审核';
   void router.push({ path: base.value + '/' + next.id, query: listQuery.value });
   void loadQueue();
 }
@@ -68,7 +68,7 @@ async function act(decision: 'approved' | 'rejected' | 'withdrawn') {
   problem.value = ''; savedMessage.value = '';
   const note = reason.value.trim();
   if (!note && (decision !== 'approved' || warnings.value.length)) {
-    problem.value = '请填写处理原因或警告接受依据。'; return;
+    problem.value = '请填写处理原因或警告接受依据'; return;
   }
   const path = { id: current.id };
   busy.value = true;
@@ -88,7 +88,7 @@ async function act(decision: 'approved' | 'rejected' | 'withdrawn') {
     }
     if (!live || id.value !== current.id) return;
     command.confirmed(); group.value = next; reviewWarnings.reset();
-    savedMessage.value = decision === 'approved' ? '修复组已批准，源账与目标账已同步更新。' : '修复组' + labels[next.status] + '。';
+    savedMessage.value = decision === 'approved' ? '修复组已批准，源账与目标账已同步更新' : '修复组' + labels[next.status];
     await loadQueue(false);
   } catch (error) {
     if (!live || id.value !== current.id) return;
@@ -123,7 +123,7 @@ async function act(decision: 'approved' | 'rejected' | 'withdrawn') {
         </div>
         <p v-if="listError" role="alert">{{ listError }} <button @click="loadQueue()">重读修复列表</button></p>
         <p v-else-if="listLoading && !queue" role="status">正在读取修复列表…</p>
-        <p v-else-if="!queue?.total">当前没有修复申请。</p>
+        <p v-else-if="!queue?.total">当前没有修复申请</p>
         <div v-else class="entry-list">
           <RouterLink v-for="item in queue.items" :key="item.id" :to="{ path: base + '/' + item.id, query: listQuery }"
             :class="{ selected: item.id === id }">

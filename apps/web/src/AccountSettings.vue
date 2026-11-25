@@ -15,9 +15,9 @@ async function submit() {
     notice.value = '';
     await changeOwnPassword(current.value, next.value);
     current.value = next.value = '';
-    notice.value = '密码已更改。';
+    notice.value = '密码已更改';
   } catch (e) {
-    error.value = e instanceof ApiError && e.status ? e.message : '改密结果未确认，请重新登录核对。';
+    error.value = e instanceof ApiError && e.status ? e.message : '改密结果未确认，请重新登录核对';
   } finally {
     busy.value = false;
   }

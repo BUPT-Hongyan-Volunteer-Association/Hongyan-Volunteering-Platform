@@ -13,18 +13,28 @@ import PersonalPage from './PersonalPage.vue';
 import ActivityNotices from './notices/ActivityNotices.vue';
 import MyNotices from './notices/MyNotices.vue';
 import SchedulePage from '@hongyan/ui/SchedulePage.vue';
+export const studentNav = [
+  { to: '/', label: '活动', icon: 'Calendar' },
+  { to: '/registrations', label: '我的报名', icon: 'Tickets' },
+  { to: '/notices', label: '通知', icon: 'Bell' },
+  { to: '/mine', label: '我的', icon: 'User' },
+] as const;
+export const managedNav = [
+  { to: '/managed', label: '我的管理活动', icon: 'FolderOpened' },
+  { to: '/managed-schedule', label: '管理日程', icon: 'Clock' },
+] as const;
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', component: PublicActivities, meta: { profile: true } },
-    { path: '/activities/:id', component: PublicActivities, meta: { profile: true } },
-    { path: '/managed', component: ManagedActivities, meta: { organizer: true, profile: true } },
-    { path: '/managed/new', component: ActivityEditor, meta: { organizer: true } },
+    { path: '/', component: PublicActivities, meta: {title: '活动', nav: '/',  profile: true } },
+    { path: '/activities/:id', component: PublicActivities, meta: {title: '活动详情', nav: '/',  profile: true } },
+    { path: '/managed', component: ManagedActivities, meta: {title: '我的管理活动', nav: '/managed',  organizer: true, profile: true } },
+    { path: '/managed/new', component: ActivityEditor, meta: {title: '新建活动', nav: '/managed',  organizer: true } },
     {
       path: '/managed/:id',
       name: 'managed-overview',
       component: ActivityWorkspace,
-      meta: { organizer: true, profile: true },
+      meta: {title: '活动工作区', nav: '/managed',  organizer: true, profile: true },
       children: [
         {
           path: ':area(requests)/:item?',
@@ -33,7 +43,7 @@ export const router = createRouter({
           props: route => ({ activityId: String(route.params.id), requestId: route.params.item || undefined }),
           meta: { area: 'roster' },
         },
-        { path: 'edit', name: 'activity-edit', component: ActivityEditor },
+        { path: 'edit', name: 'activity-edit', component: ActivityEditor, meta: { area: 'edit' } },
         { path: 'notices/:item?', name: 'activity-notices', component: ActivityNotices, meta: { area: 'notices' } },
         { path: 'roster', name: 'roster', component: Roster, meta: { area: 'roster' } },
         { path: 'attendance', name: 'activity-attendance', component: AttendanceRecords, meta: { area: 'attendance' } },
@@ -49,49 +59,45 @@ export const router = createRouter({
       path: '/schedule',
       component: SchedulePage,
       props: { scope: 'public' },
-      meta: { studentSchedule: true },
+      meta: {title: '活动日程', nav: '/',  studentSchedule: true },
     },
     {
       path: '/mine/schedule',
       component: SchedulePage,
       props: { scope: 'mine' },
-      meta: { personal: true, studentSchedule: true },
+      meta: {title: '活动日程', nav: '/mine',  personal: true, studentSchedule: true },
     },
     {
       path: '/managed-schedule',
       component: SchedulePage,
       props: { scope: 'managed' },
-      meta: { organizer: true },
+      meta: {title: '管理日程', nav: '/managed-schedule',  organizer: true },
     },
-    { path: '/mine', component: PersonalPage, meta: { profile: true, personal: true } },
-    { path: '/mine/settings', component: () => import('./AccountSettings.vue'), meta: { profile: true, personal: true } },
-    {
-      path: '/mine/example-activity',
-      redirect: '/registrations',
-    },
+    { path: '/mine', component: PersonalPage, meta: {title: '我的', nav: '/mine',  profile: true, personal: true } },
+    { path: '/mine/settings', component: () => import('./AccountSettings.vue'), meta: {title: '账号管理', nav: '/mine',  profile: true, personal: true } },
     {
       path: '/registrations/:item?',
       name: 'registrations',
       component: MyRegistrations,
-      meta: { personal: true },
+      meta: {title: '我的报名', nav: '/registrations',  personal: true },
     },
     {
       path: '/notices/:item?',
       name: 'notices',
       component: MyNotices,
-      meta: { personal: true },
+      meta: {title: '通知', nav: '/notices',  personal: true },
     },
     {
       path: '/mine/hours/:item?',
       name: 'hours',
       component: () => import('./hours/MyHours.vue'),
-      meta: { personal: true },
+      meta: {title: '我的时长', nav: '/mine',  personal: true },
     },
     {
       path: '/mine/feedback/:item?',
       name: 'feedback',
       component: () => import('./hours/MyFeedback.vue'),
-      meta: { personal: true },
+      meta: {title: '本人记录与反馈', nav: '/mine',  personal: true },
     },
   ],
 });

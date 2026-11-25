@@ -1,43 +1,26 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import { listActivityReviews, listAppeals, listHourBatchesForReview, listHourCorrectionGroups, listIncidentsForReview,
-  type ActivityReview } from '@hongyan/contracts';
+import { computed } from 'vue';
+import { navigation as nav } from './navigation';
+import { listActivityReviews, listAppeals, listHourBatchesForReview, listHourCorrectionGroups, listIncidentsForReview } from '@hongyan/contracts';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import { usePageRead } from '@hongyan/ui/usePageRead';
 const tasks = [
-  { to: '/hours', label: '时长批次', read: (signal: AbortSignal) =>
+  { ...nav.hours, label: '时长批次', read: (signal: AbortSignal) =>
     listHourBatchesForReview({ query: { status: 'pending_review', page_size: 1 }, signal, throwOnError: true }) },
-  { to: '/manage/corrections?group_status=pending_review', label: '错帐修复', read: (signal: AbortSignal) =>
+  { ...nav.corrections, to: nav.corrections.to + '?group_status=pending_review', read: (signal: AbortSignal) =>
     listHourCorrectionGroups({ query: { status: 'pending_review', page_size: 1 }, signal, throwOnError: true }) },
-  { to: '/manage/incidents', label: '异常复核', read: (signal: AbortSignal) =>
+  { ...nav.incidents, read: (signal: AbortSignal) =>
     listIncidentsForReview({ query: { status: 'pending', page_size: 1 }, signal, throwOnError: true }) },
-  { to: '/manage/appeals?appeal_status=pending', label: '申诉与更正', read: (signal: AbortSignal) =>
+  { ...nav.appeals, to: nav.appeals.to + '?appeal_status=pending', read: (signal: AbortSignal) =>
     listAppeals({ query: { status: 'pending', page_size: 1 }, signal, throwOnError: true }) },
 ];
 const { data: counts, error: workError, refresh: loadWork } = usePageRead(() => true, async (signal) =>
   Promise.all(tasks.map(async (item) => (await item.read(signal)).data.data.total)),
 );
-const rows = ref<ActivityReview[]>([]);
-const total = ref(0);
-const busy = ref(true);
-const error = ref('');
-async function load() {
-  busy.value = true;
-  error.value = '';
-  rows.value = [];
-  try {
-    const response = (
-      await listActivityReviews({ query: { status: 'pending', page_size: 3 }, throwOnError: true })
-    ).data.data;
-    rows.value = response.items;
-    total.value = response.total;
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '待审队列读取失败';
-  } finally {
-    busy.value = false;
-  }
-}
-onMounted(load);
+const { data: reviewPage, loading: busy, error, refresh: load } = usePageRead(() => true, async signal =>
+  (await listActivityReviews({ query: { status: 'pending', page_size: 3 }, signal, throwOnError: true })).data.data);
+const rows = computed(() => reviewPage.value?.items ?? []);
+const total = computed(() => reviewPage.value?.total ?? 0);
 </script>
 
 <template>
@@ -49,12 +32,12 @@ onMounted(load);
           <UiIcon name="DocumentChecked" />
           <h2>活动待审</h2>
         </div>
-        <RouterLink class="button compact" to="/reviews"
+        <RouterLink class="button compact" :to="nav.reviews.to"
           >查看活动审核队列<UiIcon name="ArrowRight"
         /></RouterLink>
       </div>
       <p v-if="busy" role="status">正在读取待审版本…</p>
-      <p v-else-if="error" role="alert">{{ error }} <button @click="load">重试</button></p>
+      <p v-else-if="error" role="alert">{{ error }} <button @click="load()">重试</button></p>
       <template v-else>
         <div class="queue-count" :class="{ empty: !total }">
           <span class="state-chip" v-if="total">待审 {{ total }} 项</span

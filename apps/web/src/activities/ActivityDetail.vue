@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import UiIcon, { type IconName } from '@hongyan/ui/UiIcon.vue';
-import { activityTypes as types, activityContacts, resultDate, serviceTime, localDateTime as date } from '@hongyan/ui/activityDisplay';
+import { activityTypes as types, serviceTime, localDateTime as date } from '@hongyan/ui/activityDisplay';
 import {
   applyForActivity,
   createCommand,
@@ -97,18 +97,18 @@ const conditions: [keyof Activity, string, IconName][] = [
 <template>
   <article class="activity-detail">
     <div class="detail-top">
-      <RouterLink
+      <RouterLink class="button compact"
         :to="noticeReturn || registrationReturn || scheduleReturn || { path: '/', query: $route.query }"
         :aria-label="
           noticeReturn ? '返回通知详情' : registrationReturn ? (/^\/registrations\//.test(registrationReturn) ? '返回报名详情' : '返回我的报名') : scheduleReturn ? '返回日程' : '返回活动列表'
         "
         ><UiIcon name="ArrowLeft" />活动详情</RouterLink
-      ><RouterLink v-if="showRegistrations" to="/registrations">我的报名</RouterLink>
+      ><RouterLink class="button compact" v-if="showRegistrations" to="/registrations">我的报名</RouterLink>
     </div>
     <p v-if="pendingNotices" class="notice-callout">
       <UiIcon name="Bell" />
       本活动有 {{ pendingNotices }} 条通知待确认，
-      <RouterLink :to="{ path: '/notices', query: { pending: '1', activity_id: activity.id } }">去查看并确认</RouterLink>
+      <RouterLink class="button compact" :to="{ path: '/notices', query: { pending: '1', activity_id: activity.id } }">去查看并确认</RouterLink>
     </p>
     <div v-if="activity.schedule" class="detail-columns">
       <div class="detail-intro">
@@ -189,8 +189,8 @@ const conditions: [keyof Activity, string, IconName][] = [
         </section>
         <aside class="joining">
           <h2>报名须知</h2>
-          <p>本活动统一报名，录取后查看入群方式。</p>
-          <p v-if="activity.schedule.schedule_type === 'weekly'">每周参加报名在活动群内完成。</p>
+          <p>本活动统一报名，录取后查看入群方式</p>
+          <p v-if="activity.schedule.schedule_type === 'weekly'">每周参加报名在活动群内完成</p>
         </aside>
         <details v-if="canApply" class="apply-statement">
           <summary>报名说明（选填）</summary>
@@ -201,7 +201,7 @@ const conditions: [keyof Activity, string, IconName][] = [
         <details
           v-if="
             activity.registration_opens_at ||
-            resultDate(activity) ||
+            activity.result_expected_date ||
             activity.selection_text ||
             activity.hours_rule_text
           "
@@ -212,7 +212,7 @@ const conditions: [keyof Activity, string, IconName][] = [
               ><dt>录取说明</dt>
               <dd>{{ activity.selection_text }}</dd></template
             >
-            <template v-if="activity.hours_import_date || activity.hours_import_expected_at"><dt>预计时长导入日期</dt><dd>{{ activity.hours_import_date || date(activity.hours_import_expected_at!).split(" ")[0] }}</dd></template>
+            <template v-if="activity.hours_import_date"><dt>预计时长导入日期</dt><dd>{{ activity.hours_import_date }}</dd></template>
             <template v-if="activity.hours_rule_text"
               ><dt>时长认定</dt>
               <dd>{{ activity.hours_rule_text }}</dd></template
@@ -221,9 +221,9 @@ const conditions: [keyof Activity, string, IconName][] = [
               ><dt>报名开放</dt>
               <dd>{{ date(activity.registration_opens_at) }}</dd></template
             >
-            <template v-if="resultDate(activity)"
+            <template v-if="activity.result_expected_date"
               ><dt>结果公布</dt>
-              <dd>{{ resultDate(activity) }}</dd></template
+              <dd>{{ activity.result_expected_date }}</dd></template
             >
           </dl>
         </details>
@@ -239,14 +239,13 @@ const conditions: [keyof Activity, string, IconName][] = [
         v-else-if="!activity.my_registration_status && !canApply && activity.registration_phase"
         >{{ phases[activity.registration_phase] }}</small
       >
-      <button v-if="activityContacts(activity).length || activity.contact_text" class="contact-btn" @click="contact?.showModal()">
+      <button v-if="activity.contacts?.length" class="contact-btn" @click="contact?.showModal()">
         <UiIcon name="Message" />联系负责人
       </button>
     </footer>
     <dialog ref="contact" aria-labelledby="contact-title">
       <h2 id="contact-title">联系负责人</h2>
-      <p v-for="(value,index) in activityContacts(activity)" :key="index">{{ value }}</p>
-      <p v-if="activity.contact_text">{{ activity.contact_text }}</p>
+      <p v-for="(value,index) in activity.contacts" :key="index">{{ value }}</p>
       <form method="dialog"><button autofocus>关闭</button></form>
     </dialog>
   </article>
@@ -456,11 +455,11 @@ dialog button {
   gap: 8px;
   padding: 10px 14px;
   margin: 0 0 16px;
-  border: 1px solid var(--line, #dfe5ef);
-  border-radius: var(--radius, 8px);
-  background: var(--surface-muted, #f5f8ff);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 .notice-callout a {
-  text-decoration: underline;
+  background-color: var(--brand-tint);
 }
 </style>

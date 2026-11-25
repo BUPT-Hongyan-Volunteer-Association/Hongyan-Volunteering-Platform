@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { studentNav, managedNav } from './router';
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import type { Profile } from '@hongyan/contracts';
@@ -10,37 +11,9 @@ import BrandName from '@hongyan/ui/BrandName.vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 
 const route = useRoute();
-const studentNav = [
-  { to: '/', label: '活动', icon: 'Calendar' },
-  { to: '/registrations', label: '我的报名', icon: 'Tickets' },
-  { to: '/notices', label: '通知', icon: 'Bell' },
-  { to: '/mine', label: '我的', icon: 'User' },
-] as const;
-const managedNav = [
-  { to: '/managed', label: '我的管理活动', icon: 'FolderOpened' },
-  { to: '/managed/new', label: '新建活动', icon: 'Plus' },
-  { to: '/managed-schedule', label: '管理日程', icon: 'Clock' },
-] as const;
 const canManage = (profile: Profile) => profile.roles.includes('organizer');
-function isCurrent(to: string) {
-  if (to === '/')
-    return (
-      route.path === '/' || route.path.startsWith('/activities/') || route.path === '/schedule'
-    );
-  if (to === '/managed' && route.path === '/managed/new') return false;
-  return route.path === to || route.path.startsWith(to + '/');
-}
-const crumb = computed(() => {
-  if (route.path.startsWith('/activities/')) return '活动详情';
-  if (route.path.endsWith('/schedule') || route.path === '/managed-schedule') return '活动日程';
-  if (route.path === '/managed/new') return '新建活动';
-  if (route.path.startsWith('/managed/')) return '活动工作区';
-  if (route.path === '/managed') return '我的管理活动';
-  if (route.path === '/mine/settings') return '账号管理';
-  if (route.path.startsWith('/mine/hours')) return '我的时长';
-  if (route.path.startsWith('/mine/feedback')) return '本人记录与反馈';
-  return studentNav.find((item) => isCurrent(item.to))?.label || '我的';
-});
+const isCurrent = (to: string) => route.meta.nav === to;
+const crumb = computed(() => route.meta.title);
 </script>
 <template>
   <AccountGate v-slot="{ profile, busy, logout }">
@@ -104,10 +77,10 @@ const crumb = computed(() => {
         </header>
         <main class="shell-content">
           <p v-if="$route.meta.organizer && !canManage(profile)" role="alert">
-            当前账号无活动管理权限。
+            当前账号无活动管理权限
           </p>
           <p v-else-if="$route.meta.personal && !hasStudentAccess(profile)" role="alert">
-            当前账号无学生个人页面权限。
+            当前账号无学生个人页面权限
           </p>
           <RouterView v-else v-slot="{ Component }"
             ><component

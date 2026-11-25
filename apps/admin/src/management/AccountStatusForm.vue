@@ -28,7 +28,7 @@ async function submit() {
     const studentId = props.account.student_id;
     if (studentId) {
       const version = props.account.student_version;
-      if (version === undefined) { stale.value = true; error.value = '请重新读取学生档案版本。'; return; }
+      if (version === undefined) { stale.value = true; error.value = '请重新读取学生档案版本'; return; }
       const patch = { ...body, expected_version: version, ...(needsVerification.value && { pilot_scope_verified: verified.value }) };
       const { data } = await updateStudent({ path: { id: studentId }, body: patch,
         headers: command.headers('update_student', studentId, patch), throwOnError: true });
@@ -42,7 +42,7 @@ async function submit() {
     }
   } catch (e) {
     stale.value = e instanceof ApiError && (e.body?.code === 'version_conflict' || e.status === 403 || e.status === 404);
-    error.value = e instanceof ApiError ? e.message : '操作结果未确认，请重试。';
+    error.value = e instanceof ApiError ? e.message : '操作结果未确认，请重试';
   } finally { busy.value = false; }
 }
 </script>
@@ -50,11 +50,11 @@ async function submit() {
 <template>
   <button v-if="!editing" @click="open">{{ action }}账号</button>
   <form v-else class="status-form" @submit.prevent="submit">
-    <fieldset :disabled="stale || busy">
+    <fieldset class="form-section" :disabled="stale || busy">
       <legend>{{ action }}账号 · {{ account.display_name }}（{{ account.username }}）</legend>
-      <p v-if="disabling">{{ self ? '你当前的会话也将退出。' : '' }}停用将撤销该账号的全部登录会话，角色和历史记录保留。</p>
-      <p v-else>{{ account.credential_pending ? '该账号仍待发放登录凭证，启用后暂不可登录。' : '启用后需重新登录，原来的会话继续失效。' }}</p>
-      <p v-if="disabling">若其担任主负责人，请到「活动团队」筛选待接管活动，重新指定主负责人。重新启用后，如负责人资格仍有效，可按届时保留的成员身份继续参与活动。</p>
+      <p v-if="disabling">{{ self ? '你当前的会话也将退出。' : '' }}停用将撤销该账号的全部登录会话，角色和历史记录保留</p>
+      <p v-else>{{ account.credential_pending ? '该账号仍待发放登录凭证，启用后暂不可登录' : '启用后需重新登录，原来的会话继续失效' }}</p>
+      <p v-if="disabling">若其担任主负责人，请到「活动团队」筛选待接管活动，重新指定主负责人。重新启用后，如负责人资格仍有效，可按届时保留的成员身份继续参与活动</p>
       <label v-if="needsVerification" class="verify"><input v-model="verified" type="checkbox" required />已核实该学生仍在学院核定试点范围内</label>
       <label>办理原因<textarea v-model="reason" required rows="2" :maxlength="account.student_id ? 500 : 2000" /></label>
       <div class="page-actions">
@@ -68,10 +68,9 @@ async function submit() {
 </template>
 
 <style scoped>
-.status-form fieldset { min-width:0; display:grid; gap:12px; padding:16px; border:1px solid var(--line); border-radius:var(--radius); }
 legend { font-weight:600; overflow-wrap:anywhere; }
 p { margin:0; }
-label { display:grid; gap:6px; }
+label { display:grid; gap:8px; }
 .verify { display:flex; align-items:center; gap:8px; }
 textarea { min-width:0; }
 </style>

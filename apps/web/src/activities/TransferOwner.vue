@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { computed, ref } from 'vue';
 import { ApiError, createCommand, transferActivityOwner, type Activity, type ActivityMemberList } from '@hongyan/contracts';
 
@@ -26,11 +27,11 @@ async function submit() {
     const status = error instanceof ApiError ? error.status : undefined;
     retrying.value = !status || status >= 500;
     if (retrying.value) {
-      notice.value = '交接结果未确认。点击「重试交接」将使用原请求核对结果。';
+      notice.value = '交接结果未确认。点击「重试交接」将使用原请求核对结果';
     } else {
       if (status !== 404 && status !== 409) emit('target', '');
-      notice.value = status === 404 ? '交接请求未获确认，请核对最新成员名单中的主负责人。'
-        : error instanceof Error ? error.message : '交接失败。';
+      notice.value = status === 404 ? '交接请求未获确认，请核对最新成员名单中的主负责人'
+        : error instanceof Error ? error.message : '交接失败';
       if (status && [401, 403, 404, 409].includes(status)) emit('refresh');
     }
   } finally { saving.value = false; }
@@ -40,14 +41,12 @@ async function submit() {
 <template>
   <details>
     <summary>交接主负责人</summary>
-    <p v-if="!collaborators.length">请先添加一位协作者，再办理交接。</p>
+    <p v-if="!collaborators.length">请先添加一位协作者，再办理交接</p>
     <form v-else @submit.prevent="submit">
-      <label>接任协作者<select v-model="target" required :disabled="saving || retrying">
-        <option disabled value="">请选择协作者</option>
-        <option v-for="person in collaborators" :key="person.account_id" :value="person.account_id">{{ person.display_name }} · {{ person.student_no }}</option>
-      </select></label>
+      <label>接任协作者<UiSelect v-model="target" label="接任协作者" :disabled="saving || retrying"
+        :options="[{ value: '', label: '请选择协作者', disabled: true }, ...collaborators.map(person => ({ value: person.account_id, label: [person.display_name, person.student_no].filter(Boolean).join(' · ') }))]" /></label>
       <template v-if="selected">
-        <p>{{ selected.display_name }} 将成为「{{ activity.title }}」的主负责人。你将保留协作者身份，成员管理权限将移交给对方。</p>
+        <p>{{ selected.display_name }} 将成为「{{ activity.title }}」的主负责人。你将保留协作者身份，成员管理权限将移交给对方</p>
         <label>交接原因<input v-model="reason" required maxlength="500" :disabled="saving || retrying" /></label>
         <button class="primary" :disabled="paused || saving || !reason.trim()">{{ saving ? '正在交接…' : retrying ? '重试交接' : '确认交接' }}</button>
       </template>

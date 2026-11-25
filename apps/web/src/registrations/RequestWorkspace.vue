@@ -36,7 +36,7 @@ const { data: detail, loading: detailLoading, error: detailError, refresh: reloa
       const row = (await read(kind, signal, { request_id: props.requestId })).items[0];
       if (row) return { kind, row };
     }
-    throw new Error('申请不存在或不可见。');
+    throw new Error('申请不存在或不可见');
   }, denied,
 );
 const resolvedKind = computed(() => explicitKind.value ?? detail.value?.kind ?? (props.requestId ? undefined : 'exit'));
@@ -107,7 +107,7 @@ async function decide(decision: 'approved' | 'rejected') {
     });
     command.confirmed();
     if (!mounted || accessAtSubmit !== accessVersion) return;
-    const outcome = requestKinds[kind] + requestStates[decision] + '。';
+    const outcome = requestKinds[kind] + requestStates[decision];
     if (viewVersion === version) {
       feedback.value = outcome;
       reason.value = '';
@@ -143,7 +143,7 @@ async function decide(decision: 'approved' | 'rejected') {
         <div class="page-actions"><span>申请状态</span><UiSelect label="申请状态" :model-value="status" :options="options" @update:model-value="setStatus($event)" /></div>
         <p v-if="listError" role="alert">{{ listError }} <button @click="reviewAgain">重新读取申请</button></p>
         <p v-else-if="loading" role="status">正在读取申请…</p>
-        <p v-else-if="queue && !queue.total">暂无符合条件的{{ requestKinds[kind] }}。</p>
+        <p v-else-if="queue && !queue.total">暂无符合条件的{{ requestKinds[kind] }}</p>
         <div v-else class="entry-list">
           <RouterLink v-for="row in queue?.items" :key="row.id" :aria-current="row.id === requestId ? 'true' : undefined"
             :aria-label="(row.status === 'pending' ? '处理申请' : '查看申请') + ' · ' + row.student_name + ' ' + row.student_no"
@@ -170,7 +170,7 @@ async function decide(decision: 'approved' | 'rejected') {
             <template v-if="detail.row.decision_reason"><dt>处理说明</dt><dd>{{ detail.row.decision_reason }}</dd></template>
           </dl>
           <form v-if="detail.row.status === 'pending'" @submit.prevent="decide('approved')">
-            <p>{{ detail.kind === 'exit' ? '批准后释放该生名额。' : '批准时重新核对余量，成功后占用一个名额。' }}</p>
+            <p>{{ detail.kind === 'exit' ? '批准后释放该生名额' : '批准时重新核对余量，成功后占用一个名额' }}</p>
             <label>处理说明（驳回必填）<textarea v-model="reason" maxlength="2000" rows="2" /></label>
             <div class="page-actions">
               <button class="primary" :disabled="busy || writesPaused || conflict">批准{{ detail.kind === 'exit' ? '退出' : '恢复' }}</button>

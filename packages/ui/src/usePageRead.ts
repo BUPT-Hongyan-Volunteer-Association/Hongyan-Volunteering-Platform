@@ -2,7 +2,7 @@ import { onScopeDispose, ref, shallowRef, watch, type WatchSource } from 'vue';
 import { ApiError } from '@hongyan/contracts';
 
 export const message = (error: unknown) =>
-  error instanceof Error ? error.message : '未能读取数据，请重试。';
+  error instanceof Error ? error.message : '未能读取数据，请重试';
 export const noAccess = (error: unknown) =>
   error instanceof ApiError && [401, 403, 404].includes(error.status ?? 0);
 export function pageNumber(raw: unknown) {

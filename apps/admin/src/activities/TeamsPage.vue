@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { listManagedActivities } from '@hongyan/contracts';
 import { pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
+import UiIcon from '@hongyan/ui/UiIcon.vue';
 import Pager from '@hongyan/ui/Pager.vue';
 
 const query = ref('');
@@ -42,12 +43,15 @@ function changePage(page: number) {
   <p v-if="error" role="alert">{{ error }} <button @click="load()">重试</button></p>
   <p v-else-if="!result" role="status">正在读取活动…</p>
   <template v-else>
-    <p v-if="!result.total">{{ pendingOnly ? '当前筛选范围内没有待接管活动。' : '没有找到匹配的活动。' }}</p>
-    <ul class="activities">
+    <p v-if="!result.total">{{ pendingOnly ? '当前筛选范围内没有待接管活动' : '没有找到匹配的活动' }}</p>
+    <ul class="activities entry-list">
       <li v-for="item in result.items" :key="item.id">
-        <RouterLink :to="{ path: '/manage/teams/' + item.id, query: route.query }">{{ item.title }}</RouterLink>
-        <span class="owner">{{ item.activity_code }} · 主负责人 {{ item.owner_display_name }}</span>
-        <span v-if="item.owner_unavailable" class="state-chip attention">待接管</span>
+        <RouterLink :to="{ path: '/manage/teams/' + item.id, query: route.query }" :aria-label="item.title">
+          <strong>{{ item.title }}</strong>
+          <span class="owner">{{ item.activity_code }} · 主负责人 {{ item.owner_display_name }}</span>
+          <span v-if="item.owner_unavailable" class="state-chip attention">待接管</span>
+          <span class="row-end"><UiIcon name="ArrowRight" /></span>
+        </RouterLink>
       </li>
     </ul>
     <Pager v-if="result.total > result.page_size" :page="result.page" :size="result.page_size" :total="result.total" @change="changePage" />
@@ -55,10 +59,19 @@ function changePage(page: number) {
 </template>
 
 <style scoped>
-.search, li { display:flex; align-items:end; flex-wrap:wrap; gap:12px; }
+.search { display:flex; align-items:end; flex-wrap:wrap; gap:12px; }
 label { display:grid; gap:6px; }
 .pending { display:flex; align-items:center; min-height:44px; }
 .activities { max-width:50rem; padding:0; list-style:none; }
-li { padding:14px 0; border-bottom:1px solid var(--line); justify-content:space-between; }
+.activities > li > a { display:grid; grid-template-columns:minmax(0,1fr) auto auto; }
+.activities .owner { grid-column:1; }
+.activities .row-end { grid-column:3; grid-row:1 / span 2; }
+.activities .state-chip { grid-column:2; grid-row:1 / span 2; }
+@media(min-width:701px) {
+  .activities > li > a { grid-template-columns:minmax(10em,1fr) auto auto auto; }
+  .activities .owner { grid-column:2; }
+  .activities .state-chip { grid-column:3; grid-row:1; }
+  .activities .row-end { grid-column:4; grid-row:1; }
+}
 .owner { color:var(--muted); }
 </style>

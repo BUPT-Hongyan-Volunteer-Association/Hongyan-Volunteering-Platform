@@ -51,10 +51,10 @@ async function submit() {
       </div>
     </template>
     <template #actions="{ row }">
-      <div v-if="row.status === 'current'" class="page-actions">
+      <details v-if="row.status === 'current'"><summary>处理</summary><div class="page-actions">
         <button :disabled="writesPaused || sending" @click="record = row">申请撤销</button>
         <RouterLink class="button" :to="{ path: base + '/corrections', query: { new: '1', source_date: row.service_date, source_record: row.id } }">申请错帐修复</RouterLink>
-      </div>
+      </div></details>
     </template>
   </HourLedger>
   <p v-if="error" role="alert">{{ error }}</p>

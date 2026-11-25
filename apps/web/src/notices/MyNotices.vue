@@ -134,7 +134,7 @@ async function ack(notice: Notice) {
     ackCommand.confirmed();
     window.dispatchEvent(new Event('hongyan-notice-updated'));
     if (route.fullPath === origin) {
-      feedback.value = '已确认收到，负责人可在回执里看到。';
+      feedback.value = '已确认收到，负责人可在回执里看到';
       if (item.value === notice.id) await refreshDetail(false);
     }
   } catch (e) {
@@ -149,9 +149,11 @@ async function ack(notice: Notice) {
     busy.value = false;
   }
 }
+const needsAck = (notice: Notice) => !notice.follow_up_closed && notice.requires_ack && notice.is_current && !notice.acknowledged_at;
 const rows = computed(() =>
   (listing.value?.items || []).map((notice) => ({
     id: notice.id,
+    to: needsAck(notice) ? undefined : { path: '/notices/' + notice.id, query: route.query },
     title: notice.title,
     context: kinds[notice.notice_kind] + ' · 第 ' + notice.information_version + ' 版',
     status: state(notice).label,
@@ -229,16 +231,12 @@ onUnmounted(() => {
             </RouterLink>
           </div>
           <RecordSummaryList v-else-if="rows.length" :records="rows">
-            <template #title="{ row }">
-              <RouterLink :to="{ path: '/notices/' + row.id, query: route.query }">{{
-                row.title
-              }}</RouterLink>
-            </template>
             <template #action="{ row }">
               <div
-                v-if="!row.notice.follow_up_closed && row.notice.requires_ack && row.notice.is_current && !row.notice.acknowledged_at"
-                class="confirm-action"
+                v-if="needsAck(row.notice)"
+                class="confirm-action page-actions"
               >
+                <RouterLink class="button compact" :to="{ path: '/notices/' + row.id, query: route.query }" :aria-label="row.title + ' · 查看通知'">查看通知</RouterLink>
                 <button class="compact" :disabled="busy" @click="ack(row.notice)">确认收到</button>
               </div>
             </template>
@@ -246,12 +244,12 @@ onUnmounted(() => {
           <p v-else role="status">
             {{
               listing.q
-                ? '暂无匹配通知。'
+                ? '暂无匹配通知'
                 : listing.filter === 'pending'
-                  ? '没有待确认的通知。'
+                  ? '没有待确认的通知'
                   : listing.filter === 'unread'
-                    ? '没有未读通知。'
-                    : '暂时没有通知。'
+                    ? '没有未读通知'
+                    : '暂时没有通知'
             }}
           </p>
           <Pager
@@ -317,13 +315,13 @@ onUnmounted(() => {
             </button>
           </div>
           <p v-if="!selected.is_current" class="notice-hint">
-            <template v-if="selected.notice_kind === 'result'">这是当时的报名结果。<RouterLink to="/registrations">查看我的报名</RouterLink></template>
-            <template v-else>这条通知已被同一活动的后续版本替代，可在列表查看最新通知。</template>
+            <template v-if="selected.notice_kind === 'result'">这是当时的报名结果<RouterLink class="button compact" to="/registrations">查看我的报名</RouterLink></template>
+            <template v-else>这条通知已被同一活动的后续版本替代，可在列表查看最新通知</template>
           </p>
         </section>
         <p v-else>
-          未找到可查看的通知。
-          <RouterLink to="/notices">回到通知列表</RouterLink>
+          未找到可查看的通知
+          <RouterLink class="button compact" to="/notices">回到通知列表</RouterLink>
         </p>
       </template>
     </RecordWorkspace>
@@ -332,7 +330,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.confirm-action { display: flex; justify-content: center; flex-basis: 100%; margin-block: 8px; }
+.confirm-action { justify-content: center; flex-basis: 100%; margin-block: 8px; }
 .row-actions {
   display: flex;
   justify-content: center;

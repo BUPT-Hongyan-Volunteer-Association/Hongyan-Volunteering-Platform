@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fileHash } from '@hongyan/ui/files';
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Pager from '@hongyan/ui/Pager.vue';
@@ -40,7 +41,8 @@ const batch = ref<StudentImport>();
 const rows = ref<StudentImportRow[]>([]);
 const rowTotal = ref(0);
 const rowPage = ref(1);
-const rowSize = 100;
+const requestedRows = 100;
+const rowSize = ref(requestedRows);
 const rowFailure = ref<{ page: number; message: string }>();
 let rowRequest = 0;
 const loading = ref(false);
@@ -58,6 +60,8 @@ onUnmounted(() => {
 });
 
 const batchId = computed(() => (route.params.item ? String(route.params.item) : ''));
+const sourceName = computed(() => batchId.value && typeof window.history.state?.importFilename === 'string'
+  ? window.history.state.importFilename : '');
 const statusText = computed(() => (batch.value ? statusLabels[batch.value.status] : ''));
 const canCommit = computed(
   () =>
@@ -70,7 +74,7 @@ const canCommit = computed(
 );
 
 function message(reason: unknown) {
-  return reason instanceof Error ? reason.message : '操作失败，请重试。';
+  return reason instanceof Error ? reason.message : '操作失败，请重试';
 }
 function stopPolling() {
   if (pollTimer) {
@@ -88,6 +92,8 @@ function display(
   }
   return row[field] || row.raw_values?.[field] || '—';
 }
+const showCohort = computed(() => rows.value.some(r => display(r, 'cohort') !== '—'));
+const showCollege = computed(() => rows.value.some(r => display(r, 'college') !== '—'));
 function currentRoute(version: number) {
   return !disposed && version === routeVersion;
 }
@@ -103,11 +109,12 @@ async function loadRows(page: number, serial = loadSerial) {
   try {
     const { data } = await getStudentImportRows({
       path: { id: current.id },
-      query: { page, page_size: rowSize },
+      query: { page, page_size: requestedRows },
       throwOnError: true,
     });
     if (!isCurrent()) return;
     rowPage.value = data.data.page;
+    rowSize.value = data.data.page_size;
     rowTotal.value = data.data.total;
     rows.value = data.data.items;
   } catch (reason) {
@@ -162,7 +169,7 @@ function acceptFile(next: File | undefined) {
   error.value = '';
   if (!next || busy.value) return;
   if (!/\.xlsx$/i.test(next.name) || next.size > 5_242_880) {
-    error.value = '请选择不超过 5 MB 的 .xlsx 学生建档模板。';
+    error.value = '请选择不超过 5 MB 的 .xlsx 学生建档模板';
     return;
   }
   chosenName.value = next.name;
@@ -191,10 +198,7 @@ async function uploadFile(source: File) {
   writeFailure.value = undefined;
   notice.value = '';
   try {
-    const hash = Array.from(
-      new Uint8Array(await crypto.subtle.digest('SHA-256', await source.arrayBuffer())),
-      (byte) => byte.toString(16).padStart(2, '0'),
-    ).join('');
+    const hash = await fileHash(source);
     const headers = command.headers('upload_student_import', '', { file: [source.name, hash] });
     const result = await uploadStudentImport({
       body: { file: source },
@@ -205,7 +209,7 @@ async function uploadFile(source: File) {
     if (!currentRoute(version)) return;
     chosenName.value = '';
     notice.value = '文件已受理，正在校验…';
-    await router.replace({ path: '/manage/imports/' + result.data.data.id });
+    await router.replace({ path: '/manage/imports/' + result.data.data.id, state: { importFilename: source.name } });
   } catch (reason) {
     if (currentRoute(version)) error.value = message(reason);
   } finally {
@@ -230,7 +234,7 @@ async function commit() {
     command.confirmed();
     if (!currentRoute(version)) return;
     batch.value = result.data.data;
-    notice.value = '已确认建档，可在学生档案中查到新学生。';
+    notice.value = '已确认建档，可在学生档案中查到新学生';
     await loadBatch(current.id, { quiet: true });
   } catch (reason) {
     if (!currentRoute(version)) return;
@@ -293,6 +297,7 @@ watch(
   </div>
   <input
     ref="picker"
+    tabindex="-1"
     class="file-input"
     type="file"
     accept=".xlsx"
@@ -300,6 +305,7 @@ watch(
     @change="choose"
   />
   <div
+    v-if="!batchId && !busy"
     class="dropzone reading-area"
     :class="{ dragging, busy }"
     role="button"
@@ -316,6 +322,7 @@ watch(
     <p>{{ busy ? '正在上传…' : dragging ? '松开即上传' : '拖拽文件到此处，或点击选择' }}</p>
     <small v-if="chosenName">{{ chosenName }}</small>
   </div>
+  <p v-if="busy && !batchId" role="status">正在上传 {{ chosenName }}…</p>
   <p v-if="error" role="alert">{{ error }} <button type="button" @click="batchId && loadBatch(batchId)">重试读取</button></p>
   <p v-if="notice" role="status" class="notice">{{ notice }}</p>
   <section v-if="writeFailure" class="conflict-panel" role="alert">
@@ -325,20 +332,22 @@ watch(
         <template v-if="item.row">原表第 {{ item.row }} 行：</template>{{ item.message }}
       </li>
     </ul>
-    <p v-if="writeFailure.details.length">请按原表行号修正文件后重新上传，整批未写入。</p>
+    <p v-if="writeFailure.details.length">请按原表行号修正文件后重新上传，整批未写入</p>
   </section>
   <p v-if="loading && !batch" role="status">正在读取批次…</p>
   <section v-else-if="batch" class="batch-summary reading-area">
     <div class="page-title">
       <h2>批次 {{ batch.id.slice(0, 8) }}</h2>
-      <span class="state-chip" :class="{ attention: batch.status === 'invalid' || batch.status === 'failed', neutral: batch.status === 'validating' }">{{ statusText }}</span>
     </div>
     <dl>
-      <dt>原文件摘要</dt>
-      <dd class="hash">{{ batch.source_hash }}</dd>
+      <template v-if="sourceName"><dt>文件名</dt><dd>{{ sourceName }}</dd></template>
       <dt>数据行</dt>
       <dd>非空 {{ batch.row_count }} 行 · 新建 {{ batch.created_count }} 行 · 跳过 {{ batch.skipped_count }} 行 · 错误 {{ batch.error_count }} 行</dd>
     </dl>
+    <details><summary>技术详情</summary><p class="hash">原文件摘要 {{ batch.source_hash }}</p></details>
+    <button v-if="batch.status !== 'validating'" type="button" :disabled="busy" @click="openPicker">
+      {{ batch.status === 'committed' ? '开始新批次' : '重新选择文件' }}
+    </button>
     <p v-if="batch.error_message" role="alert">{{ batch.error_message }}</p>
     <div v-if="canCommit" class="page-actions">
       <button class="primary" type="button" :disabled="busy || loading" @click="commit">
@@ -350,9 +359,9 @@ watch(
         {{ busy ? '正在重试…' : '重试原批次' }}
       </button>
     </div>
-    <p v-else-if="batch.status === 'invalid'" class="notice">请按原表行号修正文件后重新上传；内容有误的批次不能确认。</p>
+    <p v-else-if="batch.status === 'invalid'" class="notice">请按原表行号修正文件后重新上传；内容有误的批次不能确认</p>
     <p v-else-if="batch.status === 'committed'" class="notice">
-      已建档。可在 <RouterLink to="/manage/students">学生档案</RouterLink> 查看新学生。
+      已建档 <RouterLink class="button compact" to="/manage/students">查看学生档案</RouterLink>
     </p>
   </section>
   <p v-if="batch && rowFailure" role="alert">
@@ -369,10 +378,10 @@ watch(
             <th scope="col">原表行</th>
             <th scope="col">学号</th>
             <th scope="col">姓名</th>
-            <th scope="col">级部</th>
+            <th v-if="showCohort" scope="col">级部</th>
             <th scope="col">年级</th>
             <th scope="col">班级</th>
-            <th scope="col">学院</th>
+            <th v-if="showCollege" scope="col">学院</th>
             <th scope="col">处理</th>
             <th scope="col">错误</th>
           </tr>
@@ -387,10 +396,10 @@ watch(
             <th scope="row">{{ row.row_number }}</th>
             <td>{{ display(row, 'student_no') }}</td>
             <td>{{ display(row, 'name') }}</td>
-            <td>{{ display(row, 'cohort') }}</td>
+            <td v-if="showCohort">{{ display(row, 'cohort') }}</td>
             <td>{{ display(row, 'grade') }}</td>
             <td>{{ display(row, 'class_name') }}</td>
-            <td>{{ display(row, 'college') }}</td>
+            <td v-if="showCollege">{{ display(row, 'college') }}</td>
             <td>
               <span class="state-chip" :class="{ attention: row.action === 'error', neutral: row.action === 'skip_identical' }">
                 {{ actionLabels[row.action as keyof typeof actionLabels] }}

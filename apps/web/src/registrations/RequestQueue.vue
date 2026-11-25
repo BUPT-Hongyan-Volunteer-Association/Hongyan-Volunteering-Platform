@@ -54,8 +54,8 @@ async function act(action: 'create' | 'withdraw' | 'withdrawRegistration', row?:
     command.confirmed();
     if (!mounted || registration.id !== props.registration.id) return;
     reason.value = '';
-    emit('changed', action === 'withdrawRegistration' ? '已撤回报名。' :
-      requestKinds[type] + (action === 'create' ? '已提交。' : '已撤回。'));
+    emit('changed', action === 'withdrawRegistration' ? '已撤回报名' :
+      requestKinds[type] + (action === 'create' ? '已提交' : '已撤回'));
   } catch (e) {
     if (!mounted || registration.id !== props.registration.id) return;
     error.value = message(e);
@@ -76,11 +76,11 @@ async function act(action: 'create' | 'withdraw' | 'withdrawRegistration', row?:
     <template v-else-if="queue">
       <button v-if="registration.can_withdraw" :disabled="paused" @click="act('withdrawRegistration')">撤回报名</button>
       <form v-if="canApply" @submit.prevent="act('create')">
-        <p>{{ exit ? '退出申请待处理时仍保留名额，批准后释放。' : '恢复申请待处理时不占名额，批准后恢复原报名。' }}</p>
+        <p>{{ exit ? '退出申请待处理时仍保留名额，批准后释放' : '恢复申请待处理时不占名额，批准后恢复原报名' }}</p>
         <label>申请原因<textarea v-model="reason" rows="3" required maxlength="2000" /></label>
         <button class="primary" :disabled="paused || !reason.trim()">申请{{ exit ? '退出整项活动' : '恢复报名' }}</button>
       </form>
-      <p v-if="!queue.items.length" class="empty">暂无符合条件的{{ requestKinds[kind] }}。</p>
+      <p v-if="!queue.items.length" class="empty">暂无符合条件的{{ requestKinds[kind] }}</p>
       <article v-for="row in queue.items" :key="row.id">
         <div class="page-title"><strong>{{ requestKinds[kind] }}</strong><span class="state-chip">{{ requestStates[row.status] }}</span></div>
         <p>{{ row.reason }}</p><small v-if="row.created_at">{{ localDateTime(row.created_at) }}</small>

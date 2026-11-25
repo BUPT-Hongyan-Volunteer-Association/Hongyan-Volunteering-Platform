@@ -1,15 +1,16 @@
 <script setup lang="ts" generic="T extends SummaryRecord">
-import type { SummaryRecord } from './preview';
+import UiIcon from './UiIcon.vue';
+import type { SummaryRecord } from './records';
 defineProps<{ records: T[] }>();
 </script>
 
 <template>
   <ul class="summary-list">
-    <li v-for="row in records" :key="row.id" :class="{ unread: row.unread }">
+    <li v-for="row in records" :key="row.id" :class="{ unread: row.unread, linked: !!row.to }">
       <div class="summary-name">
         <div class="page-title">
           <strong
-            ><slot name="title" :row="row">{{ row.title }}</slot></strong
+            ><RouterLink v-if="row.to" class="summary-link" :to="row.to" :aria-label="row.title">{{ row.title }} <UiIcon name="ArrowRight" /></RouterLink><slot v-else name="title" :row="row">{{ row.title }}</slot></strong
           ><span class="state-chip" :class="{ neutral: !row.unread }">{{ row.status }}</span>
         </div>
         <small v-if="row.context">{{ row.context }}</small>
@@ -33,12 +34,18 @@ defineProps<{ records: T[] }>();
   display: grid;
   grid-template-columns: minmax(12rem, 1fr) minmax(0, 1.8fr) auto;
   align-items: center;
-  gap: 8px 24px;
+  gap: var(--space-8) var(--space-24);
   border-bottom: 1px solid var(--line);
-  padding: 14px 8px 14px 26px;
+  padding: var(--space-16) var(--space-8) var(--space-16) var(--space-24);
   position: relative;
   overflow-wrap: anywhere;
 }
+.linked:hover, .linked:focus-within { background: var(--surface); }
+.summary-link { color: var(--ink); }
+.summary-link .ui-icon { width: 15px; }
+.summary-link::after { content: ''; position: absolute; inset: 0; }
+.linked .summary-name { position: static; }
+.linked.unread .summary-name::before { left: 8px; top: 21px; }
 .summary-name {
   position: relative;
 }
@@ -55,7 +62,7 @@ defineProps<{ records: T[] }>();
 .summary-name small,
 time {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 .summary-name small {
   display: block;
@@ -68,7 +75,7 @@ time {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: var(--space-4) var(--space-12);
 }
 time {
   font-variant-numeric: tabular-nums;

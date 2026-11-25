@@ -48,7 +48,7 @@ async function decide(kind: 'confirmed' | 'rejected' | 'revoked') {
       await reviewIncident({ path, body, headers: command.headers('review_incident', row.id, body), throwOnError: true });
     }
     command.confirmed(); selected.value = undefined;
-    result.value = '异常记录' + labels[kind] + '。';
+    result.value = '异常记录' + labels[kind];
     await refresh();
   } catch (error) {
     if (noAccess(error) || error instanceof ApiError && error.status === 409) {
@@ -68,7 +68,7 @@ async function decide(kind: 'confirmed' | 'rejected' | 'revoked') {
     <p v-if="result" role="status">{{ result }}</p>
     <p v-if="error" role="alert">{{ error }} <button @click="refresh()">重读异常记录</button></p>
     <p v-else-if="loading" role="status">正在读取异常记录…</p>
-    <p v-else-if="!data?.total">没有异常记录。</p>
+    <p v-else-if="!data?.total">没有异常记录</p>
     <ul v-else class="incident-rows">
       <li v-for="row in data.items" :key="row.id">
         <div class="page-title"><strong>{{ row.occurred_at ? beijing(row.occurred_at) : row.service_date }}</strong><span class="state-chip">{{ labels[row.status] }}</span></div>
@@ -94,7 +94,7 @@ async function decide(kind: 'confirmed' | 'rejected' | 'revoked') {
       </li>
     </ul>
     <p v-if="problem" role="alert">{{ problem }}</p>
-    <Pager v-if="data && data.total > size" :page="page" :size="size" :total="data.total" @change="page = $event" />
+    <Pager v-if="data && data.total > data.page_size" :page="page" :size="data.page_size" :total="data.total" @change="page = $event" />
   </section>
 </template>
 <style scoped>

@@ -17,6 +17,7 @@ import ActivitySnapshot from '@hongyan/ui/ActivitySnapshot.vue';
 import { fieldLabel, fieldValue } from '@hongyan/ui/activityFields';
 import { localDateTime, reviewLabels } from '@hongyan/ui/activityDisplay';
 import RecordWorkspace from '@hongyan/ui/RecordWorkspace.vue';
+import { pageNumber } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 const props = defineProps<{ profile: Profile }>();
 const route = useRoute(),
@@ -24,6 +25,7 @@ const route = useRoute(),
   review = ref<ActivityReview>(),
   rows = ref<ActivityReview[]>([]),
   total = ref(0),
+  pageSize = ref(20),
   busy = ref(false),
   loading = ref(false),
   currentPending = ref(false),
@@ -33,7 +35,7 @@ const route = useRoute(),
 const status = computed(
   () => String(route.query.status || 'pending') as 'pending' | 'approved' | 'rejected',
 );
-const page = computed(() => Number(route.query.page || 1));
+const page = computed(() => pageNumber(route.query.page));
 const windowScroll = () => window.scrollY;
 function scheduleReturn() {
   const origin = window.history.state?.scheduleReturn;
@@ -65,6 +67,7 @@ async function loadQueue() {
     if (turn === queueSerial) {
       rows.value = data.data.items;
       total.value = data.data.total;
+      pageSize.value = data.data.page_size;
     }
   } catch (e) {
     if (turn === queueSerial)
@@ -141,7 +144,7 @@ async function decide(decision: 'approved' | 'rejected') {
   } catch (e) {
     if (route.fullPath === from) {
       error.value = e instanceof Error ? e.message : '提交失败';
-      if (e instanceof ApiError && !e.body) error.value = '审核结果尚未确认，可用相同内容重试。';
+      if (e instanceof ApiError && !e.body) error.value = '审核结果尚未确认，可用相同内容重试';
       if (e instanceof ApiError && [403, 404, 409].includes(e.status ?? 0)) {
         currentPending.value = false;
         if (e.status !== 409) review.value = undefined;
@@ -214,9 +217,9 @@ watch(
         <p>暂无匹配的审核</p>
       </div>
       <Pager
-        v-if="total > 20 && !queueError && !queueLoading"
+        v-if="total > pageSize && !queueError && !queueLoading"
         :page="page"
-        :size="20"
+        :size="pageSize"
         :total="total"
         @change="(p) => router.push({ path: '/reviews', query: { ...route.query, page: p } })"
       />

@@ -1,5 +1,5 @@
 import { localDate } from '@hongyan/contracts/activity';
-export { localDate, activityContacts, resultDate } from '@hongyan/contracts/activity';
+export { localDate } from '@hongyan/contracts/activity';
 import type { Activity } from '@hongyan/contracts';
 
 export const activityTypes = { date_range: '单次活动', continuous: '单次活动', weekly: '每周活动', custom: '多时段活动' };
@@ -36,6 +36,16 @@ export const revisionLabels = {
   withdrawn: '已撤回',
   cancelled: '已取消',
 };
+
+export function beijingInput(iso: unknown) {
+  if (typeof iso !== 'string' || !iso) return '';
+  const instant = Date.parse(iso);
+  return Number.isFinite(instant) ? new Date(instant + 8 * 3600_000).toISOString().slice(0, 16) : '';
+}
+
+export function beijingISO(value: string) {
+  return new Date(value + '+08:00').toISOString();
+}
 
 const format = (options: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hourCycle: 'h23', ...options });

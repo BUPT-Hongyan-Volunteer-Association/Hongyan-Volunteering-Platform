@@ -40,7 +40,7 @@ watch(() => props.id, () => { notice.value = ''; });
       <h2>当前主负责人：{{ owner.display_name }}</h2>
       <span v-if="team.owner_unavailable_reason" class="state-chip attention">{{ reasons[team.owner_unavailable_reason] }}</span>
     </header>
-    <p v-if="team.owner_unavailable_reason">现任主负责人无法办理交接，请核对接任人后重新指定。</p>
+    <p v-if="team.owner_unavailable_reason">现任主负责人无法办理交接，请核对接任人后重新指定</p>
     <h2>活动成员</h2>
     <ActivityMemberListView :activity="activity" :team="team" can-manage :paused="false" @saved="saved" @refresh="refresh" />
     <OwnerRepair :key="activity.id" :activity="activity" :team="team"

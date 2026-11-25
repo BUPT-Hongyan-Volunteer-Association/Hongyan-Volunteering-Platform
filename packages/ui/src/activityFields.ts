@@ -1,4 +1,4 @@
-import { activityTypes, localDate, localDateTime } from './activityDisplay';
+import { activityTypes, localDateTime } from './activityDisplay';
 import type { IconName } from './UiIcon.vue';
 
 type Field = [
@@ -57,8 +57,7 @@ export const fieldGroups: { title: string; icon: IconName; fields: Field[] }[] =
 export const activityFields = fieldGroups.flatMap((g) => g.fields);
 const labels: Record<string, string> = {
   ...Object.fromEntries(activityFields.map(([key, label]) => [key, label])),
-  phone: '手机号', wechat: '微信号', result_expected_at: '预计结果公布日期',
-  selection_text: '录取说明', contact_text: '原联系渠道', starts_at: '开始时间', ends_at: '结束时间', hours_import_expected_at: '预计时长导入时间',
+  selection_text: '录取说明', starts_at: '开始时间', ends_at: '结束时间',
   schedule: '活动安排',
   schedule_type: '时间类型',
   duration_start_date: '周期开始',
@@ -87,7 +86,6 @@ export function fieldValue(key: string, value: unknown): string {
       .map(([k, v]) => fieldLabel(k) + '　' + fieldValue(k, v))
       .join('\n');
   const part = key.split('.').at(-1) || key;
-  if (part === 'result_expected_at' && typeof value === 'string') return localDate(value);
   if (part.endsWith('_at') && typeof value === 'string' && Number.isFinite(Date.parse(value)))
     return localDateTime(value) + '（北京时间）';
   if (part === 'schedule_type' && Object.hasOwn(activityTypes, String(value)))

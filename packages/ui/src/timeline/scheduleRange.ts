@@ -1,7 +1,7 @@
 import { computed, ref, shallowRef } from 'vue';
 import type { TimelineActivity, TimelineActivityPage, TimelineItem } from '@hongyan/contracts';
 
-type Page = TimelineActivityPage & { rangeKey: string | null };
+type Page = TimelineActivityPage & { rangeKey: string };
 
 /** 一轮读取的意图：初次进入、刷新、加载更多、失败重试、按选中活动补读。 */
 export type RangeIntent =
@@ -125,7 +125,7 @@ export function createScheduleRange(read: (page: number) => Promise<Page>, optio
       let last = target;
       for (let attempt = 0; attempt < 2; attempt++) {
         // 有全范围摘要时可以复用前页；校验失败或重试时从头读取。
-        const reuse = !retry && attempt === 0 && !!previous[0]?.rangeKey;
+        const reuse = !retry && attempt === 0 && previous.length > 0;
         let candidate: Page[];
         if (intent.kind === 'focus') {
           const { item, slot } = options.selection();

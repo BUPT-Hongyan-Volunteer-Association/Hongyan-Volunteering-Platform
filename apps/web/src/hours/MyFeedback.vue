@@ -50,10 +50,10 @@ async function submit() {
   <section class="reading-area feedback">
     <RouterLink class="back-link" to="/mine">返回我的</RouterLink>
     <h1>本人记录与反馈</h1>
-    <p v-if="saved" role="status">反馈已提交。</p>
+    <p v-if="saved" role="status">反馈已提交</p>
     <div class="page-actions" v-if="!route.params.item && !editing">
       <RouterLink class="button primary" :to="{ path: '/mine/feedback', query: { new: '1' } }">提交漏记反馈</RouterLink>
-      <RouterLink to="/mine/hours">查看我的时长</RouterLink>
+      <RouterLink class="button compact" to="/mine/hours">查看我的时长</RouterLink>
     </div>
     <form v-if="editing" class="feedback-form" @submit.prevent="submit">
       <h2>{{ type === 'missing_hours' ? '漏记反馈' : type === 'hours' ? '反馈这笔时长' : '异常申诉' }}</h2>
@@ -65,11 +65,11 @@ async function submit() {
         </template>
         <label>情况说明
           <textarea v-model="description" rows="4" maxlength="6000" required
-            :placeholder="type === 'missing_hours' ? '请说明实际服务内容。未报名者请注明参加方式与当日情况。' : '请说明需要老师核实的情况。'" />
+            :placeholder="type === 'missing_hours' ? '请说明实际服务内容。未报名者请注明参加方式与当日情况' : '请说明需要老师核实的情况'" />
         </label>
         <div class="page-actions">
           <button type="submit" class="primary" :disabled="!description.trim() || (!linked && (!activity || !day))">提交反馈</button>
-          <RouterLink to="/mine/feedback">取消</RouterLink>
+          <RouterLink class="button compact" to="/mine/feedback">取消</RouterLink>
         </div>
       </fieldset>
       <p v-if="error" role="alert">{{ error }}</p>

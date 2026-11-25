@@ -144,10 +144,10 @@ async function reloadReceipts() {
                 接收 {{ row.recipient_count }} 人
               </div>
             </div>
-            <span class="state-chip">{{ row.is_current ? '当前有效' : '已被替代' }}</span>
+            <span class="row-end"><span class="state-chip">{{ row.is_current ? '当前有效' : '已被替代' }}</span><UiIcon name="ArrowRight" /></span>
           </RouterLink>
         </div>
-        <p v-else>本活动还没有发出过通知。</p>
+        <p v-else>本活动还没有发出过通知</p>
         <Pager
           v-if="page > 1 || listing.page.total > listing.page.page_size"
           :page="page"
@@ -200,8 +200,8 @@ async function reloadReceipts() {
           <p v-if="receiptError" role="alert">{{ receiptError }}</p>
           <p v-else-if="!receipts" role="status">正在读取回执…</p>
           <template v-else>
-            <div v-if="receipts.items.length" class="receipt-scroll">
-              <table class="receipt-table">
+            <div v-if="receipts.items.length" class="scroll-table">
+              <table>
                 <thead>
                   <tr>
                     <th>学号</th>
@@ -231,7 +231,7 @@ async function reloadReceipts() {
               </table>
             </div>
             <p v-else>
-              {{ followUp === '1' ? '当前没有需要跟进的接收人。' : '这条通知没有接收人。' }}
+              {{ followUp === '1' ? '当前没有需要跟进的接收人' : '这条通知没有接收人' }}
             </p>
             <Pager
               v-if="receiptIndex > 1 || receipts.total > receipts.page_size"
@@ -243,10 +243,10 @@ async function reloadReceipts() {
 
           </template>
           <p v-if="!current.is_current" class="notice-hint">
-            这条通知已被后续版本替代，回执仅作为历史记录保留。
+            这条通知已被后续版本替代，回执仅作为历史记录保留
           </p>
         </section>
-        <p v-else>未找到该通知。</p>
+        <p v-else>未找到该通知</p>
       </template>
     </RecordWorkspace>
   </section>
@@ -259,9 +259,6 @@ async function reloadReceipts() {
 @keyframes reveal-loading {
   from { visibility: hidden; }
   to { visibility: visible; }
-}
-.receipt-scroll {
-  overflow-x: auto;
 }
 .receipt-summary {
   margin: 4px 0 12px;
@@ -276,17 +273,5 @@ async function reloadReceipts() {
   align-items: center;
   flex-wrap: wrap;
   margin: 12px 0;
-}
-.receipt-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-.receipt-table th,
-.receipt-table td {
-  text-align: left;
-  padding: 8px 6px;
-  border-bottom: 1px solid #e5e5e5;
-  white-space: nowrap;
 }
 </style>

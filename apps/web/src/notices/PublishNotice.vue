@@ -38,7 +38,7 @@ async function submit() {
       const invalidRows = new Set(reason.body?.details?.filter(d => d.code === 'ineligible_recipient').map(d => d.row));
       if (invalidRows.size) {
         students.value = input.recipient_student_ids.filter((_, index) => !invalidRows.has(index + 1));
-        error.value += '。已从选择中移除，请核对后再发布。';
+        error.value += '。已从选择中移除，请核对后再发布';
         void roster.value?.refresh();
       }
     }

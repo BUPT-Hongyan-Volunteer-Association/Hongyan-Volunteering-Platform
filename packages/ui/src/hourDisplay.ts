@@ -1,6 +1,6 @@
 import { computed, shallowRef } from 'vue';
 import { type ApiError, type HourBatch, type HourRow } from '@hongyan/contracts';
-export { message, noAccess, usePageRead as useHourRead } from './usePageRead';
+export { message, noAccess } from './usePageRead';
 
 export const statuses: Record<HourBatch['status'], string> = {
   validating: '校验中', invalid: '内容有误', ready: '校验完成', failed: '系统校验失败',

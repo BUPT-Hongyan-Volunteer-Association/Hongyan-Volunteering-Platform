@@ -81,8 +81,8 @@ onUnmounted(() => {
     <template v-else>
       <RecordSummaryList v-if="rows.length" :records="rows">
         <template #action="{ row }">
-          <RouterLink v-if="!item" :to="{ path: '/registrations/' + row.id, query: route.query }">办理与进度</RouterLink>
-          <RouterLink
+          <RouterLink class="button primary compact" v-if="!item" :to="{ path: '/registrations/' + row.id, query: route.query }">办理与进度</RouterLink>
+          <RouterLink class="button compact"
             :to="{
               path: '/activities/' + row.activityId,
               state: { registrationReturn: route.fullPath },
@@ -91,7 +91,7 @@ onUnmounted(() => {
           >
         </template>
       </RecordSummaryList>
-      <p v-else>{{ item ? '未找到该报名记录。' : '暂无符合条件的报名记录。' }}</p>
+      <p v-else>{{ item ? '未找到该报名记录' : '暂无符合条件的报名记录' }}</p>
       <RequestQueue v-if="item && result.items[0]" :registration="result.items[0]" :writes-paused="refreshing"
         @changed="msg => { feedback = msg; load(); }" />
       <Pager

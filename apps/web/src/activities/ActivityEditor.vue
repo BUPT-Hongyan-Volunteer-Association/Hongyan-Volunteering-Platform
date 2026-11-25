@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import ActivityDateField from '@hongyan/ui/ActivityDateField.vue';
-import { campusName, campuses } from '@hongyan/contracts/activity';
+import { formValues, buildPatch } from './activityForm';
+import { campuses } from '@hongyan/contracts/activity';
 import { ref, computed, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -24,9 +25,6 @@ import ActivityHistory from './ActivityHistory.vue';
 import { fieldGroups, activityFields as fields } from '@hongyan/ui/activityFields';
 import {
   revisionLabels,
-  localDate,
-  activityContacts,
-  resultDate,
 } from '@hongyan/ui/activityDisplay';
 
 const props = defineProps<{ writesPaused?: boolean; snapshot?: ManagedActivityDetail }>();
@@ -38,7 +36,7 @@ const detail = ref<ManagedActivityDetail>(),
   form = ref<Record<string, string>>({}),
   base = ref<Record<string, string>>({});
 const contactRows = ref<string[]>(['']);
-const savedContacts = computed(() => activityContacts(detail.value?.working_snapshot.content));
+const savedContacts = computed(() => detail.value?.working_snapshot.content.contacts ?? []);
 const contacts = computed(() => contactRows.value.map((value) => value.trim()).filter(Boolean));
 const contactsChanged = computed(
   () =>
@@ -46,7 +44,7 @@ const contactsChanged = computed(
     contacts.value.some((value, index) => value !== savedContacts.value[index]),
 );
 function resetContacts(item?: ActivityRevision['content']) {
-  const values = activityContacts(item);
+  const values = item?.contacts ?? [];
   contactRows.value = values.length ? [...values] : [''];
 }
 async function changeContactRows(remove?: number) {
@@ -57,6 +55,7 @@ async function changeContactRows(remove?: number) {
   const index = Math.min(remove ?? contactRows.value.length - 1, contactRows.value.length - 1);
   document.getElementById('activity-contact-' + index)?.focus();
 }
+const optionalOpen = ref<Record<string, boolean>>({});
 const reason = ref(''),
   message = ref(''),
   confirmation = ref<{ id: string; text: string }>(),
@@ -101,44 +100,20 @@ const options = [
   { value: '', label: '请选择校区' },
   ...campuses.map((value) => ({ value, label: value })),
 ];
-function formValues(item?: ActivityRevision['content']) {
-  const schedule = item?.schedule;
-  const dates =
-    schedule?.schedule_type === 'continuous'
-      ? {
-          duration_start_date: localDate(schedule.starts_at),
-          duration_end_date: localDate(schedule.ends_at),
-        }
-      : schedule;
-  const values: Record<string, unknown> = {
-    ...item,
-    ...dates,
-    result_expected_date: resultDate(item),
-    campus: campusName(item?.campus),
-    hours_import_date:
-      item?.hours_import_date ??
-      (item?.hours_import_expected_at && localDate(item.hours_import_expected_at)),
-  };
-  return Object.fromEntries(
-    fields
-      .filter(([key]) => key !== 'contacts')
-      .map(([key, , type]) => {
-        const v = values[key];
-        return [
-          key,
-          type === 'datetime-local' && v
-            ? new Date(Date.parse(String(v)) + 8 * 3600000).toISOString().slice(0, 16)
-            : String(v ?? ''),
-        ];
-      }),
-  );
-}
 function requirement(key: string) {
   if (['group_join_instructions', 'group_qr_id'].includes(key)) return '至少一项';
   if (['expected_hours', 'eligibility_text', 'safety_notes'].includes(key)) return '选填';
   if (key === 'expected_hours_basis') return form.value.expected_hours ? '必填' : '选填';
-  return '必填';
+  return '';
 }
+function optionalField(key: string) {
+  return ['eligibility_text', 'safety_notes', 'expected_hours', 'expected_hours_basis'].includes(key);
+}
+watch(fieldErrors, errors => {
+  for (const group of fieldGroups) {
+    if (group.fields.some(([key]) => optionalField(key) && errors[key])) optionalOpen.value[group.title] = true;
+  }
+}, { flush: 'sync' });
 function selectImage(event: Event) {
   const input = event.target as HTMLInputElement,
     file = input.files?.[0];
@@ -224,60 +199,8 @@ function report(e: unknown) {
   }
 }
 function payload(partial: boolean) {
-  const result: Record<string, unknown> = {},
-    v = form.value;
-  const source = restore.value;
-  const saved = detail.value?.working_snapshot.content;
-  if (contactsChanged.value) result.contacts = contacts.value;
-  for (const [key, , type] of fields) {
-    if (key === 'contacts' || key.startsWith('duration_')) continue;
-    const value = String(v[key] ?? '').trim();
-    if ((partial && v[key] === base.value[key]) || (!partial && !value)) continue;
-    if (key === 'group_qr_id' && value.startsWith('data:')) result.group_qr_upload = value;
-    else if (!value) result[key] = null;
-    else if (type === 'datetime-local') result[key] = new Date(value + '+08:00').toISOString();
-    else result[key] = type === 'number' ? Number(value) : value;
-    if (key === 'hours_import_date' && saved?.hours_import_expected_at)
-      result.hours_import_expected_at = null;
-  }
-  const start = v.duration_start_date,
-    end = v.duration_end_date;
-  const original = source && formValues(source);
-  const datesChanged =
-    start !== base.value.duration_start_date || end !== base.value.duration_end_date;
-  if (
-    source?.schedule &&
-    original &&
-    start === original.duration_start_date &&
-    end === original.duration_end_date
-  )
-    result.schedule = source.schedule;
-  else if (datesChanged)
-    result.schedule = {
-      schedule_type: 'date_range',
-      ...(start && { duration_start_date: start }),
-      ...(end && { duration_end_date: end }),
-    };
-  if (source && original) {
-    for (const k of ['registration_opens_at', 'registration_closes_at'] as const)
-      if (v[k] === original[k] && source[k] !== saved?.[k]) result[k] = source[k] ?? null;
-    for (const k of ['selection_text', 'contact_text', 'hours_import_expected_at'] as const)
-      if (
-        saved?.[k] !== source[k] &&
-        !(k === 'hours_import_expected_at' && 'hours_import_date' in result)
-      )
-        result[k] = source[k] ?? null;
-  }
-  const converting =
-    saved?.schedule?.schedule_type === 'continuous' &&
-    (result.schedule as ActivityInput['schedule'])?.schedule_type === 'date_range';
-  if (converting) {
-    for (const key of ['registration_opens_at', 'registration_closes_at'] as const)
-      if (v[key]) result[key] = new Date(v[key] + '+08:00').toISOString();
-    if (v.hours_import_date) result.hours_import_date = v.hours_import_date;
-    if (saved.hours_import_expected_at) result.hours_import_expected_at = null;
-  }
-  return result;
+  return buildPatch(form.value, base.value, detail.value?.working_snapshot.content, restore.value,
+    contactsChanged.value ? contacts.value : undefined, partial);
 }
 const command = createCommand();
 async function run(action: 'save' | 'submit' | 'withdraw') {
@@ -351,7 +274,7 @@ async function run(action: 'save' | 'submit' | 'withdraw') {
             ?.focus(),
         );
       }
-      if (e instanceof ApiError && !e.body) message.value = '写入结果尚未确认，可用相同内容重试。';
+      if (e instanceof ApiError && !e.body) message.value = '写入结果尚未确认，可用相同内容重试';
     }
     return;
   } finally {
@@ -401,7 +324,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
     return;
   if (dirty.value) {
     conflict.value = true;
-    message.value = '活动已更新，请刷新版本并复核修改。';
+    message.value = '活动已更新，请刷新版本并复核修改';
   } else {
     void load(false, snapshot);
   }
@@ -452,28 +375,33 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
         使用版本 {{ detail.current_review.revision }} 的内容重新编辑
       </button>
     </div>
-    <p v-if="!readonly" class="editor-hint">填写标题即可保存草稿，送审前请补齐必填项。</p>
+    <p v-if="!readonly" class="editor-hint">填写标题即可保存草稿。送审时请补齐各组字段，选填项和二选一项已标注</p>
     <ul v-if="Object.keys(fieldErrors).length" class="error-summary" aria-label="待修正字段">
       <li v-for="[key, title] in fields.filter(([k]) => fieldErrors[k])" :key="key">
         {{ title }} · {{ fieldErrors[key] }}
       </li>
     </ul>
     <form id="activity-form" class="activity-form" @submit.prevent="run('save')">
-      <fieldset v-for="group in fieldGroups" :key="group.title" :disabled="!!readonly || busy">
+      <fieldset class="form-section" v-for="group in fieldGroups" :key="group.title" :disabled="!!readonly || busy">
         <legend>
           <UiIcon :name="group.icon" />{{ group.title }}
           <small v-if="group.icon === 'Calendar'">北京时间</small>
         </legend>
+        <button v-if="group.fields.some(([key]) => optionalField(key))" class="quiet optional-toggle" type="button"
+          :aria-expanded="!!optionalOpen[group.title]" @click="optionalOpen[group.title] = !optionalOpen[group.title]">
+          {{ optionalOpen[group.title] ? '收起选填项' : '展开选填项' }}
+        </button>
         <div class="field-grid">
           <div
             v-for="[key, title, type] in group.fields"
             :key="key"
+            v-show="!optionalField(key) || optionalOpen[group.title] || !!fieldErrors[key]"
             class="field"
             :class="{ wide: type === 'textarea' || type === 'contacts', invalid: fieldErrors[key] }"
           >
             <label :for="type === 'contacts' ? 'activity-contact-0' : 'activity-' + key"
               ><span>{{ title }}</span
-              ><small class="requirement">{{ requirement(key) }}</small></label
+              ><small v-if="requirement(key)" class="requirement">{{ requirement(key) }}</small></label
             >
             <UiSelect
               v-if="type === 'campus' || type === 'select'"
@@ -549,7 +477,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
                   @change="selectImage"
                 />
               </label>
-              <small class="hint">PNG 或 JPEG，最多 5 MB。可与入群文字同时提供。</small>
+              <small class="hint">PNG 或 JPEG，最多 5 MB。可与入群文字同时提供</small>
               <button
                 v-if="form[key] && !readonly"
                 type="button"
@@ -580,13 +508,6 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
               :aria-invalid="!!fieldErrors[key]"
               :aria-describedby="fieldErrors[key] ? 'error-' + key : undefined"
             />
-            <small
-              v-if="
-                key === 'contacts' && (restore || detail?.working_snapshot.content)?.contact_text
-              "
-              class="hint"
-              >原联系渠道　{{ (restore || detail?.working_snapshot.content)?.contact_text }}</small
-            >
             <small v-if="fieldErrors[key]" :id="'error-' + key" role="alert">{{
               fieldErrors[key]
             }}</small>
@@ -603,7 +524,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
       </fieldset>
     </form>
     <div class="editor-actions">
-      <p v-if="dirty && id">请先保存修改，再提交审核。</p>
+      <p v-if="dirty && id">请先保存修改，再提交审核</p>
       <div class="page-actions">
         <button
           type="submit"
@@ -652,7 +573,12 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
   justify-self: start;
 }
 
+.optional-toggle { justify-self: start; }
 .version-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
   background: var(--surface);
   border-radius: var(--radius);
   padding: 10px 14px;

@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="T extends string | number">
-import { computed, shallowRef } from 'vue';
+import { computed } from 'vue';
 import { ElSelect } from 'element-plus';
 import { dropdownPosition } from './dropdownPosition';
 import 'element-plus/es/components/select/style/css';
@@ -8,34 +8,23 @@ type Choice = T | { value: T; label: string; disabled?: boolean };
 const props = defineProps<{
   label: string;
   options: readonly Choice[];
-  modelValue?: T;
+  modelValue: T;
   disabled?: boolean;
 }>();
 const emit = defineEmits<{ 'update:modelValue': [value: T]; open: [] }>();
-const local = shallowRef<T>();
 const choices = computed(() =>
   props.options.map((choice) =>
     typeof choice === 'object' ? choice : { value: choice, label: String(choice) },
   ),
 );
-const selected = computed(
-  () =>
-    props.modelValue ??
-    choices.value.find((o) => o.value === local.value)?.value ??
-    choices.value[0]?.value,
-);
-function select(value: T) {
-  local.value = value;
-  emit('update:modelValue', value);
-}
 </script>
 <template>
   <ElSelect
     class="platform-select"
     :aria-label="label"
     :disabled="disabled"
-    :model-value="selected"
-    @update:model-value="select"
+    :model-value="modelValue"
+    @update:model-value="emit('update:modelValue', $event)"
     @visible-change="(visible: boolean) => visible && emit('open')"
     :options="choices"
     :empty-values="[null, undefined]"
@@ -60,7 +49,7 @@ function select(value: T) {
   vertical-align: middle;
 }
 .platform-select .el-select__wrapper {
-  min-height: var(--select-height, 36px);
+  min-height: var(--control-height);
 }
 .platform-select .el-select__wrapper.is-focused {
   outline: 2px solid var(--brand);
@@ -87,10 +76,6 @@ function select(value: T) {
 }
 .platform-options .el-select-dropdown__item.is-hovering {
   background: var(--surface);
-}
-.preview-form,
-.field-grid {
-  --select-width: 100%;
 }
 @media (max-width: 700px), (pointer: coarse) {
   .platform-select .el-select__wrapper {

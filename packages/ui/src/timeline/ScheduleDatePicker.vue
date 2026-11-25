@@ -61,7 +61,7 @@ onBeforeUnmount(() => {
 function select(date: string) {
   if (props.disabled) return;
   if (!validDate(date)) {
-    error.value = '请输入有效的年、月、日，格式为 YYYY-MM-DD。';
+    error.value = '请输入有效的年、月、日，格式为 YYYY-MM-DD';
     return;
   }
   dismiss();

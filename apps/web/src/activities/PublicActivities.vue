@@ -23,6 +23,7 @@ import {
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import ActivityDetail from './ActivityDetail.vue';
 import ServiceCalendar from '@hongyan/ui/ServiceCalendar.vue';
+import { pageNumber } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 
 defineProps<{ profile: Profile }>();
@@ -31,11 +32,12 @@ const route = useRoute(),
 const rows = ref<Activity[]>([]),
   detail = ref<Activity>(),
   total = ref(0),
+  pageSize = ref(20),
   busy = ref(true),
   error = ref('');
 const search = ref('');
 const filtersOpen = ref(false);
-const page = computed(() => Number(route.query.page || 1));
+const page = computed(() => pageNumber(route.query.page));
 const selectedDay = computed(() => (validDate(route.query.date) ? route.query.date : ''));
 const unit = computed(() => (validUnit(route.query.unit) ? route.query.unit : 'day'));
 const range = computed(() =>
@@ -121,6 +123,7 @@ async function load(keepDetail = false) {
       if (index === serial) {
         rows.value = response.data.data.items;
         total.value = response.data.data.total;
+        pageSize.value = response.data.data.page_size;
       }
     }
   } catch (e) {
@@ -350,9 +353,9 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
           </li>
         </ul>
         <Pager
-          v-if="!busy && !error && total > 20"
+          v-if="!busy && !error && total > pageSize"
           :page="page"
-          :size="20"
+          :size="pageSize"
           :total="total"
           @change="
             (p) => {

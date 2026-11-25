@@ -16,7 +16,7 @@ import ActivityDateField from '@hongyan/ui/ActivityDateField.vue';
 import Pager from '@hongyan/ui/Pager.vue';
 import RecordTable from '@hongyan/ui/RecordTable.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
-import type { PreviewRecord } from '@hongyan/ui/preview';
+import type { TableRecord } from '@hongyan/ui/records';
 import { message, noAccess, usePageRead } from '@hongyan/ui/usePageRead';
 import AttendanceRoster from './AttendanceRoster.vue';
 
@@ -56,7 +56,7 @@ watch(result, (data) => {
   if (data.page > last) listQuery.value = { ...listQuery.value, page: last };
 });
 watch(() => status.value === 'unregistered_participation', () => { selected.value = []; });
-const records = computed<PreviewRecord[]>(() => (result.value?.items ?? []).map((row) => ({
+const records = computed<TableRecord[]>(() => (result.value?.items ?? []).map((row) => ({
   id: row.id,
   title: row.student_name,
   status: labels[row.status],
@@ -121,12 +121,12 @@ async function save(withdraw = false) {
       if (withdraw) {
         await withdrawAttendance({ path: recordPath, query: managed, body: version,
           headers: command.headers('withdraw_attendance', target, version), throwOnError: true });
-        notice.value = '已撤销现场异常记录。';
+        notice.value = '已撤销现场异常记录';
       } else {
         const body = { ...version, ...fields };
         await recordAttendance({ path: recordPath, query: managed, body,
           headers: command.headers('record_attendance', target, body), throwOnError: true });
-        notice.value = '已保存修改。';
+        notice.value = '已保存修改';
       }
     } else {
       const students = status.value === 'unregistered_participation'
@@ -135,7 +135,7 @@ async function save(withdraw = false) {
       const body = { service_date: day, ...fields, ...students };
       const { data } = await recordAttendanceBatch({ path, query: managed, body,
         headers: command.headers('record_attendance_batch', path.id, body), throwOnError: true });
-      notice.value = `已登记 ${data.data.recorded_count} 条现场异常。`;
+      notice.value = `已登记 ${data.data.recorded_count} 条现场异常`;
     }
     command.confirmed();
     if (!mounted || accessLost.value) return;
@@ -223,7 +223,7 @@ onUnmounted(() => { mounted = false; });
       <p v-if="notice" role="status">{{ notice }}</p>
       <p v-if="readError" role="alert">{{ readError }} <button @click="refresh()">重读记录</button></p>
       <p v-else-if="!result" role="status">正在读取现场异常…</p>
-      <p v-else-if="!result.total" role="status">{{ listQuery.date ? '该日期暂无现场异常。' : '本活动暂无现场异常。' }}</p>
+      <p v-else-if="!result.total" role="status">{{ listQuery.date ? '该日期暂无现场异常' : '本活动暂无现场异常' }}</p>
       <RecordTable :records="records" label="现场人员记录" heading="姓名" status-heading="异常类型">
         <template #actions="{ id }">
           <button type="button" :disabled="writesPaused || accessLost" @click="edit(id)">修改</button>

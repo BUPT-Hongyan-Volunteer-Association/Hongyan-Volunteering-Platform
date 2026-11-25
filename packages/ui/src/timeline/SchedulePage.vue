@@ -93,7 +93,9 @@ const readPage = async (page: number) => {
     query: { ...query.value, page, page_size: pageSize },
     throwOnError: true,
   });
-  return { ...data.data, rangeKey: response.headers.get('X-Timeline-Range') };
+  const rangeKey = response.headers.get('X-Timeline-Range');
+  if (!rangeKey?.trim()) throw new Error('日程响应缺少范围摘要，请重新读取');
+  return { ...data.data, rangeKey };
 };
 
 const schedule = createScheduleRange(readPage, {
@@ -158,8 +160,8 @@ function applySelection() {
     state.kind === 'window-moved'
       ? '所选时段已移出当前窗口'
       : state.kind === 'schedule-updated'
-        ? '所选时段已随安排更新失效，已回到日程。'
-        : '所选活动已移出当前筛选。';
+        ? '所选时段已随安排更新失效，已回到日程'
+        : '所选活动已移出当前筛选';
   clearSelection();
 }
 
@@ -191,7 +193,7 @@ async function load(mode: LoadMode) {
       }
       if (outcome.forbidden) {
         if (route.query.item) clearSelection();
-        error.value = '当前身份无权查看该日程范围，请重新登录或返回。';
+        error.value = '当前身份无权查看该日程范围，请重新登录或返回';
       } else if (pages.value.length) {
         error.value = lastMode === 'more' ? '未能加载更多，请重试' : '状态待刷新，请重试';
       } else {
@@ -328,7 +330,7 @@ onUnmounted(() => {
     <header class="page-heading schedule-heading">
       <div class="page-title">
         <h1>{{ scopes[scope] }}</h1>
-        <span class="sample-label">北京时间</span>
+        <span class="state-chip neutral">北京时间</span>
       </div>
       <div v-if="!fullMobileDetail" class="view-actions">
         <SegmentedControl class="view-switch" aria-label="显示方式">
