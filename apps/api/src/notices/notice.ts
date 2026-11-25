@@ -10,7 +10,7 @@ import type {
   NoticeReceipt,
   NotificationEvent as EventRow,
 } from '../generated/prisma/client.js';
-import { comparableContent, stable } from '../activities/workflow.js';
+import { stable } from '../database.js';
 import { slots } from '../activities/schedule.js';
 
 const fieldLabels = {
@@ -32,7 +32,6 @@ const fieldLabels = {
   hours_rule_text: '时长规则',
   expected_hours: '预计时长',
   expected_hours_basis: '时长计算依据',
-  hours_import_expected_at: '时长导入时间',
 } satisfies Partial<Record<keyof ActivityInput, string>>;
 type Field = keyof typeof fieldLabels;
 export const notifiedFields = new Set<string>(Object.keys(fieldLabels));
@@ -69,8 +68,7 @@ function display(field: Field, version: ActivityInput) {
 }
 
 // 累积尚待确认的变更。字段改回原值时仍展示最近的不同值，学生能看清这次恢复了什么。
-export function changeNoticeBody(snapshots: ActivityInput[]) {
-  const versions = snapshots.map(comparableContent);
+export function changeNoticeBody(versions: ActivityInput[]) {
   const latest = versions[versions.length - 1];
   const newestFirst = versions.slice().reverse();
   const lines: string[] = [];
@@ -88,7 +86,7 @@ export function changeNoticeBody(snapshots: ActivityInput[]) {
       lines.push(`· ${label}：${from === to ? '已更新，请查看最新安排' : `${from} → ${to}`}`);
     }
   }
-  return `以下内容有调整：\n${[...new Set(lines)].join('\n')}\n请核对最新安排并确认收到。`;
+  return `以下内容有调整：\n${[...new Set(lines)].join('\n')}\n请核对最新安排并确认收到`;
 }
 
 export function noticeView(row: NoticeRow, receipt?: NoticeReceipt | null): Notice {

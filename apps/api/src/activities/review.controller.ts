@@ -1,3 +1,4 @@
+import { audit } from '../audit.js';
 import {
   Body,
   Controller,
@@ -13,18 +14,13 @@ import type { ActivityReview } from '../generated/prisma/client.js';
 import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
 import type { ReviewDecision } from '@hongyan/contracts/types';
 import type { SessionRequest } from '../auth/session.guard.js';
-import { Database } from '../database.js';
-import { BusinessError, denied, envelope, invalid, invisible } from '../http.js';
+import { Database, type Tx } from '../database.js';
+import { BusinessError, denied, envelope, invalid, invisible, checkVersion, wrongState } from '../http.js';
 import { includeView, pagination, staff } from './read.js';
-import {
-  checkVersion,
-  reviewResponse,
-  reviewView,
-  type Tx,
-  Workflow,
-  wrongState,
-} from './workflow.js';
-import { content, validate } from './validation.js';
+import { reviewResponse, reviewView } from './views.js';
+import { Workflow } from '../workflow.js';
+import { content } from './validation.js';
+import { validate } from '../validation.js';
 import { notifiedFields } from '../notices/notice.js';
 
 // Each review references a frozen revision and, for amendments, its previous public revision.
@@ -145,18 +141,11 @@ export class ReviewController {
         },
         include: includeView,
       });
-      await tx.reviewAudit.create({
-        data: {
-          review_id: id,
-          activity_id: row.id,
-          actor_id: req.actor.account_id,
-          revision: r.revision,
-          before_status: r.status,
-          after_status: action.decision,
-          before_public: row.published_revision,
-          after_public: afterPublic,
-          reason: action.reason,
-        },
+      const source = { activity_id: row.id, revision: r.revision };
+      await audit(tx, {
+        actor_id: req.actor.account_id, action: 'review_activity', resource_type: 'activity_review', resource_id: id,
+        reason: action.reason, before: { ...source, status: r.status, published_revision: row.published_revision },
+        after: { ...source, status: action.decision, published_revision: afterPublic },
       });
       const result = reviewView(updated, decided);
       if (approved && r.previous_revision !== null) {

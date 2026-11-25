@@ -17,8 +17,8 @@ import type {
   RosterStatusCounts,
 } from '@hongyan/contracts/types';
 import { pagination, workspaceScope } from '../activities/read.js';
-import { Workflow } from '../activities/workflow.js';
-import { validate } from '../activities/validation.js';
+import { Workflow } from '../workflow.js';
+import { validate } from '../validation.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import { envelope, invalid, invisible } from '../http.js';

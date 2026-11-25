@@ -1,22 +1,12 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import type { ActivityInput } from '@hongyan/contracts/types';
 import type { Notice, NotificationEvent } from '../generated/prisma/client.js';
-import type { Tx } from '../activities/workflow.js';
-import { Database } from '../database.js';
+import { type Tx, Database } from '../database.js';
 import { changeNoticeBody } from './notice.js';
 import { hourNoticeKind, hourPublication } from '../hours/events.js';
 
 // 失败后按分钟退避：第 1–5 次失败分别等待 1/2/5/15/30 分钟，第 6 次失败转为人工处理。
 const retryDelaysMinutes = [1, 2, 5, 15, 30];
-
-type DecisionPayload = {
-  student_id: string;
-  status: string;
-  decision_reason?: string | null;
-  registration_version?: number;
-  actor_id?: string;
-  kind?: string;
-};
 
 type Publication = {
   title: string;
@@ -38,7 +28,7 @@ function dueAt(now: Date) {
   };
 }
 
-const resultTexts: Record<string, string> = {
+const resultTexts = {
   accepted: '已被录取',
   waitlisted: '进入候补',
   rejected: '未被录取',
@@ -157,7 +147,11 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
     now: Date,
   ) {
     if (event.event_type === 'gathering_supplement') {
-      const payload = event.payload as { source_notice_id: string; student_id: string; registration_version: number };
+      const payload = event.payload;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+          typeof payload.source_notice_id !== 'string' || typeof payload.student_id !== 'string' ||
+          typeof payload.registration_version !== 'number' || !Number.isSafeInteger(payload.registration_version) ||
+          payload.registration_version < 1) throw new DeliveryError('集合通知补发缺少有效来源或报名版本');
       const source = await tx.notice.findFirst({ where: {
         id: payload.source_notice_id, activity_id, notice_kind: 'gathering', is_current: true, source_notice_id: null,
       } });
@@ -307,52 +301,42 @@ async function changePublication(
   };
 }
 
-async function resultPublication(
-  tx: Tx,
-  event: NotificationEvent,
-  activity_id: string,
-  published: number,
-): Promise<Publication | null> {
-  const payload = event.payload as DecisionPayload;
-  if (!payload.student_id || !payload.status)
-    throw new DeliveryError('录取结果缺少接收人或决定状态');
-  if (event.event_type === 'registration_decided') {
-    if (!payload.registration_version) throw new DeliveryError('报名结果缺少决定版本');
-    const current = await tx.registration.findFirst({ where: {
-      id: event.resource_id, activity_id, student_id: payload.student_id, version: payload.registration_version,
-    }, select: { id: true } });
-    if (!current) return null;
-  }
-  const revision = await tx.activityRevision.findUniqueOrThrow({
-    where: { activity_id_revision: { activity_id, revision: published } },
-    select: { content: true },
-  });
-  const { title } = revision.content as unknown as ActivityInput;
-  if (event.event_type === 'request_decided') {
-    const kind = payload.kind === 'exit' ? '退出' : '恢复';
-    const statuses: Record<string, string> = { approved: '已批准', rejected: '已驳回', cancelled: '因活动取消或结束已取消' };
-    return {
-      title: title + kind + '申请结果', body: kind + '申请' + statuses[payload.status] +
-        (payload.decision_reason ? '。说明：' + payload.decision_reason : '。'),
-      recipients: [payload.student_id], published_by: payload.actor_id ?? null, source_revision: published,
-    };
-  }
-  return {
-    title: `${title}报名结果`,
-    body: resultBody(title, payload.status, payload.decision_reason ?? null),
-    recipients: [payload.student_id],
-    published_by: payload.actor_id ?? null,
-    source_revision: published,
-  };
-}
+const requestResults = { approved: '已批准', rejected: '已驳回', cancelled: '因活动取消或结束已取消' };
 
-function resultBody(activityTitle: string, status: string, reason: string | null) {
-  const result = resultTexts[status] ?? '已有结果';
-  const head =
-    status === 'accepted'
-      ? `恭喜，你${result}：「${activityTitle}」。请确认收到，并按时参加活动。`
-      : `「${activityTitle}」的报名结果：你${result}。请在活动详情页查看后续安排。`;
-  return reason ? `${head}\n说明：${reason}` : head;
+async function resultPublication(
+  tx: Tx, event: NotificationEvent, activity_id: string, published: number,
+): Promise<Publication | null> {
+  const p = event.payload;
+  if (!p || typeof p !== 'object' || Array.isArray(p) || typeof p.student_id !== 'string' ||
+      !p.student_id || typeof p.status !== 'string' ||
+      (p.actor_id != null && typeof p.actor_id !== 'string') ||
+      (p.decision_reason != null && typeof p.decision_reason !== 'string'))
+    throw new DeliveryError('结果通知缺少有效接收人或决定信息');
+  const revision = await tx.activityRevision.findUniqueOrThrow({
+    where: { activity_id_revision: { activity_id, revision: published } }, select: { content: true },
+  });
+  const { title: activityTitle } = revision.content as unknown as ActivityInput;
+  const base = { recipients: [p.student_id], published_by: p.actor_id ?? null, source_revision: published };
+  if (event.event_type === 'request_decided') {
+    if ((p.kind !== 'exit' && p.kind !== 'restoration') || !Object.hasOwn(requestResults, p.status))
+      throw new DeliveryError('申请通知的类型或决定状态无效');
+    const kind = p.kind === 'exit' ? '退出' : '恢复';
+    return { ...base, title: activityTitle + kind + '申请结果',
+      body: kind + '申请' + requestResults[p.status as keyof typeof requestResults] +
+        (p.decision_reason ? '。说明：' + p.decision_reason : '') };
+  }
+  if (!Object.hasOwn(resultTexts, p.status) || typeof p.registration_version !== 'number' ||
+      !Number.isSafeInteger(p.registration_version) || p.registration_version < 1)
+    throw new DeliveryError('报名通知的决定状态或版本无效');
+  const current = await tx.registration.findFirst({ where: {
+    id: event.resource_id, activity_id, student_id: p.student_id, version: p.registration_version, status: p.status,
+  }, select: { id: true } });
+  if (!current) return null;
+  const result = resultTexts[p.status as keyof typeof resultTexts];
+  const body = p.status === 'accepted'
+    ? `恭喜，你${result}：「${activityTitle}」。请确认收到，并按时参加活动`
+    : `「${activityTitle}」的报名结果：你${result}。请在活动详情页查看后续安排`;
+  return { ...base, title: activityTitle + '报名结果', body: p.decision_reason ? body + '\n说明：' + p.decision_reason : body };
 }
 
 function errorText(error: unknown): string {

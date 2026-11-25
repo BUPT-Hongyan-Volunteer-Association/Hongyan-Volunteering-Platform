@@ -1,4 +1,3 @@
-import { studentView } from './student-profile.js';
 import { createHash } from 'node:crypto';
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import type { Prisma, StudentImportBatch } from '../generated/prisma/client.js';
@@ -6,7 +5,7 @@ import { hashPassword } from '../auth/password.js';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { pagination } from '../activities/read.js';
 import { Database } from '../database.js';
-import { BusinessError, invalid, invisible } from '../http.js';
+import { BusinessError, invalid, invisible, checkVersion } from '../http.js';
 import {
   counts,
   evaluateRows,
@@ -18,8 +17,7 @@ import {
   type ExistingStudent,
   type FieldIssue,
 } from './import.js';
-import { studentWhere } from './query.js';
-import { Workflow, checkVersion } from '../activities/workflow.js';
+import { Workflow } from '../workflow.js';
 
 export interface UploadedStudentFile {
   buffer: Buffer;
@@ -158,7 +156,7 @@ export class StudentImportService implements OnApplicationBootstrap {
     if (file.buffer[0] !== 0x50 || file.buffer[1] !== 0x4b)
       invalid('file', '文件不是有效的 .xlsx 工作簿');
     const source_hash = sha256(file.buffer);
-    const source_name = file.originalname ?? '名单.xlsx';
+    const source_name = file.originalname;
     let batchId = '';
     const response = await this.workflow.run(
       req, null, 'review',
@@ -191,7 +189,7 @@ export class StudentImportService implements OnApplicationBootstrap {
     try {
       const batch = await this.db.studentImportBatch.findUnique({ where: { id: batchId } });
       if (!batch || batch.status !== 'validating') return;
-      const parsed = parseImportWorkbook(Buffer.from(batch.source_data));
+      const parsed = await parseImportWorkbook(Buffer.from(batch.source_data));
       let evaluated: EvaluatedRow[] = [];
       let summary = { created_count: 0, skipped_count: 0, error_count: 0 };
       if (parsed.fields) {
@@ -291,7 +289,7 @@ export class StudentImportService implements OnApplicationBootstrap {
     if (!batch) invisible();
     // 已确认批次的相同幂等键由命令回执直接返回，不再重复计算初始密码摘要。
     const ready = batch.status === 'ready';
-    const fields = ready ? readImportFields(Buffer.from(batch.source_data)) : [];
+    const fields = ready ? await readImportFields(Buffer.from(batch.source_data)) : [];
     const planned = ready ? batch.rows.flatMap(row => row.student_no ? [row.student_no] : []) : [];
     const hashes = await hashAccounts([...new Set(planned)]);
     return this.workflow.run(req, null, 'review', async (tx) => {
@@ -429,64 +427,5 @@ export class StudentImportService implements OnApplicationBootstrap {
     });
     if (scheduled) this.schedule(id);
     return response;
-  }
-
-  async students(query: Record<string, string>) {
-    const { page, page_size, skip } = pagination(query);
-    if (query.q !== undefined && (typeof query.q !== 'string' || query.q.length > 100))
-      invalid('q', '搜索词过长');
-    if (query.cohort !== undefined && (typeof query.cohort !== 'string' || query.cohort.length > 100))
-      invalid('cohort', '级部筛选值无效');
-    const status = query.status;
-    if (status !== undefined && status !== 'active' && status !== 'inactive')
-      invalid('status', '账号状态筛选值无效');
-    if (query.grade !== undefined && !/^\d{4}$/.test(query.grade.trim()))
-      invalid('grade', '年级筛选值无效');
-    const q = query.q?.trim();
-    const cohort = query.cohort?.trim();
-    const grade = query.grade?.trim();
-    const where = studentWhere({ q, cohort, grade, status });
-    return this.db.$transaction(
-      async (tx) => {
-        const total = await tx.student.count({ where });
-        const gradeRows = await tx.student.findMany({
-          where: { grade: { not: null } },
-          select: { grade: true },
-          distinct: ['grade'],
-          orderBy: { grade: 'desc' },
-        });
-        const grade_options = gradeRows
-          .map((row) => row.grade)
-          .filter((value): value is string => !!value);
-        const cohortRows = await tx.student.findMany({
-          where: { cohort: { not: null } },
-          select: { cohort: true },
-          distinct: ['cohort'],
-          orderBy: { cohort: 'asc' },
-        });
-        const cohort_options = cohortRows
-          .map((row) => row.cohort)
-          .filter((value): value is string => !!value);
-        const items =
-          skip < total
-            ? await tx.student.findMany({
-                where,
-                include: { account: { select: { display_name: true, active: true } } },
-                orderBy: { student_no: 'asc' },
-                skip,
-                take: page_size,
-              })
-            : [];
-        return {
-          items: items.map(studentView),
-          page,
-          page_size,
-          total,
-          grade_options,
-          cohort_options,
-        };
-      },
-      { isolationLevel: 'RepeatableRead' },
-    );
   }
 }

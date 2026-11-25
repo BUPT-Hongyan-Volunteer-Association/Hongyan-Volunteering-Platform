@@ -1,4 +1,4 @@
-import type { Tx } from '../activities/workflow.js';
+import type { Tx } from '../database.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { BusinessError } from '../http.js';
 import type { Actor } from './session.guard.js';

@@ -1,14 +1,15 @@
+import { parseActivityFilters } from './filters.js';
 import { Body, Controller, Delete, Get, Header, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Req } from '@nestjs/common';
 import type { MemberAdd, MemberReplacement, OwnerTransfer, ReasonAction } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import { audit } from '../audit.js';
 import type { SessionRequest } from '../auth/session.guard.js';
-import { Database } from '../database.js';
-import { BusinessError, envelope, invalid, invisible } from '../http.js';
+import { Database, type Tx } from '../database.js';
+import { BusinessError, envelope, invalid, invisible, checkVersion } from '../http.js';
 import { activityPage } from './list.js';
 import { eligibleOrganizer, managedScope, staff, teamManagerScope } from './read.js';
-import { validate } from './validation.js';
-import { checkVersion, Workflow, type Tx } from './workflow.js';
+import { validate } from '../validation.js';
+import { Workflow } from '../workflow.js';
 
 async function readTeam(db: Tx, where: Prisma.ActivityWhereInput) {
   const row = await db.activity.findFirst({
@@ -60,14 +61,9 @@ async function recordTeamChange(tx: Tx, id: string, before: Awaited<ReturnType<t
 export class ManagedController {
   constructor(private db: Database, private workflow: Workflow) {}
   @Get() async list(@Req() req: SessionRequest, @Query() q: Record<string, string>) {
-    const scope = q.revision_scope ?? 'working';
-    if (scope !== 'working' && scope !== 'published') invalid('revision_scope', '版本范围无效');
+    const scope = q.revision_scope === 'published' ? 'published' : 'working';
+    const range = parseActivityFilters(q, true);
     const access = managedScope(req.actor, q.scope);
-    if (
-      q.owner_account_id &&
-      !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(q.owner_account_id)
-    )
-      invalid('owner_account_id', '负责人编号无效');
     const where = {
       AND: [
         access,
@@ -81,7 +77,7 @@ export class ManagedController {
       ],
     };
     return envelope(await activityPage(this.db, where, scope, q, {
-      showOwnerAvailability: staff(req.actor) && q.scope !== 'managed',
+      range, showOwnerAvailability: staff(req.actor) && q.scope !== 'managed',
     }));
   }
   @Get(':id/members') async members(

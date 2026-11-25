@@ -258,20 +258,6 @@ model AttendanceRecord {
   @@map("attendance_record")
 }
 
-model RegistrationDecisionEvent {
-  event_id             String   @id @default(uuid()) @db.Uuid
-  event_type           String   @default("registration_decided")
-  activity_id          String   @db.Uuid
-  registration_id      String   @db.Uuid
-  student_id           String   @db.Uuid
-  registration_version Int
-  status               String
-  created_at           DateTime @default(now()) @db.Timestamptz(3)
-
-  @@unique([registration_id, registration_version], map: "registration_decision_version_key")
-  @@map("registration_decision_event")
-}
-
 model ActivityReview {
   id                String    @id @default(uuid()) @db.Uuid
   activity_id       String    @db.Uuid
@@ -302,21 +288,6 @@ model CommandReceipt {
 
   @@id([account_id, method, path, key])
   @@map("command_receipt")
-}
-
-model ReviewAudit {
-  review_id     String   @id @db.Uuid
-  activity_id   String   @db.Uuid
-  actor_id      String   @db.Uuid
-  revision      Int
-  before_status String
-  after_status  String
-  before_public Int?
-  after_public  Int?
-  reason        String?
-  created_at    DateTime @default(now()) @db.Timestamptz(3)
-
-  @@map("review_audit")
 }
 
 model ActivityChangeEvent {

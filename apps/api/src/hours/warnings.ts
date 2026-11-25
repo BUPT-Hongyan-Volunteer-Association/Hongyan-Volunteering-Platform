@@ -1,5 +1,5 @@
 import type { HourReviewDecision, HourWarning } from '@hongyan/contracts/types';
-import { stable } from '../activities/workflow.js';
+import { stable } from '../database.js';
 import { BusinessError, invalid } from '../http.js';
 import { digest } from './batch-data.js';
 import { hours } from './values.js';

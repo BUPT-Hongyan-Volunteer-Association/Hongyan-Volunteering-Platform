@@ -1,4 +1,4 @@
-import { json, type Tx } from './activities/workflow.js';
+import { json, type Tx } from './database.js';
 
 const sensitiveKey = /password|token|secret|session|credential|contents|attachment|file_data/i;
 function redact(value: unknown): unknown {

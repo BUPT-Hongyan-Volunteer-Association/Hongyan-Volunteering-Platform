@@ -1,10 +1,9 @@
 import type { HourRecord as HourView } from '@hongyan/contracts/types';
 import type { HourRecord, Prisma } from '../generated/prisma/client.js';
-import type { Actor } from '../auth/session.guard.js';
-import { studentId } from '../auth/session.guard.js';
+import { type Actor, studentId } from '../auth/session.guard.js';
 import { managedScope, pagination, staff } from '../activities/read.js';
 import { parseCalendarDate } from '../activities/schedule.js';
-import type { Tx } from '../activities/workflow.js';
+import type { Tx } from '../database.js';
 import { denied, invalid, invisible } from '../http.js';
 import { dateText } from './ledger-data.js';
 

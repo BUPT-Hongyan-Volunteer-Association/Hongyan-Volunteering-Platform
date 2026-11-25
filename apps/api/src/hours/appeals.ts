@@ -1,10 +1,10 @@
 import type { Appeal, AppealDecision, AppealInput, HourRekeyItem } from '@hongyan/contracts/types';
 import { parseCalendarDate } from '../activities/schedule.js';
-import { checkVersion, wrongState, type Tx } from '../activities/workflow.js';
+import { checkVersion, wrongState, BusinessError, invalid, invisible } from '../http.js';
+import { type Tx } from '../database.js';
 import { studentId, type Actor } from '../auth/session.guard.js';
 import { audit } from '../audit.js';
 import type { HourAppeal, Prisma } from '../generated/prisma/client.js';
-import { BusinessError, invalid, invisible } from '../http.js';
 import { enqueueHourNotices } from './events.js';
 import { approvedOrigin, approvedTitles } from './read-ledger.js';
 import { dateText } from './ledger-data.js';
@@ -93,7 +93,7 @@ export async function createAppeal(tx: Tx, input: AppealInput, actor: Actor, now
   });
   await enqueueHourNotices(tx, 'hours_feedback', row.id, actor.account_id, recipients.map(({ id }) => ({
     student_id: id, activity_id: row.activity_id, title: '有新的活动反馈',
-    body: '该活动收到新的本人记录反馈，请进入活动工作区核实。',
+    body: '该活动收到新的本人记录反馈，请进入活动工作区核实',
   })));
   return (await appealViews(tx, [row], true))[0];
 }
@@ -110,7 +110,7 @@ async function resolutionFor(tx: Tx, appeal: HourAppeal, input: AppealDecision) 
     if (!await tx.incident.findFirst({
       where: { id: appeal.target_id!, student_id: appeal.student_id, status: 'revoked' }, select: { id: true },
     })) invalid('resolution_action', '请先由老师正式撤销该异常');
-    return { ids: [], text: '本人现场异常已撤销。' };
+    return { ids: [], text: '本人现场异常已撤销' };
   }
   const origin = batchId ? await tx.hourImportBatch.findFirst({ where: { id: batchId, status: 'approved' } })
     : groupId ? await tx.hourCorrectionGroup.findFirst({ where: { id: groupId, status: 'approved' } }) : null;
@@ -121,7 +121,7 @@ async function resolutionFor(tx: Tx, appeal: HourAppeal, input: AppealDecision) 
       ...(batchId ? { batch_id: batchId } : { correction_group_id: groupId }),
     } });
     if (!current) invalid('resolution_action', '找不到由该批准生成的本人同活动同日期有效记录');
-    return { ids: [current.id], text: '本人 ' + current.hours.toFixed(1) + ' 小时已补记。' };
+    return { ids: [current.id], text: '本人 ' + current.hours.toFixed(1) + ' 小时已补记' };
   }
   if (appeal.target_type !== 'hours') invalid('resolution_action', '请选择与反馈类型匹配的处理方式');
   const original = await tx.hourRecord.findFirst({
@@ -131,10 +131,10 @@ async function resolutionFor(tx: Tx, appeal: HourAppeal, input: AppealDecision) 
     const current = await tx.hourRecord.findFirst({ where: {
       student_id: appeal.student_id, supersedes_record_id: original.id, batch_id: batchId, status: 'current',
     } });
-    if (current) return { ids: [current.id], text: '本人时长已更正为 ' + current.hours.toFixed(1) + ' 小时。' };
+    if (current) return { ids: [current.id], text: '本人时长已更正为 ' + current.hours.toFixed(1) + ' 小时' };
   }
   if (batchId && action === 'void_hours' && original.status === 'voided' && original.voided_by_batch_id === batchId)
-    return { ids: [original.id], text: '本人错记时长已撤销。' };
+    return { ids: [original.id], text: '本人错记时长已撤销' };
   if (groupId && action === 'rekey_hours' && 'items' in origin && original.status === 'voided' && original.voided_by_group_id === groupId) {
     const item = (origin.items as unknown as HourRekeyItem[]).find((row) => row.source_record.id === original.id);
     if (item?.target_student_id === appeal.student_id && item.new_record_id) {
@@ -142,9 +142,9 @@ async function resolutionFor(tx: Tx, appeal: HourAppeal, input: AppealDecision) 
         id: item.new_record_id, student_id: appeal.student_id, status: 'current', correction_group_id: groupId,
       } });
       if (!current) invalid('resolution_action', '修复目标已变化，请复核本人有效记录');
-      return { ids: [original.id, current.id], text: '本人错记时长已撤销，正确的服务记录已补记。' };
+      return { ids: [original.id, current.id], text: '本人错记时长已撤销，正确的服务记录已补记' };
     }
-    if (item) return { ids: [original.id], text: '本人错记时长已撤销。' };
+    if (item) return { ids: [original.id], text: '本人错记时长已撤销' };
   }
   return invalid('resolution_action', '所选结果尚未更正这条本人时长');
 }

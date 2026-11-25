@@ -91,3 +91,16 @@ export function validateSchedule(schedule: ActivitySchedule) {
     if (segments[i].start < segments[i - 1].end) invalid(segments[i].field, '服务时段不能重叠');
   return segments[0].start;
 }
+
+export function cachedSlots(): typeof slots {
+  const bySchedule = new WeakMap<ActivitySchedule, ScheduleSlot[]>();
+  return schedule => {
+    if (!schedule) return [];
+    let values = bySchedule.get(schedule);
+    if (!values) {
+      values = slots(schedule);
+      bySchedule.set(schedule, values);
+    }
+    return values;
+  };
+}

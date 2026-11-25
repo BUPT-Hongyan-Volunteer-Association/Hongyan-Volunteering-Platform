@@ -1,7 +1,6 @@
 import type { Activity as View, ActivityInput } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Actor } from '../auth/session.guard.js';
-import { campusName } from '@hongyan/contracts/activity';
 import { slots } from './schedule.js';
 import { denied, invalid } from '../http.js';
 
@@ -74,23 +73,23 @@ export function project(
   row: PageRow,
   scope: 'working' | 'published' | 'public' | 'public-detail',
   now: Date,
+  expand = slots,
 ): View | null {
   const management = scope === 'working' || scope === 'published';
   const published = publishedRevision(row);
   const rev = scope === 'working' ? workingRevision(row) : published;
   if (!rev) return null;
   const input = rev.content as unknown as ActivityInput;
-  const times = slots(input.schedule);
+  const times = expand(input.schedule);
   const live =
     rev === published
       ? times
       : published
-        ? slots((published.content as unknown as ActivityInput).schedule)
+        ? expand((published.content as unknown as ActivityInput).schedule)
         : [];
   const t = now.getTime();
   const item: View = {
     ...input,
-    ...(input.campus && input.campus !== '沙河' && { campus: campusName(input.campus) }),
     id: row.id,
     version: row.version,
     activity_code: row.activity_code,

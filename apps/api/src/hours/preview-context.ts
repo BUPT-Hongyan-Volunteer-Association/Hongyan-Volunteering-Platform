@@ -1,7 +1,7 @@
 import type { ActivityPublicationContent } from '@hongyan/contracts/types';
 import type { Actor } from '../auth/session.guard.js';
 import { managedScope } from '../activities/read.js';
-import type { Tx } from '../activities/workflow.js';
+import type { Tx } from '../database.js';
 import { invisible } from '../http.js';
 import { previewHourRows, type PreviewOptions } from './preview.js';
 import { readHistory, readFactReviews } from './ledger-data.js';
@@ -25,7 +25,6 @@ export async function previewActivityHours(
     where: { student_no: { in: [...numbers] } },
     select: { id: true, student_no: true, account: { select: { display_name: true } },
       registrations: { where: { activity_id: activityId }, select: {
-        submitted_at: true, status: true,
         history: { orderBy: { version: 'asc' }, select: { submitted_at: true, changed_at: true, status: true } },
       } } },
   });
@@ -43,7 +42,7 @@ export async function previewActivityHours(
       ({ revision, schedule: (content as unknown as ActivityPublicationContent).schedule })),
     students: students.map(({ id, student_no, account, registrations }) => ({
       id, student_no, name: account.display_name,
-      registration: registrations[0]?.history.length ? registrations[0].history : registrations,
+      registration: registrations[0]?.history ?? [],
     })),
     history: await readHistory(tx, days),
     fact_reviews: await readFactReviews(tx, days),

@@ -1,9 +1,8 @@
-import { json, type Tx } from '../activities/workflow.js';
+import { json, type Tx } from '../database.js';
 import type { NotificationEvent } from '../generated/prisma/client.js';
 
 type HourEventType = 'hours_result' | 'appeal_result' | 'hours_feedback';
 type Recipient = { student_id: string; activity_id: string; revision?: number };
-type Payload = { student_id: string; actor_id: string; title: string; body: string };
 
 export async function enqueueHourNotices(
   tx: Tx, event_type: HourEventType, resource_id: string, actor_id: string,
@@ -28,8 +27,12 @@ export function hourNoticeKind(type: string) {
 }
 
 export async function hourPublication(tx: Tx, event: NotificationEvent, published: number) {
-  const payload = event.payload as Payload;
-  if (!payload.student_id || !payload.title || !payload.body) return null;
+  const payload = event.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+      typeof payload.student_id !== 'string' || !payload.student_id ||
+      typeof payload.actor_id !== 'string' || !payload.actor_id ||
+      typeof payload.title !== 'string' || !payload.title.trim() ||
+      typeof payload.body !== 'string' || !payload.body.trim()) return null;
   const allowed = event.event_type !== 'hours_feedback' || !!await tx.student.findFirst({
     where: { id: payload.student_id, account: { active: true,
       roles: { some: { role: 'organizer', OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }] } },

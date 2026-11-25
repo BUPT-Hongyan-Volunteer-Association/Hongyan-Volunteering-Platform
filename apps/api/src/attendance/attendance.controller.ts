@@ -8,12 +8,12 @@ import type {
 } from '@hongyan/contracts/types';
 import { workspaceScope, pagination, publishedRevision, type LoadedActivity } from '../activities/read.js';
 import { parseCalendarDate, serviceDayMilliseconds, slots } from '../activities/schedule.js';
-import { validate } from '../activities/validation.js';
-import { checkVersion, Workflow, type Tx } from '../activities/workflow.js';
+import { validate } from '../validation.js';
+import { checkVersion, BusinessError, envelope, invalid, invisible } from '../http.js';
+import { Workflow } from '../workflow.js';
+import { type Tx, Database } from '../database.js';
 import type { SessionRequest } from '../auth/session.guard.js';
-import { Database } from '../database.js';
 import type { AttendanceRecord } from '../generated/prisma/client.js';
-import { BusinessError, envelope, invalid, invisible } from '../http.js';
 
 const studentFields = {
   id: true,

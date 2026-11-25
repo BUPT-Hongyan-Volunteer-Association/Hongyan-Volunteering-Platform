@@ -1,6 +1,7 @@
+import { parseActivityFilters, publishedActivityFilter } from './filters.js';
 import { Controller, Get, Param, ParseUUIDPipe, Query, Req } from '@nestjs/common';
 import { Database } from '../database.js';
-import { denied, envelope, invalid, invisible } from '../http.js';
+import { envelope, invalid, invisible } from '../http.js';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { activityPage } from './list.js';
 import { includeView, project } from './read.js';
@@ -9,22 +10,12 @@ import { includeView, project } from './read.js';
 export class PublicController {
   constructor(private db: Database) {}
   @Get() async list(@Req() req: SessionRequest, @Query() q: Record<string, string>) {
-    if (q.review_status !== undefined || q.owner_account_id !== undefined) denied();
-    if (q.scope && !['public', 'mine'].includes(q.scope)) invalid('scope', '公开查询范围无效');
+    const scope = q.scope ?? 'public';
+    if (scope !== 'public' && scope !== 'mine') invalid('scope', '公开查询范围无效');
+    const range = parseActivityFilters(q, false);
     const studentId = req.actor.student?.id;
-    const statuses = q.status
-      ? [q.status]
-      : q.scope === 'mine'
-        ? ['published', 'completed', 'cancelled']
-        : ['published'];
-    const where = {
-      published_revision: { not: null },
-      status: { in: statuses.filter((s) => ['published', 'completed', 'cancelled'].includes(s)) },
-      ...(q.scope === 'mine' && {
-        registrations: { some: { student_id: studentId ?? { in: [] }, status: 'accepted' } },
-      }),
-    };
-    return envelope(await activityPage(this.db, where, 'public', q, { studentId }));
+    const where = publishedActivityFilter(scope, q.status, studentId);
+    return envelope(await activityPage(this.db, where, 'public', q, { studentId, range }));
   }
   @Get(':id') async detail(
     @Req() req: SessionRequest,

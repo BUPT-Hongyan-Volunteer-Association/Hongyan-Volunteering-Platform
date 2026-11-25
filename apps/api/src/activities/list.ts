@@ -1,32 +1,24 @@
+import type { ActivityWindow } from './filters.js';
 import type { Activity as View } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Database } from '../database.js';
 import { denied, invalid } from '../http.js';
 import { eligibleOrganizer, includeView, pagination, project, workingRevision, type PageRow } from './read.js';
 import { matchesCampus } from '@hongyan/contracts/activity';
-import { slots } from './schedule.js';
+import { cachedSlots, slots } from './schedule.js';
 
 type Query = Record<string, string>;
 type Scope = 'public' | 'working' | 'published';
-type ListOptions = { studentId?: string; showOwnerAvailability?: boolean };
+type ListOptions = { studentId?: string; showOwnerAvailability?: boolean; range: ActivityWindow | undefined; expand?: typeof slots };
 
-export function contentFilter(q: Query) {
-  const from = Date.parse(q.from),
-    to = Date.parse(q.to);
-  if (
-    (q.from !== undefined || q.to !== undefined) &&
-    !(Number.isFinite(from) && Number.isFinite(to) && from < to && to - from <= 31 * 86400000)
-  )
-    invalid('from', '日期窗口须成对填写，最长 31 天');
-  if (q.is_ongoing && !['true', 'false'].includes(q.is_ongoing))
-    invalid('is_ongoing', '进行中筛选值无效');
+function contentFilter(q: Query, range: ActivityWindow | undefined, expand: typeof slots) {
   return (a: View) =>
     (!q.q || [a.title, a.activity_code].some((v) => v.includes(q.q))) &&
     (!q.campus || matchesCampus(a.campus, q.campus)) &&
     (!q.registration_phase || a.registration_phase === q.registration_phase) &&
     (!q.is_ongoing || a.is_ongoing === (q.is_ongoing === 'true')) &&
-    (!q.from ||
-      slots(a.schedule).some((s) => Date.parse(s.starts_at) < to && Date.parse(s.ends_at) > from));
+    (!range ||
+      expand(a.schedule).some((s) => Date.parse(s.starts_at) < range.to && Date.parse(s.ends_at) > range.from));
 }
 
 /**
@@ -38,11 +30,11 @@ export async function activityViews(
   where: Prisma.ActivityWhereInput,
   scope: Scope,
   q: Query,
-  { studentId, showOwnerAvailability = false }: ListOptions = {},
+  { studentId, showOwnerAvailability = false, range, expand = cachedSlots() }: ListOptions,
   onMatch?: (view: View) => void,
 ) {
   const { page, page_size, skip } = pagination(q);
-  const matches = contentFilter(q);
+  const matches = contentFilter(q, range, expand);
   const derived = !!(
     q.q ||
     q.campus ||
@@ -117,7 +109,7 @@ export async function activityViews(
           };
           if (q.review_status && workingRevision(data)?.revision_state !== q.review_status)
             continue;
-          const view = project(data, scope, now);
+          const view = project(data, scope, now, expand);
           if (!view || !matches(view)) continue;
           onMatch?.(view);
           if (derived) {
@@ -140,7 +132,7 @@ export async function activityPage(
   where: Prisma.ActivityWhereInput,
   scope: Scope,
   q: Query,
-  options: ListOptions = {},
+  options: ListOptions,
 ) {
   const { items, total, page, page_size } = await activityViews(db, where, scope, q, options);
   return { items, total, page, page_size };

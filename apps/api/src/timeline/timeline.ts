@@ -1,3 +1,4 @@
+import { parseActivityFilters, publishedActivityFilter } from '../activities/filters.js';
 import { createHash } from 'node:crypto';
 import type {
   Activity,
@@ -9,21 +10,14 @@ import type {
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Database } from '../database.js';
 import type { Actor } from '../auth/session.guard.js';
-import { denied, invalid } from '../http.js';
+import { invalid } from '../http.js';
 import { managedScope } from '../activities/read.js';
 import { activityViews } from '../activities/list.js';
-import { parseCalendarDate, slots } from '../activities/schedule.js';
+import { cachedSlots, slots } from '../activities/schedule.js';
 
 export type TimelineScope = 'public' | 'mine' | 'managed' | 'all';
 const scopes: TimelineScope[] = ['public', 'mine', 'managed', 'all'];
-const statuses = ['draft', 'pending_review', 'published', 'cancelled', 'completed', 'archived'];
-const publicStatuses = ['published', 'cancelled', 'completed'];
-const phases = ['not_open', 'open', 'closed', 'unavailable'];
-const reviewStatuses = ['draft', 'pending_review', 'approved', 'rejected', 'withdrawn', 'cancelled'];
 const overlappingStatuses = ['published', 'completed'];
-const day = 86_400_000;
-const dateTime = /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/i;
-
 function instant(milliseconds: number) {
   return new Date(milliseconds + 8 * 3600_000).toISOString().replace(/(?:\.000)?Z$/, '+08:00');
 }
@@ -36,22 +30,6 @@ export function colorIndex(id: string) {
   for (const byte of new TextEncoder().encode(id.toLowerCase()))
     hash = Math.imul(hash ^ byte, 16777619);
   return (hash >>> 0) % 6;
-}
-
-function windowBound(q: Query, field: 'from' | 'to') {
-  const value = q[field];
-  const match = typeof value === 'string' && dateTime.exec(value);
-  const time = match && parseCalendarDate(match[1]) ? Date.parse(value) : NaN;
-  if (!Number.isFinite(time)) invalid(field, '请填写带时区的有效日期时间');
-  return time;
-}
-
-function window(q: Query) {
-  const from = windowBound(q, 'from');
-  const to = windowBound(q, 'to');
-  if (!(from < to)) invalid('to', '结束时刻必须晚于开始时刻');
-  if (to - from > 31 * day) invalid('to', '日期窗口最长 31 天');
-  return { from, to };
 }
 
 type Plan = { activity_id: string; start: number; end: number };
@@ -77,8 +55,8 @@ async function plannedSlots(db: Database, studentId: string, from: number, to: n
   return plan;
 }
 
-function windowSlots(schedule: Activity['schedule'], from: number, to: number) {
-  return slots(schedule)
+function windowSlots(schedule: Activity['schedule'], from: number, to: number, expand = slots) {
+  return expand(schedule)
     .map((slot) => ({ ...slot, start: Date.parse(slot.starts_at), end: Date.parse(slot.ends_at) }))
     .filter((slot) => slot.start < to && slot.end > from);
 }
@@ -89,11 +67,12 @@ function toActivity(
   from: number,
   to: number,
   management: boolean,
+  expand: typeof slots,
   plan?: Plan[],
 ): TimelineActivity | null {
   const { schedule } = view;
   if (!schedule) return null;
-  const segments = windowSlots(schedule, from, to).sort((a, b) => a.start - b.start);
+  const segments = windowSlots(schedule, from, to, expand).sort((a, b) => a.start - b.start);
   if (!segments.length) return null;
   const others = overlappingStatuses.includes(view.status)
     ? plan?.filter((slot) => slot.activity_id !== view.id)
@@ -167,38 +146,16 @@ export async function timelinePage(
 ): Promise<{ page: TimelineActivityPage; rangeKey: string }> {
   const scope = q.scope as TimelineScope;
   if (!scopes.includes(scope)) invalid('scope', '日程范围无效');
-  const { from, to } = window(q);
-  if (q.registration_phase && !phases.includes(q.registration_phase))
-    invalid('registration_phase', '报名阶段筛选值无效');
-  if (q.status && !statuses.includes(q.status)) invalid('status', '活动状态筛选值无效');
-  if (q.revision_scope && !['published', 'working'].includes(q.revision_scope))
-    invalid('revision_scope', '版本范围无效');
-  if (q.owner_account_id && !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(q.owner_account_id))
-    invalid('owner_account_id', '负责人编号无效');
-
   const management = scope === 'managed' || scope === 'all';
-  if (management && q.review_status && !reviewStatuses.includes(q.review_status))
-    invalid('review_status', '审核状态筛选值无效');
-  if (!management) {
-    // 公开与本人范围固定读取获批版本，管理字段与筛选不对前台开放。
-    if (q.revision_scope === 'working' || q.review_status || q.owner_account_id) denied();
-    if (q.status && !publicStatuses.includes(q.status))
-      invalid('status', '公开日程只能查看曾公开的活动');
-  }
+  const range = parseActivityFilters(q, management, true);
+  const { from, to } = range;
+  const expand = cachedSlots();
   const revision = management ? (q.revision_scope === 'published' ? 'published' : 'working') : 'published';
   const studentId = scope === 'mine' ? actor.student?.id : undefined;
 
   let where: Prisma.ActivityWhereInput;
-  if (scope === 'public')
-    where = { published_revision: { not: null }, status: q.status ?? 'published' };
-  else if (scope === 'mine')
-    where = {
-      published_revision: { not: null },
-      registrations: {
-        some: { student_id: studentId ?? { in: [] }, status: 'accepted' },
-      },
-      ...(q.status && { status: q.status }),
-    };
+  if (scope === 'public' || scope === 'mine')
+    where = publishedActivityFilter(scope, q.status, studentId);
   else
     where = {
       AND: [
@@ -217,7 +174,7 @@ export async function timelinePage(
 
   // 日程本就需要扫描全部匹配项以计数。只对当前身份可见的日程字段取摘要，排除请求时刻。
   const digest = createHash('sha256');
-  const views = await activityViews(db, where, management ? revision : 'public', q, { studentId }, (a) => {
+  const views = await activityViews(db, where, management ? revision : 'public', q, { studentId, range, expand }, (a) => {
     digest.update(JSON.stringify([
       a.id, a.activity_code, a.title, a.status, a.schedule_revision, a.revision_state, a.schedule,
       a.campus, a.location, a.capacity, a.registration_closes_at, a.registration_phase, a.is_ongoing,
@@ -230,7 +187,7 @@ export async function timelinePage(
       : undefined;
   const owners = management ? await ownerChoices(db, actor, scope) : undefined;
   const items = views.items
-    .map((view) => toActivity(view, views.now, from, to, management, plan))
+    .map((view) => toActivity(view, views.now, from, to, management, expand, plan))
     .filter((item): item is TimelineActivity => item !== null);
   const page = {
     items,

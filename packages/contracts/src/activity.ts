@@ -1,4 +1,4 @@
-import type { Activity, Registration, RegistrationDecision } from './generated/types.gen.js';
+import type { Registration, RegistrationDecision } from './generated/types.gen.js';
 
 export const activeRegistrationStatuses: Registration['status'][] = ['submitted', 'waitlisted', 'accepted'];
 
@@ -24,19 +24,3 @@ export function matchesCampus(value: string | undefined, filter: string) {
 
 export const localDate = (value: string | number) =>
   new Date(new Date(value).getTime() + 8 * 3600000).toISOString().slice(0, 10);
-export function activityContacts(
-  activity?: Pick<Activity, 'contacts' | 'phone' | 'wechat'>,
-): string[] {
-  return (
-    activity?.contacts ??
-    [activity?.phone, activity?.wechat].filter((value): value is string => !!value)
-  );
-}
-export function resultDate(
-  activity?: Pick<Activity, 'result_expected_date' | 'result_expected_at'>,
-) {
-  return (
-    activity?.result_expected_date ??
-    (activity?.result_expected_at && localDate(activity.result_expected_at))
-  );
-}

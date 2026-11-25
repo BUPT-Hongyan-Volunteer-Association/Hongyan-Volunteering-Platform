@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: 志愿服务平台接口契约
   version: 1.2.5
-  description: 2026-11-18 PRD v1.3.4配套规格，尚未实现。沿用/api/v1，本次校订后按本文件重新生成客户端。确认学生初始密码为学号后六位，首次登录强制改密。学号和班级均为十位数字，建档不含在校状态。时长以录入单为准，整数部分最多三位、最多一位小数。本轮聚焦平台搭建与功能实现，暂不考虑部署维护。业务字段、枚举及错误码使用snake_case，自动限制固定off。
+  description: 鸿雁志愿服务平台现行接口契约。沿用/api/v1，本次校订后按本文件重新生成客户端。确认学生初始密码为学号后六位，首次登录强制改密。学号和班级均为十位数字，建档不含在校状态。时长以录入单为准，整数部分最多三位、最多一位小数。本轮聚焦平台搭建与功能实现，暂不考虑部署维护。业务字段、枚举及错误码使用snake_case，自动限制固定off。
     沿用：时长模板末列是否有违纪情况，时长与违规核实合并审批。规则未确定时正常审核时长，处罚固定未启用。按表头识别七列与兼容六列，不仅依赖文件名或版本号。
   x-document-revision: 2026-11-24-r8
 servers:
@@ -45,11 +45,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -95,11 +91,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -155,11 +147,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -219,31 +207,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/action_result'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActionResultResponse'
   /me:
     get:
       operationId: get_profile
@@ -270,11 +240,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -341,12 +307,9 @@ paths:
         schema:
           type: string
           enum:
-          - draft
-          - pending_review
           - published
           - cancelled
           - completed
-          - archived
       - name: from
         in: query
         required: false
@@ -390,31 +353,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityPageResponse'
   /activities/{id}:
     get:
       operationId: get_activity
@@ -447,31 +392,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityResponse'
   /organizer/activities:
     get:
       operationId: list_managed_activities
@@ -601,31 +528,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityPageResponse'
     post:
       operationId: create_activity
       summary: 创建活动草稿
@@ -651,31 +560,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '201':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/CreatedActivityResponse'
       requestBody:
         required: true
         content:
@@ -733,31 +624,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityResponse'
       requestBody:
         required: true
         content:
@@ -795,11 +668,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -854,11 +723,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -921,31 +786,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityResponse'
       requestBody:
         required: true
         content:
@@ -985,31 +832,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityResponse'
       requestBody:
         required: true
         content:
@@ -1050,11 +879,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -1109,31 +934,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity_review'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityReviewResponse'
       requestBody:
         required: true
         content:
@@ -1173,31 +980,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity_member_list'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityMemberListResponse'
     post:
       operationId: add_activity_member
       summary: 添加活动协作成员
@@ -1230,31 +1019,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity_member_list'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityMemberListResponse'
       requestBody:
         required: true
         content:
@@ -1293,31 +1064,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity_member_list'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityMemberListResponse'
       requestBody:
         required: true
         content:
@@ -1350,31 +1103,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '201':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/CreatedActivityResponse'
       requestBody:
         required: true
         content:
@@ -1506,11 +1241,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -1519,6 +1250,7 @@ paths:
           description: 成功
           headers:
             X-Timeline-Range:
+              required: true
               description: 当前查询全部匹配活动的有序日程摘要。相同查询的各页可据此核对是否能合并。
               schema:
                 type: string
@@ -1653,11 +1385,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -1729,11 +1457,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -1786,31 +1510,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/registration'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/RegistrationResponse'
       requestBody:
         required: true
         content:
@@ -1868,11 +1574,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -2002,21 +1704,7 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/registration'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/RegistrationResponse'
       requestBody:
         required: true
         content:
@@ -2049,11 +1737,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -2110,31 +1794,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/exit_request_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ExitRequestPageResponse'
   /organizer/activities/{id}/exit-requests:
     get:
       operationId: list_exit_requests
@@ -2174,31 +1840,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/exit_request_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ExitRequestPageResponse'
   /organizer/exit-requests/{id}/decision:
     post:
       operationId: decide_exit_request
@@ -2233,31 +1881,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/exit_request'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ExitRequestResponse'
       requestBody:
         required: true
         content:
@@ -2304,11 +1934,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -2433,11 +2059,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -2502,31 +2124,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/notice_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/NoticePageResponse'
   /me/notices:
     get:
       operationId: list_my_notices
@@ -2593,31 +2197,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/notice_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/NoticePageResponse'
   /me/notices/{id}/read:
     post:
       operationId: read_notice
@@ -2650,31 +2236,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/notice'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/NoticeResponse'
   /me/notices/{id}/ack:
     post:
       operationId: acknowledge_notice
@@ -2707,31 +2275,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/notice'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/NoticeResponse'
   /organizer/notices/{id}/receipts:
     get:
       operationId: list_notice_receipts
@@ -2782,11 +2332,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -2845,31 +2391,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '202':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_batch'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/AcceptedHourBatchResponse'
       requestBody:
         required: true
         content:
@@ -2957,31 +2485,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_batch_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/HourBatchPageResponse'
   /organizer/hour-records/{id}/void-requests:
     post:
       operationId: request_hour_void
@@ -3016,11 +2526,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -3078,11 +2584,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -3186,11 +2688,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -3350,31 +2848,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_batch'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/HourBatchResponse'
       requestBody:
         required: true
         content:
@@ -3425,31 +2905,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_batch_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/HourBatchPageResponse'
   /admin/hour-imports/{id}/decision:
     post:
       operationId: review_hour_batch
@@ -3509,21 +2971,7 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_batch'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/HourBatchResponse'
       requestBody:
         required: true
         content:
@@ -3602,31 +3050,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_record_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/HourRecordPageResponse'
   /organizer/activities/{id}/hours:
     get:
       operationId: list_activity_hours
@@ -3679,31 +3109,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_record_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/HourRecordPageResponse'
   /admin/students/{id}/hours:
     get:
       operationId: list_student_hours
@@ -3754,31 +3166,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_record_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/HourRecordPageResponse'
   /admin/student-imports:
     post:
       operationId: upload_student_import
@@ -3810,31 +3204,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '202':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/student_import'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/AcceptedStudentImportResponse'
       requestBody:
         required: true
         content:
@@ -3877,31 +3253,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/student_import'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/StudentImportResponse'
   /admin/student-imports/{id}/rows:
     get:
       operationId: get_student_import_rows
@@ -3934,11 +3292,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -3992,31 +3346,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/student_import'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/StudentImportResponse'
       requestBody:
         required: true
         content:
@@ -4073,11 +3409,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -4131,11 +3463,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -4191,31 +3519,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/account_roles'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/AccountRolesResponse'
     put:
       operationId: set_account_roles
       summary: 发放或回收角色
@@ -4248,31 +3558,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/account_roles'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/AccountRolesResponse'
       requestBody:
         required: true
         content:
@@ -4304,11 +3596,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -4368,11 +3656,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -4385,7 +3669,7 @@ paths:
                 type: object
                 properties:
                   data:
-                    $ref: '#/components/schemas/action_result'
+                    $ref: '#/components/schemas/credential_result'
                   request_id:
                     type: string
                     format: uuid
@@ -4432,11 +3716,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -4496,31 +3776,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/incident_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/IncidentPageResponse'
   /admin/incidents:
     get:
       operationId: list_incidents_for_review
@@ -4572,31 +3834,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/incident_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/IncidentPageResponse'
   /admin/incidents/{id}/decision:
     post:
       operationId: review_incident
@@ -4629,31 +3873,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/incident'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/IncidentResponse'
       requestBody:
         required: true
         content:
@@ -4692,31 +3918,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/incident'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/IncidentResponse'
       requestBody:
         required: true
         content:
@@ -4750,31 +3958,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/incident_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/IncidentPageResponse'
   /me/appeals:
     post:
       operationId: create_appeal
@@ -4802,11 +3992,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -4871,31 +4057,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/appeal_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/AppealPageResponse'
   /admin/appeals:
     get:
       operationId: list_appeals
@@ -4927,31 +4095,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/appeal_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/AppealPageResponse'
   /admin/appeals/{id}/decision:
     post:
       operationId: decide_appeal
@@ -4987,11 +4137,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5042,11 +4188,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5098,11 +4240,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5194,11 +4332,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5283,11 +4417,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5329,11 +4459,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5392,11 +4518,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5450,11 +4572,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5518,11 +4636,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5582,31 +4696,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity_member_list'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityMemberListResponse'
       requestBody:
         required: true
         content:
@@ -5648,31 +4744,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity_member_list'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityMemberListResponse'
       requestBody:
         required: true
         content:
@@ -5719,11 +4797,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5798,11 +4872,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5884,21 +4954,7 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/action_result'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActionResultResponse'
       requestBody:
         required: true
         content:
@@ -5935,11 +4991,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5996,11 +5048,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -6051,31 +5099,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity_review'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityReviewResponse'
   /organizer/activity-reviews/{id}/withdraw:
     post:
       operationId: withdraw_activity_review
@@ -6106,31 +5136,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/activity_review'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ActivityReviewResponse'
       requestBody:
         required: true
         content:
@@ -6250,31 +5262,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/exit_request'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/ExitRequestResponse'
       requestBody:
         required: true
         content:
@@ -6305,11 +5299,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -6368,31 +5358,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/restoration_request_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/RestorationRequestPageResponse'
   /me/restoration-requests/{id}/withdraw:
     post:
       operationId: withdraw_restoration_request
@@ -6423,31 +5395,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/restoration_request'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/RestorationRequestResponse'
       requestBody:
         required: true
         content:
@@ -6498,31 +5452,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/restoration_request_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/RestorationRequestPageResponse'
   /organizer/restoration-requests/{id}/decision:
     post:
       operationId: decide_restoration_request
@@ -6555,31 +5491,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/restoration_request'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/RestorationRequestResponse'
       requestBody:
         required: true
         content:
@@ -6616,31 +5534,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '202':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_batch'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/AcceptedHourBatchResponse'
       requestBody:
         required: true
         content:
@@ -6676,11 +5576,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -6726,11 +5622,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -6800,31 +5692,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_correction_group_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/HourCorrectionGroupPageResponse'
   /hour-correction-groups/{id}:
     get:
       operationId: get_hour_correction_group
@@ -6853,31 +5727,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_correction_group'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/HourCorrectionGroupResponse'
   /hour-correction-groups/{id}/withdraw:
     post:
       operationId: withdraw_hour_correction_group
@@ -6908,31 +5764,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_correction_group'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/HourCorrectionGroupResponse'
       requestBody:
         required: true
         content:
@@ -6972,31 +5810,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_correction_group_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/HourCorrectionGroupPageResponse'
   /admin/hour-correction-groups/{id}/decision:
     post:
       operationId: review_hour_correction_group
@@ -7050,21 +5870,7 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/hour_correction_group'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/HourCorrectionGroupResponse'
       requestBody:
         required: true
         content:
@@ -7112,31 +5918,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/appeal_page'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/AppealPageResponse'
   /organizer/activities/{id}/current-gathering-notice:
     get:
       operationId: get_current_gathering_notice
@@ -7165,31 +5953,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/notice'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/NoticeResponse'
   /admin/notification-events:
     get:
       operationId: list_notification_events
@@ -7203,6 +5973,9 @@ paths:
       parameters:
       - $ref: '#/components/parameters/page'
       - $ref: '#/components/parameters/page_size'
+      - name: id
+        in: query
+        schema: {type: string, format: uuid}
       - name: status
         in: query
         required: false
@@ -7230,11 +6003,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -7285,11 +6054,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -7371,11 +6136,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -7424,31 +6185,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/account_summary'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/AccountSummaryResponse'
     patch:
       operationId: set_account_status
       summary: 启停独立后台账号
@@ -7479,31 +6222,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/account_summary'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/AccountSummaryResponse'
       requestBody:
         required: true
         content:
@@ -7540,31 +6265,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/incident'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/IncidentResponse'
       requestBody:
         required: true
         content:
@@ -7604,31 +6311,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 状态、版本、名额或幂等冲突
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/error'
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '202':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/student_import'
-                  request_id:
-                    type: string
-                    format: uuid
-                additionalProperties: false
-                required:
-                - data
-                - request_id
+          $ref: '#/components/responses/AcceptedStudentImportResponse'
       requestBody:
         required: true
         content:
@@ -7637,6 +6326,428 @@ paths:
               $ref: '#/components/schemas/version_action'
 components:
   responses:
+    ActionResultResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/action_result'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    ActivityPageResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/activity_page'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    ActivityResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/activity'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    CreatedActivityResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/activity'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    ActivityReviewResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/activity_review'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    ActivityMemberListResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/activity_member_list'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    RegistrationResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/registration'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    ExitRequestPageResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/exit_request_page'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    ExitRequestResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/exit_request'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    NoticePageResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/notice_page'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    NoticeResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/notice'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    AcceptedHourBatchResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/hour_batch'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    HourBatchPageResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/hour_batch_page'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    HourBatchResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/hour_batch'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    HourRecordPageResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/hour_record_page'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    AcceptedStudentImportResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/student_import'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    StudentImportResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/student_import'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    AccountRolesResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/account_roles'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    IncidentPageResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/incident_page'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    IncidentResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/incident'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    AppealPageResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/appeal_page'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    RestorationRequestPageResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/restoration_request_page'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    RestorationRequestResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/restoration_request'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    HourCorrectionGroupPageResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/hour_correction_group_page'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    HourCorrectionGroupResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/hour_correction_group'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    AccountSummaryResponse:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/account_summary'
+              request_id:
+                type: string
+                format: uuid
+            additionalProperties: false
+            required:
+            - data
+            - request_id
+    Conflict:
+      description: 状态、版本、名额或幂等冲突
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/error'
     BadRequest:
       description: 请求格式错误
       content:
@@ -7756,6 +6867,14 @@ components:
       additionalProperties: false
       required:
       - completed
+    credential_result:
+      allOf:
+      - $ref: '#/components/schemas/action_result'
+      - type: object
+        required: [resource_id, version]
+        properties:
+          resource_id: {type: string, format: uuid}
+          version: {type: integer, minimum: 1}
     csrf_token:
       type: object
       properties:
@@ -7982,9 +7101,6 @@ components:
         registration_closes_at:
           type: string
           format: date-time
-        result_expected_at:
-          type: string
-          format: date-time
         campus:
           type: string
           maxLength: 100
@@ -8018,20 +7134,11 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-        hours_import_expected_at:
-          type: string
-          format: date-time
         contacts:
           $ref: '#/components/schemas/activity_contacts'
         result_expected_date:
           type: string
           format: date
-        phone:
-          type: string
-          pattern: '^1[3-9][0-9]{9}$'
-        wechat:
-          type: string
-          pattern: '^[A-Za-z][A-Za-z0-9_-]{5,19}$'
         hours_import_date:
           type: string
           format: date
@@ -8043,10 +7150,6 @@ components:
           writeOnly: true
           description: 新选的 PNG 或 JPEG 图片，以 data URL 传输，解码后至多 5 MiB。与草稿在同一事务保存。
           maxLength: 6990532
-        contact_text:
-          type: string
-          minLength: 1
-          maxLength: 500
         safety_notes:
           type: string
           maxLength: 2000
@@ -8093,10 +7196,6 @@ components:
           type: string
           nullable: true
           format: date-time
-        result_expected_at:
-          type: string
-          nullable: true
-          format: date-time
         campus:
           type: string
           nullable: true
@@ -8139,24 +7238,12 @@ components:
           nullable: true
           minLength: 1
           maxLength: 2000
-        hours_import_expected_at:
-          type: string
-          nullable: true
-          format: date-time
         contacts:
           $ref: '#/components/schemas/activity_contacts'
         result_expected_date:
           type: string
           nullable: true
           format: date
-        phone:
-          type: string
-          nullable: true
-          pattern: '^1[3-9][0-9]{9}$'
-        wechat:
-          type: string
-          nullable: true
-          pattern: '^[A-Za-z][A-Za-z0-9_-]{5,19}$'
         hours_import_date:
           type: string
           nullable: true
@@ -8170,11 +7257,6 @@ components:
           writeOnly: true
           description: 新选的 PNG 或 JPEG 图片，以 data URL 传输，解码后至多 5 MiB。与草稿在同一事务保存。
           maxLength: 6990532
-        contact_text:
-          type: string
-          nullable: true
-          minLength: 1
-          maxLength: 500
         safety_notes:
           type: string
           nullable: true
@@ -8238,9 +7320,6 @@ components:
         registration_closes_at:
           type: string
           format: date-time
-        result_expected_at:
-          type: string
-          format: date-time
         campus:
           type: string
           maxLength: 100
@@ -8274,30 +7353,17 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-        hours_import_expected_at:
-          type: string
-          format: date-time
         contacts:
           $ref: '#/components/schemas/activity_contacts'
         result_expected_date:
           type: string
           format: date
-        phone:
-          type: string
-          pattern: '^1[3-9][0-9]{9}$'
-        wechat:
-          type: string
-          pattern: '^[A-Za-z][A-Za-z0-9_-]{5,19}$'
         hours_import_date:
           type: string
           format: date
         group_qr_id:
           type: string
           format: uuid
-        contact_text:
-          type: string
-          minLength: 1
-          maxLength: 500
         safety_notes:
           type: string
           maxLength: 2000
@@ -11227,9 +10293,6 @@ components:
         registration_closes_at:
           type: string
           format: date-time
-        result_expected_at:
-          type: string
-          format: date-time
         campus:
           type: string
           maxLength: 100
@@ -11263,30 +10326,17 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-        hours_import_expected_at:
-          type: string
-          format: date-time
         contacts:
           $ref: '#/components/schemas/activity_contacts'
         result_expected_date:
           type: string
           format: date
-        phone:
-          type: string
-          pattern: '^1[3-9][0-9]{9}$'
-        wechat:
-          type: string
-          pattern: '^[A-Za-z][A-Za-z0-9_-]{5,19}$'
         hours_import_date:
           type: string
           format: date
         group_qr_id:
           type: string
           format: uuid
-        contact_text:
-          type: string
-          minLength: 1
-          maxLength: 500
         safety_notes:
           type: string
           maxLength: 2000
@@ -12340,7 +11390,7 @@ components:
       - accepted_count
       - capacity
     activity_publication_content:
-      description: 送审和批准要求完整内容。入群文字或二维码至少一项，联系方式至少一项，旧活动兼容 phone、wechat 和原联系文本。日期活动的起止日须齐全，校区限沙河校区、西土城校区或沙河及西土城校区，报名时刻按整分钟填写，预计结果公布使用 result_expected_date，旧结果时刻按北京时间取日期，预计导入日使用 hours_import_date。精确安排兼容原联系方式和导入时间。预计小时数与口径必须成对填写。
+      description: 送审和批准要求完整内容。入群文字或二维码至少一项，联系方式至少一项。日期活动的起止日须齐全，校区限沙河校区、西土城校区或沙河及西土城校区，报名时刻按整分钟填写，预计结果公布使用 result_expected_date，预计导入日使用 hours_import_date。预计小时数与口径必须成对填写。
       allOf:
       - $ref: '#/components/schemas/activity_input'
       - required: [title, description, beneficiaries, campus, location, meeting_point, transport_notes, registration_opens_at, registration_closes_at, capacity, hours_rule_text, schedule]

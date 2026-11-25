@@ -1,9 +1,9 @@
 import type { StudentPatch } from '@hongyan/contracts/types';
-import { checkVersion, type Tx } from '../activities/workflow.js';
+import { checkVersion, invalid } from '../http.js';
+import { type Tx } from '../database.js';
 import { audit } from '../audit.js';
 import { guardPermanentAdminLoss } from '../auth/account-access.js';
 import type { Actor } from '../auth/session.guard.js';
-import { invalid } from '../http.js';
 
 export function studentView(student: {
   id: string;
