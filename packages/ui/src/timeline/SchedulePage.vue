@@ -55,6 +55,7 @@ const chart = computed(() => (route.query.view || (mobile.value ? 'list' : 'char
 const date = computed(() =>
   validDate(route.query.date) ? route.query.date : localDate(Date.now()),
 );
+const locateOnEntry = computed(() => Object.keys(route.query).every(key => key === 'unit' || key === 'view'));
 const range = computed(() => dateWindow(date.value, unit.value));
 const start = computed(() => range.value.start),
   end = computed(() => range.value.end);
@@ -201,6 +202,11 @@ async function load(mode: LoadMode) {
       }
       return;
     }
+    const suggested = pages.value[0]?.suggested_date;
+    if (mode === 'initial' && suggested && locateOnEntry.value) {
+      await router.replace({ query: { ...route.query, date: suggested } });
+      return;
+    }
     applySelection();
     if (pendingRefresh) {
       pendingRefresh = false;
@@ -270,7 +276,7 @@ function resized() {
   mobile.value = media.matches;
 }
 watch(
-  [() => JSON.stringify(query.value), () => props.scope, revision],
+  [() => JSON.stringify(query.value), () => props.scope, revision, locateOnEntry],
   ([, scope, version], [, previousScope, previousVersion]) => {
     selectionMessage.value = '';
     if (previousScope && (scope !== previousScope || version !== previousVersion) && route.query.item)
@@ -484,6 +490,9 @@ onUnmounted(() => {
       <div v-if="!rows.length" class="empty-state">
         <UiIcon name="Calendar" />
         <p>该窗口和筛选条件下没有活动</p>
+        <button v-if="lastPage?.suggested_date" @click="set('date', lastPage.suggested_date)">
+          查看 {{ lastPage.suggested_date }} 的活动
+        </button>
       </div>
       <div
         v-else

@@ -93,7 +93,7 @@ export async function checkLedgerPages({ db, web, admin, owner, teacher, student
   for (const page of [student, secondStudent]) await page.setViewportSize({ width: 390, height: 844 });
 
   await owner.goto(web + '/managed');
-  await link(owner, title + '的活动团队').click();
+  await link(owner, title).click();
   await tab(owner, '时长批次');
   await sendWorkbook(owner, file, ledgerWorkbook(activity, [{ student: a, day }]));
   const rejectedPath = new URL(owner.url()).pathname;

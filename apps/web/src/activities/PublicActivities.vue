@@ -77,11 +77,6 @@ const listQuery = computed(() => ({
   detail: undefined,
   view: undefined,
 }));
-const scheduleQuery = computed(() => ({
-  ...listQuery.value,
-  page: undefined,
-  unit: selectedDay.value ? (validUnit(route.query.unit) ? unit.value : 'hour') : undefined,
-}));
 let serial = 0;
 let scrollPosition = 0;
 const rememberScroll = () => {
@@ -200,13 +195,6 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
   <template v-else>
     <header class="page-heading discover-heading">
       <h1>活动发现</h1>
-      <RouterLink
-        class="button"
-        aria-label="活动日程"
-        :to="{ path: '/schedule', query: scheduleQuery }"
-      >
-        <UiIcon name="Calendar" />活动日程<small>按时间</small>
-      </RouterLink>
     </header>
     <div class="discovery">
       <section class="results" aria-label="公开活动">
@@ -377,12 +365,6 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
 .discover-heading {
   border-bottom: 1px solid var(--line);
   padding-bottom: 20px;
-}
-.discover-heading .button small {
-  font-size: 12px;
-  color: var(--muted);
-  border-left: 1px solid var(--line);
-  padding-left: 8px;
 }
 .discovery {
   display: grid;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { studentNav, managedNav } from './router';
+import { router, studentNav, managedNav } from './router';
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import type { Profile } from '@hongyan/contracts';
@@ -13,6 +13,12 @@ import UiIcon from '@hongyan/ui/UiIcon.vue';
 const route = useRoute();
 const canManage = (profile: Profile) => profile.roles.includes('organizer');
 const isCurrent = (to: string) => route.meta.nav === to;
+const publicNav = studentNav.filter(item => !router.resolve(item.to).meta.personal);
+function studentDestination(to: string) {
+  if (to !== '/schedule' || route.path !== '/') return to;
+  const { q, campus, phase, status, ongoing, date, unit } = route.query;
+  return { path: to, query: { q, campus, phase, status, ongoing, date, unit: date ? unit || 'hour' : undefined } };
+}
 const crumb = computed(() => route.meta.title);
 </script>
 <template>
@@ -28,9 +34,9 @@ const crumb = computed(() => route.meta.title);
         <BrandName :area="canManage(profile) ? '活动负责人' : '学生端'" />
         <nav class="rail-nav" aria-label="学生导航">
           <RouterLink
-            v-for="item in hasStudentAccess(profile) ? studentNav : studentNav.slice(0, 1)"
+            v-for="item in hasStudentAccess(profile) ? studentNav : publicNav"
             :key="item.to"
-            :to="item.to"
+            :to="studentDestination(item.to)"
             :aria-label="item.label"
             :aria-describedby="item.to === '/notices' ? 'notice-attention-description' : undefined"
             :class="{ current: isCurrent(item.to) }"
@@ -76,6 +82,12 @@ const crumb = computed(() => route.meta.title);
           <AccountIdentity :name="profile.display_name" :busy="busy" @logout="logout" />
         </header>
         <main class="shell-content">
+          <nav v-if="canManage(profile) && $route.meta.organizer" class="section-nav mobile-managed-nav" aria-label="管理页面">
+            <RouterLink v-for="item in managedNav" :key="item.to" :to="item.to"
+              :class="{ current: isCurrent(item.to) }" :aria-current="isCurrent(item.to) ? 'page' : undefined">
+              {{ item.label }}
+            </RouterLink>
+          </nav>
           <p v-if="$route.meta.organizer && !canManage(profile)" role="alert">
             当前账号无活动管理权限
           </p>
@@ -110,10 +122,12 @@ const crumb = computed(() => route.meta.title);
   font-weight: 550;
   color: var(--muted);
 }
+.mobile-managed-nav,
 .rail-nav .mobile-management {
   display: none;
 }
 @media (max-width: 700px) {
+  .mobile-managed-nav { display: flex; margin-top: 0; }
   .web-rail {
     position: fixed;
     z-index: 5;

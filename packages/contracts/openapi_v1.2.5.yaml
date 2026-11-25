@@ -10674,6 +10674,10 @@ components:
     timeline_activity_page:
       type: object
       properties:
+        suggested_date:
+          type: string
+          format: date
+          description: 当前窗口无匹配活动时，返回同一权限、版本和筛选下下一场的北京时间开始日期。只有过去时段时返回最近一场的最后服务日期。
         items:
           type: array
           items:

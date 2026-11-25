@@ -11,11 +11,29 @@ import { withPages, lostTeamMessage, link, button, accountSecurity, visible, ope
 
 test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 }, async t => {
   await withPages(t, async ({ password, web, admin, api, browser, student, owner, joined, helper, teacher, tech, db, first, firstDate }) => {
+    await t.test('三端首次进入自动定位可见活动，手动选择今天保留空窗口', async () => {
+      for (const [page, origin, entry] of [[student, web, '活动日程'], [owner, web, '管理日程'], [teacher, admin, '全院日程']]) {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.goto(origin);
+        await link(page, entry).click();
+        await page.waitForURL(url => url.searchParams.get('date') === firstDate);
+        await visible(page.getByRole('button', { name: demoActivities.open.title, exact: true }));
+        if (entry === '全院日程') continue;
+        await button(page, '今天').click();
+        await visible(page.getByText('该窗口和筛选条件下没有活动'));
+        const date = new URL(page.url()).searchParams.get('date');
+        assert.notEqual(date, firstDate);
+        await page.reload();
+        await button(page, '查看 ' + firstDate + ' 的活动').click();
+        await page.waitForURL(url => url.searchParams.get('date') === firstDate);
+      }
+    });
     const demo = await createScheduleDemo(db);
     await t.test('宽屏正文铺满侧栏以外的空间，收起侧栏后随之扩展', async () => {
       for (const page of [student, owner, teacher]) {
         await page.setViewportSize({ width: 1920, height: 1080 });
       }
+      await link(student, '活动发现').click();
       await link(student, demoActivities.open.title).click();
       await link(owner, '我的管理活动').click();
       for (const page of [student, owner, teacher]) {
@@ -63,7 +81,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         await link(student, '返回我的').click();
         await link(student, '我的日程').click();
         await visible(student.getByText('该窗口和筛选条件下没有活动'));
-        await link(student, '活动').click();
+        await link(student, '活动发现').click();
         await link(student, '活动日程').click();
         await visible(student.locator(width === 390 ? '.schedule-list' : '.chart-scroll'));
         await fits(student);
@@ -74,6 +92,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         const management = owner.getByRole('navigation', { name: '活动管理' });
         if (width === 390) {
           await studentMenu.getByRole('link', { name: '管理', exact: true }).click();
+          const mobileManagement = owner.getByRole('navigation', { name: '管理页面' });
+          assert.deepEqual(await mobileManagement.getByRole('link').allTextContents(), ['我的管理活动', '新建活动', '管理日程']);
+          await link(mobileManagement, '新建活动').click();
+          await owner.waitForURL('**/managed/new');
+          await link(mobileManagement, '我的管理活动').click();
         } else {
           await visible(management);
           const top = await studentMenu.boundingBox(),
@@ -84,6 +107,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
             '1px',
           );
           for (const [name, path] of [
+            ['新建活动', '/managed/new'],
             ['管理日程', '/managed-schedule'],
             ['我的管理活动', '/managed'],
           ]) {
@@ -92,10 +116,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
             await owner.waitForURL((u) => u.pathname === path);
             assert.equal(await entry.getAttribute('aria-current'), 'page');
             assert.equal(await management.locator('a.current').count(), 1);
-            assert.equal(await studentMenu.getByRole('link').count(), 4);
+            assert.equal(await studentMenu.getByRole('link').count(), 5);
           }
         }
-        await link(owner, demoActivities.open.title + '的活动团队').click();
+        await link(owner, demoActivities.open.title).click();
         for (const tab of [
           '退出与恢复',
           '通知与回执',
@@ -644,7 +668,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         where: { activity_id: first.id },
       });
       await owner.goto(web + '/managed');
-      await visible(link(owner, demoActivities.open.title + '的活动团队'));
+      await visible(link(owner, demoActivities.open.title));
       assert.equal(await button(owner, '下一页').count(), 0);
       for (let i = 1; i <= 20; i++) {
         await db.activity.create({
@@ -668,7 +692,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await visible(button(owner, '下一页'));
       assert.equal(await owner.locator('main li').count(), 20);
       await button(owner, '下一页').click();
-      await visible(link(owner, '分页样例20的活动团队'));
+      await visible(link(owner, '分页样例20'));
       assert.equal(await owner.locator('main li').count(), 1);
       const slow = await holdResponse(
         owner,
@@ -679,20 +703,20 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       try {
         await slow.received;
         await owner.goBack();
-        await visible(link(owner, '分页样例20的活动团队'));
+        await visible(link(owner, '分页样例20'));
       } finally {
         await slow.release();
       }
       await settleRender(owner);
       assert.equal(await owner.locator('main li').count(), 1);
-      for (const entry of ['分页样例20的活动团队', '编辑与送审', '报名名单']) {
+      for (const entry of ['分页样例20', '现场人员记录', '报名名单']) {
         await link(owner, entry).click();
         await visible(link(owner, '返回我的管理活动'));
         await owner.goBack();
-        await visible(link(owner, '分页样例20的活动团队'));
+        await visible(link(owner, '分页样例20'));
         await link(owner, entry).click();
         await link(owner, '返回我的管理活动').click();
-        await visible(link(owner, '分页样例20的活动团队'));
+        await visible(link(owner, '分页样例20'));
         assert.equal(new URL(owner.url()).searchParams.get('page'), '2');
       }
     });
@@ -745,7 +769,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await helper.goto(web + '/managed/' + first.id + '/roster');
       await helper.getByLabel('选择本页').check();
       await link(helper, '返回我的管理活动').click();
-      await link(helper, demoActivities.pending.title + '的活动团队').click();
+      await link(helper, demoActivities.pending.title).click();
       await link(helper, '报名名单').click();
       await helper.getByLabel('批量办理').waitFor({state:'detached'});
       await visible(helper.getByText('离开上次名单时已清空选择'));
@@ -1478,7 +1502,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await visible(button(student, '已提交，待审核'));
 
       await owner.goto(web + '/managed');
-      await link(owner, demoActivities.open.title + '的活动团队').click();
+      await link(owner, demoActivities.open.title).click();
       await link(owner, '报名名单').click();
       await owner.getByLabel('姓名或学号').fill('0000000001');
       await button(owner, '查看体验学生').click();
@@ -1878,7 +1902,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       const date = new Date(Date.parse(slot.starts_at) + 8 * 3600000).toISOString().slice(0, 10);
       await owner.setViewportSize({ width: 1440, height: 900 });
       await owner.goto(web + '/managed');
-      await link(owner, demoActivities.open.title + '的活动团队').click();
+      await link(owner, demoActivities.open.title).click();
       await link(owner, '现场人员记录').click();
       await visible(owner.getByText('本活动暂无现场异常'));
       await button(owner, '登记异常').click();
@@ -2072,7 +2096,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await joined.goto(web + '/managed/' + first.id);
       await visible(joined.getByText('当前账号无法访问此活动', { exact: true }));
       await owner.goto(web + '/managed');
-      await link(owner, demoActivities.open.title + '的活动团队').click();
+      await link(owner, demoActivities.open.title).click();
       await owner.getByText('添加协作者', {exact:true}).click();
       const number = owner.getByLabel('协作者学号');
       await number.fill('0000000003');

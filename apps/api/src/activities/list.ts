@@ -9,16 +9,32 @@ import { cachedSlots, slots } from './schedule.js';
 
 type Query = Record<string, string>;
 type Scope = 'public' | 'working' | 'published';
-type ListOptions = { studentId?: string; showOwnerAvailability?: boolean; range: ActivityWindow | undefined; expand?: typeof slots };
+type ListOptions = {
+  studentId?: string;
+  showOwnerAvailability?: boolean;
+  range: ActivityWindow | undefined;
+  expand?: typeof slots;
+  outsideWindow?: (start: number, end: number) => void;
+};
 
-function contentFilter(q: Query, range: ActivityWindow | undefined, expand: typeof slots) {
+function contentFilter(
+  q: Query,
+  range: ActivityWindow | undefined,
+  expand: typeof slots,
+  outsideWindow: ListOptions['outsideWindow'],
+) {
   return (a: View) =>
     (!q.q || [a.title, a.activity_code].some((v) => v.includes(q.q))) &&
     (!q.campus || matchesCampus(a.campus, q.campus)) &&
     (!q.registration_phase || a.registration_phase === q.registration_phase) &&
     (!q.is_ongoing || a.is_ongoing === (q.is_ongoing === 'true')) &&
     (!range ||
-      expand(a.schedule).some((s) => Date.parse(s.starts_at) < range.to && Date.parse(s.ends_at) > range.from));
+      expand(a.schedule).some(slot => {
+        const start = Date.parse(slot.starts_at), end = Date.parse(slot.ends_at);
+        if (start < range.to && end > range.from) return true;
+        outsideWindow?.(start, end);
+        return false;
+      }));
 }
 
 /**
@@ -30,11 +46,11 @@ export async function activityViews(
   where: Prisma.ActivityWhereInput,
   scope: Scope,
   q: Query,
-  { studentId, showOwnerAvailability = false, range, expand = cachedSlots() }: ListOptions,
+  { studentId, showOwnerAvailability = false, range, expand = cachedSlots(), outsideWindow }: ListOptions,
   onMatch?: (view: View) => void,
 ) {
   const { page, page_size, skip } = pagination(q);
-  const matches = contentFilter(q, range, expand);
+  const matches = contentFilter(q, range, expand, outsideWindow);
   const derived = !!(
     q.q ||
     q.campus ||

@@ -153,6 +153,24 @@ test('活动日程按范围、版本与窗口返回真实安排', { timeout: 180
       'cancelled',
     );
     const timeline = (client, query) => client.request('/timeline?' + query);
+
+    await t.test('空窗口只提示本范围、本筛选下的真实时段', async () => {
+      const query = async (client, scope, name, date) => {
+        const start = Date.parse(date + 'T00:00:00+08:00');
+        const params = new URLSearchParams({ scope, q: name, from: iso(start), to: iso(start + day) });
+        const result = await timeline(client, params);
+        assert.equal(result.status, 200);
+        assert.equal(result.data.total, 0);
+        return result.data.suggested_date;
+      };
+      assert.equal(await query(student, 'public', '多时段演示', '2000-01-01'), before);
+      assert.equal(await query(student, 'public', '多时段演示', '2099-01-01'), anchor);
+      assert.equal(await query(student, 'public', '没有此活动', '2000-01-01'), undefined);
+      const pendingTitle = demoActivities.pending.title;
+      assert.equal(await query(student, 'public', pendingTitle, '2000-01-01'), undefined);
+      assert.equal(await query(owner, 'managed', pendingTitle, '2000-01-01'), undefined);
+      assert.equal(await query(teacher, 'all', pendingTitle, '2000-01-01'), beijing(now + demoActivities.pending.serviceDay * day));
+    });
     const codes = (response) => response.data.items.map((item) => item.activity_code).sort();
     const publicQuery = (extra = '') => timeline(student, 'scope=public&' + window + extra);
 

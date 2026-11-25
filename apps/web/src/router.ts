@@ -14,22 +14,24 @@ import ActivityNotices from './notices/ActivityNotices.vue';
 import MyNotices from './notices/MyNotices.vue';
 import SchedulePage from '@hongyan/ui/SchedulePage.vue';
 export const studentNav = [
-  { to: '/', label: '活动', icon: 'Calendar' },
+  { to: '/', label: '活动发现', icon: 'Search' },
+  { to: '/schedule', label: '活动日程', icon: 'Calendar' },
   { to: '/registrations', label: '我的报名', icon: 'Tickets' },
   { to: '/notices', label: '通知', icon: 'Bell' },
   { to: '/mine', label: '我的', icon: 'User' },
 ] as const;
 export const managedNav = [
   { to: '/managed', label: '我的管理活动', icon: 'FolderOpened' },
+  { to: '/managed/new', label: '新建活动', icon: 'Plus' },
   { to: '/managed-schedule', label: '管理日程', icon: 'Clock' },
 ] as const;
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', component: PublicActivities, meta: {title: '活动', nav: '/',  profile: true } },
+    { path: '/', component: PublicActivities, meta: {title: '活动发现', nav: '/',  profile: true } },
     { path: '/activities/:id', component: PublicActivities, meta: {title: '活动详情', nav: '/',  profile: true } },
-    { path: '/managed', component: ManagedActivities, meta: {title: '我的管理活动', nav: '/managed',  organizer: true, profile: true } },
-    { path: '/managed/new', component: ActivityEditor, meta: {title: '新建活动', nav: '/managed',  organizer: true } },
+    { path: '/managed', component: ManagedActivities, meta: {title: '我的管理活动', nav: '/managed',  organizer: true } },
+    { path: '/managed/new', component: ActivityEditor, meta: {title: '新建活动', nav: '/managed/new',  organizer: true } },
     {
       path: '/managed/:id',
       name: 'managed-overview',
@@ -59,13 +61,13 @@ export const router = createRouter({
       path: '/schedule',
       component: SchedulePage,
       props: { scope: 'public' },
-      meta: {title: '活动日程', nav: '/',  studentSchedule: true },
+      meta: {title: '活动日程', nav: '/schedule',  studentSchedule: true },
     },
     {
       path: '/mine/schedule',
       component: SchedulePage,
       props: { scope: 'mine' },
-      meta: {title: '活动日程', nav: '/mine',  personal: true, studentSchedule: true },
+      meta: {title: '活动日程', nav: '/schedule',  personal: true, studentSchedule: true },
     },
     {
       path: '/managed-schedule',

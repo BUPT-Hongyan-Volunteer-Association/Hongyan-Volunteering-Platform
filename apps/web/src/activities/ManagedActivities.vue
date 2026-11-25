@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { listManagedActivities, type Profile } from '@hongyan/contracts';
+import { listManagedActivities } from '@hongyan/contracts';
 import { useRoute, useRouter } from 'vue-router';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import { statusLabels, serviceTime } from '@hongyan/ui/activityDisplay';
 import { pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 
-defineProps<{ profile: Profile }>();
 const route = useRoute(), router = useRouter();
 const page = computed(() => pageNumber(route.query.page));
 const sourceQuery = computed(() => ({ page: page.value > 1 ? page.value : undefined }));
@@ -19,14 +18,6 @@ const { data, loading, error, refresh: load } = usePageRead(page, async signal =
   <div class="reading-area">
     <div class="page-heading">
       <h1>我的管理活动</h1>
-      <div class="page-actions">
-        <RouterLink class="button" to="/managed-schedule"
-          ><UiIcon name="Calendar" />本人管理日程</RouterLink
-        >
-        <RouterLink class="button primary" to="/managed/new"
-          ><UiIcon name="Plus" />新建单次活动</RouterLink
-        >
-      </div>
     </div>
     <p v-if="loading" class="notice" role="status">正在读取活动…</p>
     <p v-else-if="error" role="alert">{{ error }} <button @click="load()">刷新</button></p>
@@ -39,7 +30,9 @@ const { data, loading, error, refresh: load } = usePageRead(page, async signal =
         <div class="managed-info">
           <div class="meta-line">{{ a.activity_code }}</div>
           <div class="page-title">
-            <strong class="row-title">{{ a.title }}</strong>
+            <RouterLink class="row-title" :to="{ path: '/managed/' + a.id, query: sourceQuery }">
+              {{ a.title }}<UiIcon name="ArrowRight" />
+            </RouterLink>
             <span class="state-chip" :class="{ attention: a.has_pending_review }">{{
               a.has_pending_review ? '待审核' : statusLabels[a.status]
             }}</span>
@@ -53,10 +46,9 @@ const { data, loading, error, refresh: load } = usePageRead(page, async signal =
           </div>
         </div>
         <div class="page-actions">
-          <RouterLink class="button compact" :to="{ path: '/managed/' + a.id, query: sourceQuery }" :aria-label="a.title + '的活动团队'">活动团队</RouterLink>
-          <RouterLink class="button" :to="{ path: '/managed/' + a.id + '/edit', query: sourceQuery }"
-            ><UiIcon name="EditPen" />编辑与送审</RouterLink
-          >
+          <RouterLink class="button" :to="{ path: '/managed/' + a.id + '/attendance', query: sourceQuery }">
+            <UiIcon name="DocumentChecked" />现场人员记录
+          </RouterLink>
           <RouterLink
             class="button"
             :to="{ path: '/managed/' + a.id + '/roster', query: sourceQuery }"
@@ -98,8 +90,15 @@ const { data, loading, error, refresh: load } = usePageRead(page, async signal =
 .row-title {
   color: var(--ink);
   font-size: 18px;
-  font-weight: 650;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: var(--compact-height);
+  font-weight: var(--weight-heading);
   text-decoration: none;
   overflow-wrap: anywhere;
 }
+.row-title:hover { color: var(--brand); background: var(--brand-tint); }
+.row-title .ui-icon { width: 14px; }
+@media (max-width: 700px), (pointer: coarse) { .row-title { min-height: 44px; } }
 </style>

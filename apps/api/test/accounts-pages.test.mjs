@@ -269,7 +269,7 @@ test('账号身份、角色授权、登录与凭证办理', { timeout: 5 * 60_00
         }
         await link(page, '管理').click();
         await visible(page.getByRole('heading', {name:'我的管理活动'}));
-        await link(page, '活动').click();
+        await link(page, '活动发现').click();
         await link(page, demoActivities.open.title).click();
         assert.equal(await link(page, '我的报名').count(), 0);
         assert.equal(await button(page, '申请报名').isEnabled(), false);

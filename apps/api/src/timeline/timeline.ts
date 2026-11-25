@@ -1,4 +1,5 @@
 import { parseActivityFilters, publishedActivityFilter } from '../activities/filters.js';
+import { localDate } from '@hongyan/contracts/activity';
 import { createHash } from 'node:crypto';
 import type {
   Activity,
@@ -174,7 +175,12 @@ export async function timelinePage(
 
   // 日程本就需要扫描全部匹配项以计数。只对当前身份可见的日程字段取摘要，排除请求时刻。
   const digest = createHash('sha256');
-  const views = await activityViews(db, where, management ? revision : 'public', q, { studentId, range, expand }, (a) => {
+  let nextStart = Infinity, lastEnd = -Infinity;
+  function outsideWindow(start: number, end: number) {
+    if (start >= to) nextStart = Math.min(nextStart, start);
+    if (end <= from) lastEnd = Math.max(lastEnd, end);
+  }
+  const views = await activityViews(db, where, management ? revision : 'public', q, { studentId, range, expand, outsideWindow }, (a) => {
     digest.update(JSON.stringify([
       a.id, a.activity_code, a.title, a.status, a.schedule_revision, a.revision_state, a.schedule,
       a.campus, a.location, a.capacity, a.registration_closes_at, a.registration_phase, a.is_ongoing,
@@ -189,7 +195,9 @@ export async function timelinePage(
   const items = views.items
     .map((view) => toActivity(view, views.now, from, to, management, expand, plan))
     .filter((item): item is TimelineActivity => item !== null);
+  const suggestedTime = Number.isFinite(nextStart) ? nextStart : lastEnd - 1;
   const page = {
+    ...(views.total === 0 && Number.isFinite(suggestedTime) && { suggested_date: localDate(suggestedTime) }),
     items,
     total: views.total,
     page: views.page,
