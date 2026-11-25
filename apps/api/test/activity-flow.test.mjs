@@ -35,6 +35,9 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
 
   await t.test('首次驳回与首次发布', async () => {
     const first = await submit();
+    const endpoint = '/admin/activity-reviews/' + first.id;
+    assert.equal((await teacher.request(endpoint)).data.is_current_pending, true);
+    assert.equal((await student.request(endpoint)).status, 403);
     assert.equal((await publicDetail()).status, 404);
     assert.equal((await decide(first, 'rejected', '请修订')).status, 200);
     assert.equal((await managed()).current_review.reason, '请修订');
@@ -114,7 +117,9 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
         expected.slice((page - 1) * 2, page * 2).map((r) => r.id),
       );
       for (const review of result.data.items) {
-        assert.deepEqual(review, (await teacher.request(queue + '/' + review.id)).data);
+        const { is_current_pending, ...snapshot } = (await teacher.request(queue + '/' + review.id)).data;
+        assert.deepEqual(review, snapshot);
+        assert.equal(is_current_pending, review.status === 'pending');
         assert.equal(review.snapshot.activity_id, review.activity_id);
         seen.push(review);
       }
@@ -214,6 +219,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     assert.deepEqual(after.working_snapshot, before.published_snapshot);
     assert.equal(after.activity.has_pending_review, false);
     assert.equal(after.current_review.reason, '撤回修订');
+    assert.equal((await teacher.request('/admin/activity-reviews/' + r.id)).data.is_current_pending, false);
     assert.equal(
       (await owner.request(path + '/revisions/' + r.revision)).data.revision_state,
       'withdrawn',

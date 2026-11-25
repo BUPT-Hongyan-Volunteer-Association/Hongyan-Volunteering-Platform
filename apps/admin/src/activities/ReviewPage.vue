@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import StatusFilter from '@hongyan/ui/StatusFilter.vue';
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   ApiError,
   getActivityReview,
-  getManagedActivity,
   type Profile,
   listActivityReviews,
   reviewActivity,
@@ -17,7 +16,7 @@ import ActivitySnapshot from '@hongyan/ui/ActivitySnapshot.vue';
 import { fieldLabel, fieldValue } from '@hongyan/ui/activityFields';
 import { localDateTime, reviewLabels } from '@hongyan/ui/activityDisplay';
 import RecordWorkspace from '@hongyan/ui/RecordWorkspace.vue';
-import { pageNumber } from '@hongyan/ui/usePageRead';
+import { noAccess, pageNumber } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 const props = defineProps<{ profile: Profile }>();
 const route = useRoute(),
@@ -71,8 +70,16 @@ async function loadQueue() {
       pageSize.value = data.data.page_size;
     }
   } catch (e) {
-    if (turn === queueSerial)
+    if (turn === queueSerial) {
       queueError.value = e instanceof Error ? e.message : '审核队列读取失败';
+      if (noAccess(e) && route.params.id) {
+        ++serial;
+        review.value = undefined;
+        currentPending.value = false;
+        loading.value = false;
+        error.value = queueError.value;
+      }
+    }
   } finally {
     if (turn === queueSerial) {
       queueLoading.value = false;
@@ -93,14 +100,9 @@ async function load() {
     if (route.params.id) {
       const id = String(route.params.id);
       const r = (await getActivityReview({ path: { id }, throwOnError: true })).data.data;
-      const managed = (
-        await getManagedActivity({ path: { id: r.activity_id }, throwOnError: true })
-      ).data.data;
       if (n !== serial) return;
       review.value = r;
-      currentPending.value =
-        managed.current_review?.id === r.id &&
-        ['pending_review', 'published'].includes(managed.activity.status);
+      currentPending.value = r.is_current_pending === true;
       if (completed?.id === id) {
         const origin = scheduleReturn();
         if (origin)
@@ -113,8 +115,10 @@ async function load() {
       }
     }
   } catch (e) {
-    if (n === serial)
+    if (n === serial) {
       error.value = '读取最新数据失败：' + (e instanceof Error ? e.message : '请重试');
+      if (noAccess(e)) void loadQueue();
+    }
   } finally {
     if (n === serial) loading.value = false;
   }
@@ -148,7 +152,10 @@ async function decide(decision: 'approved' | 'rejected') {
       if (e instanceof ApiError && !e.body) error.value = '审核结果尚未确认，可用相同内容重试';
       if (e instanceof ApiError && [403, 404, 409].includes(e.status ?? 0)) {
         currentPending.value = false;
-        if (e.status !== 409) review.value = undefined;
+        if (e.status !== 409) {
+          review.value = undefined;
+          void loadQueue();
+        }
       }
     }
     return;
@@ -157,17 +164,28 @@ async function decide(decision: 'approved' | 'rejected') {
   }
   await load();
 }
+function refresh() {
+  if (busy.value) return;
+  void loadQueue();
+  void load();
+}
 watch(
-  () => route.fullPath,
-  () => {
-    if (route.params.id && completed?.id !== route.params.id) notice.value = '';
+  [status, page, () => route.params.id],
+  ([filter, number, id], [lastFilter, lastPage]) => {
+    if (id && completed?.id !== id) notice.value = '';
     completed = undefined;
     reason.value = '';
-    void loadQueue();
-    return load();
+    if (!id || filter !== lastFilter || number !== lastPage) void loadQueue();
+    void load();
   },
   { immediate: true },
 );
+onMounted(() => window.addEventListener('focus', refresh));
+onUnmounted(() => {
+  window.removeEventListener('focus', refresh);
+  ++serial;
+  ++queueSerial;
+});
 </script>
 
 <template>
@@ -181,7 +199,7 @@ watch(
     >
   </div>
   <p v-if="notice" role="status" class="notice">{{ notice }}</p>
-  <p v-if="error" role="alert">{{ error }} <button @click="load">刷新</button></p>
+  <p v-if="error" role="alert">{{ error }} <button @click="refresh">刷新</button></p>
   <p v-if="loading" role="status">正在读取…</p>
   <RecordWorkspace :selected="!!route.params.id">
     <template #list>
@@ -189,7 +207,7 @@ watch(
         :options="{ pending: reviewLabels.pending, approved: reviewLabels.approved, rejected: reviewLabels.rejected }"
         @update:model-value="savedScroll = 0; router.push({ path: '/reviews', query: { status: $event, page: 1 } })" />
       <p v-if="queueError" role="alert">
-        {{ queueError }} <button @click="loadQueue">重新读取队列</button>
+        {{ queueError }} <button @click="refresh">重新读取队列</button>
       </p>
       <p v-else-if="queueLoading" role="status">正在读取审核队列…</p>
       <div v-else-if="rows.length" class="entry-list reading-area">

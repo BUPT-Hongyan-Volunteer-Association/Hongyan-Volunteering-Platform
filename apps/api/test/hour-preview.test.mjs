@@ -198,6 +198,26 @@ test('历史获批安排、午夜端点、分钟精度', () => {
   assert.equal(late.rows[0].misconduct_requires_review,false);
 });
 
+test('按原获批版本累计前夜延续和当日补充服务，扣除暂停的周规则', () => {
+  const weekly = {
+    schedule_type: 'weekly', duration_start_date: '2026-01-01', duration_end_date: '2026-12-31',
+    weekly_slots: [
+      { weekday: 2, start_time: '22:00', end_time: '01:30', end_day_offset: 1 },
+      { weekday: 3, start_time: '09:00', end_time: '11:00', end_day_offset: 0 },
+    ],
+    excluded_dates: [day],
+    additional_slots: [{ starts_at: day + 'T14:00:00+08:00', ends_at: day + 'T14:30:00+08:00' }],
+  };
+  const data = {
+    published_revision: 2,
+    approved_schedules: [{ revision: 1, schedule: weekly }, { revision: 2, schedule: snapshot.approved_schedules[0].schedule }],
+  };
+  const row = input(2, { credited_hours: number('2.1') });
+  const old = preview([row], data, { schedule_revision: 1 });
+  assert.equal(old.rows[0].warnings[0].planned_hours, '2');
+  assert.equal(preview([row], data, { schedule_revision: 2 }).rows[0].warnings.length, 0);
+});
+
 test('补录按服务日核对历次报名，撤回重报之间须说明', () => {
   const at = (date, hour = '00:00') => new Date('2026-11-' + date + 'T' + hour + ':00+08:00');
   const registration = [

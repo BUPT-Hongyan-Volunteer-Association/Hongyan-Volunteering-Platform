@@ -1,6 +1,8 @@
 import type { ActivitySchedule } from '@hongyan/contracts/types';
-import { parseCalendarDate, serviceDayMilliseconds, slots } from '../activities/schedule.js';
+import { parseCalendarDate, serviceDayMilliseconds } from '../activities/schedule.js';
 import type { HourInputRow } from './workbook.js';
+
+export { localDate as beijingDay } from '@hongyan/contracts/activity';
 
 type Raw = HourInputRow['service_date'];
 const dayMs = 86400000;
@@ -26,7 +28,6 @@ export function hourTenths(raw: Raw) {
 }
 export const hours = (tenths: number) => (tenths / 10).toFixed(1);
 export const normalizeFact = (value: string) => value.replace(/\r\n?/g, '\n').trim();
-export const beijingDay = (now: Date) => new Date(now.getTime() + 8 * 3600000).toISOString().slice(0, 10);
 
 export function serviceDate(raw: Raw, system: '1900' | '1904'): string | null {
   if (raw?.type === 'number') {
@@ -42,16 +43,17 @@ export function serviceDate(raw: Raw, system: '1900' | '1904'): string | null {
 }
 
 export function scheduleCoverage(revisions: readonly { revision: number; schedule: ActivitySchedule }[]) {
-  const byRevision = new Map(revisions.map(({ revision, schedule }) => [revision, { schedule, times: slots(schedule) }]));
+  const byRevision = new Map(revisions.map(({ revision, schedule }) => [revision, schedule]));
   const cache = new Map<string, number | null>();
   return (revision: number | null, day: string) => {
     const key = revision + '/' + day;
-    if (!cache.has(key)) {
-      const plan = byRevision.get(revision ?? -1);
-      const duration = serviceDayMilliseconds(plan?.times ?? [], day);
-      // 按日发布只提供日期覆盖，不提供计划服务小时数。
-      cache.set(key, duration > 0 && plan?.schedule.schedule_type === 'date_range' ? null : duration);
-    }
-    return cache.get(key) ?? null;
+    const cached = cache.get(key);
+    if (cached !== undefined) return cached;
+    const schedule = byRevision.get(revision ?? -1);
+    const duration = serviceDayMilliseconds(schedule, day);
+    // 按日发布只提供日期覆盖，不提供计划服务小时数。
+    const coverage = duration > 0 && schedule?.schedule_type === 'date_range' ? null : duration;
+    cache.set(key, coverage);
+    return coverage;
   };
 }

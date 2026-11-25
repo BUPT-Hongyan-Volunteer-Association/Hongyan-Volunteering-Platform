@@ -10,7 +10,7 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import type { ActivityReview } from '../generated/prisma/client.js';
+import type { Activity, ActivityReview } from '../generated/prisma/client.js';
 import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
 import type { ReviewDecision } from '@hongyan/contracts/types';
 import type { SessionRequest } from '../auth/session.guard.js';
@@ -40,6 +40,16 @@ async function snapshotsForReviews(tx: Tx, reviews: ActivityReview[]) {
       byVersion.get(r.activity_id + '/' + r.previous_revision),
     ),
   );
+}
+
+function isCurrentPending(
+  review: ActivityReview,
+  activity: Pick<Activity, 'status' | 'working_revision' | 'published_revision'>,
+  revisionState: string,
+) {
+  return review.status === 'pending' && review.revision === activity.working_revision &&
+    review.previous_revision === activity.published_revision && revisionState === 'pending_review' &&
+    ['pending_review', 'published'].includes(activity.status);
 }
 
 @Controller('admin/activity-reviews')
@@ -75,10 +85,13 @@ export class ReviewController {
     if (!staff(req.actor)) denied();
     return this.db.$transaction(
       async (tx) => {
-        const review = await tx.activityReview.findUnique({ where: { id } });
+        const review = await tx.activityReview.findUnique({
+          where: { id },
+          include: { activity: { select: { status: true, working_revision: true, published_revision: true } } },
+        });
         if (!review) invisible();
         const [item] = await snapshotsForReviews(tx, [review]);
-        return envelope(item);
+        return envelope({ ...item, is_current_pending: isCurrentPending(review, review.activity, item.snapshot.revision_state) });
       },
       { isolationLevel: 'RepeatableRead' },
     );
@@ -95,18 +108,8 @@ export class ReviewController {
       if (req.actor.account_id === r.submitted_by)
         throw new BusinessError(403, 'forbidden', '提交人与审核人必须为不同账号');
       checkVersion(r.version, action.expected_version);
-      if (
-        r.status !== 'pending' ||
-        r.revision !== row.working_revision ||
-        !['pending_review', 'published'].includes(row.status)
-      )
-        wrongState();
-      const frozen = row.revisions.find((v) => v.revision === r.revision)!;
-      if (
-        frozen.revision_state !== 'pending_review' ||
-        r.previous_revision !== row.published_revision
-      )
-        wrongState();
+      const frozen = row.revisions.find((v) => v.revision === r.revision);
+      if (!frozen || !isCurrentPending(r, row, frozen.revision_state)) wrongState();
       const approved = action.decision === 'approved',
         clock = new Date();
       if (approved) {

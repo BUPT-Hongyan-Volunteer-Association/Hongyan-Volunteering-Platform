@@ -5051,7 +5051,7 @@ paths:
     get:
       operationId: get_activity_review
       summary: 读取待审快照及与公开版本的差异
-      description: 审核页以snapshot.content为唯一审核对象，展示previous_published_snapshot与changes，禁止用公开详情代替待审内容。 从详情侧栏进入审核页时重新获取此接口及管理详情，只有当前pending且符合审核权限时显示决定操作。审核已经处理、撤回或活动取消结束时更新页面状态，不沿用侧栏旧数据提交。
+      description: 审核页以snapshot.content为唯一审核对象，展示previous_published_snapshot与changes，禁止用公开详情代替待审内容。 进入审核页时重新获取详情。is_current_pending 在同一快照中判断该版本是否仍待审，符合权限的非提交人可办理决定。审核已经处理、撤回或活动取消结束时更新页面状态，不沿用侧栏旧数据提交。
       tags:
       - FR01
       x-requirement: FR01
@@ -7477,6 +7477,10 @@ components:
           type: string
         snapshot:
           $ref: '#/components/schemas/activity_revision'
+        is_current_pending:
+          type: boolean
+          readOnly: true
+          description: 单条审核详情必返。审核、工作版本和原公开版本仍对应，且活动允许审批时为 true。决定时再次校验操作者、版本和活动状态。
         previous_published_snapshot:
           $ref: '#/components/schemas/activity_revision'
         changes:

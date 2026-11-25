@@ -357,9 +357,9 @@ async function checkExports(t, db, app, { staffPassword, adminPassword, password
     assert.equal(cells[1].find((cell) => cell.column === 0).type, 'text');
   });
 
-  await t.test('活动时长可跨页选择学生导出汇总，每人一行且只计 current', async () => {
+  await t.test('活动时长可跨页选择学生导出汇总，每人一行且只计 current', async t => {
     const extra = synthetic[0];
-    await seedApprovedHours(db, {
+    const record = await seedApprovedHours(db, {
       student_id: extra.student.id, activity_id: hoursActivity.id, service_date: new Date(ledgerDay(3)),
       hours: '1.5', version: 1, status: 'current', origin_schedule_revision: 1,
       misconduct_reported: 'none', misconduct_version: 0,
@@ -388,6 +388,14 @@ async function checkExports(t, db, app, { staffPassword, adminPassword, password
       type: 'activity_hours', activity_id: hoursActivity.id, student_ids: [synthetic[1].student.id],
     }, randomUUID());
     assert.equal(outside.status, 422);
+    // 所选两人都有时长记录，但其中一人的记录来源未获批准。
+    const batch = { id: record.batch_id };
+    await db.hourImportBatch.update({ where: batch, data: { status: 'rejected' } });
+    t.after(() => db.hourImportBatch.update({ where: batch, data: { status: 'approved' } }));
+    const unapproved = await owner.write('POST', '/exports', {
+      type: 'activity_hours', activity_id: hoursActivity.id, student_ids: selected,
+    }, randomUUID());
+    assert.equal(unapproved.status, 422);
     const wrongType = await owner.write('POST', '/exports', {
       type: 'my_hours', student_ids: [aliceStudent.id],
     }, randomUUID());

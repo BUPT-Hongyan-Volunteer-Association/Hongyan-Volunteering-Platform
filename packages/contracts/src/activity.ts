@@ -22,7 +22,7 @@ export function matchesCampus(value: string | undefined, filter: string) {
   );
 }
 
-export const localDate = (value: string | number) =>
+export const localDate = (value: string | number | Date) =>
   new Date(new Date(value).getTime() + 8 * 3600000).toISOString().slice(0, 10);
 
 type ServiceDates = Pick<DateRangeSchedule, 'duration_start_date' | 'duration_end_date'>;

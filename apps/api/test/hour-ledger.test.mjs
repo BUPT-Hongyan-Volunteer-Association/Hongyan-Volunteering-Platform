@@ -332,14 +332,16 @@ test('独立 PostgreSQL 时长账务、警告、并发与更正结案', { timeou
 
     await t.test('更正保留历史，三种读取和无分页的导出读取一致，撤销与驳回', async () => {
       const days = [ledgerDay(10), ledgerDay(11)];
-      const pending = await submit(owner, await preview(owner, activity, days.map((day) => ({ student: a, day, hours: '501.0' }))));
+      const pending = await submit(owner, await preview(owner, activity, days.map((day) => ({ student: a, day, hours: '501.1' }))));
       result(await teacher.write('POST', decision(pending), approved(pending, { reason: '专项核对并接受警告', warning_snapshot_hash: pending.warning_snapshot_hash })), 200);
       const corrected = await submit(owner, await preview(owner, activity, [{ student: a, day: days[0], hours: '502.0' }], 'correction'));
       result(await teacher.write('POST', decision(corrected), approved(corrected, { reason: '核对准确小时数', warning_snapshot_hash: corrected.warning_snapshot_hash })), 200);
       const dateFilters = { from_date: days[1], to_date: days[0], include_history: true };
       const params = new URLSearchParams({ ...dateFilters, page_size: '1' });
       const [p1, p2] = await Promise.all([myHours(alice, '?' + params), myHours(alice, '?' + params + '&page=2')]);
-      assert.deepEqual([p1.total_hours, p2.total_hours, p1.total], ['1003.0', '1003.0', 3]);
+      assert.deepEqual([p1.total_hours, p2.total_hours, p1.total], ['1003.1', '1003.1', 3]);
+      const beyond = await myHours(alice, '?' + params + '&page=4');
+      assert.deepEqual([beyond.items, beyond.total, beyond.total_hours], [[], 3, '1003.1']);
       assert.equal(p2.items[0].status, 'superseded');
       assert.equal(p1.items[0].supersedes_record_id, p2.items[0].id);
       const activityPath = '/organizer/activities/' + activity.id + '/hours';
@@ -350,7 +352,7 @@ test('独立 PostgreSQL 时长账务、警告、并发与更正结案', { timeou
         { type: 'admin_student_hours', student_id: a.id }, dateFilters);
       assert.deepEqual(activityHours, unpaged);
       assert.deepEqual(staffHours, unpaged);
-      assert.deepEqual([unpaged.total_hours, unpaged.items.map((row) => row.status)], ['1003.0', ['current', 'superseded', 'current']]);
+      assert.deepEqual([unpaged.total_hours, unpaged.items.map((row) => row.status)], ['1003.1', ['current', 'superseded', 'current']]);
       assert.deepEqual([...new Set(unpaged.items.map((row) => row.student_no))], ['0000000001']);
       assert.equal((await alice.request('/me/hours?from_date=2026-02-30')).status, 422);
       const organizer = result(await owner.request('/me'), 200);

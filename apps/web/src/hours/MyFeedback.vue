@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { localDate } from '@hongyan/contracts/activity';
 import { computed, onScopeDispose, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ApiError, createAppeal, createCommand, type AppealInput } from '@hongyan/contracts';
@@ -12,7 +13,7 @@ const linked = computed(() => typeof route.query.target === 'string' ? route.que
 const type = computed(() => linked.value && route.query.kind === 'incident' ? 'incident' : linked.value ? 'hours' : 'missing_hours');
 const editing = computed(() => !route.params.item && (!!linked.value || route.query.new === '1'));
 const description = ref(''), activity = ref(''), day = ref(''), hours = ref(''), error = ref(''), busy = ref(false), saved = ref(false);
-const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+const today = localDate(Date.now());
 const command = createCommand();
 const appeals = ref<InstanceType<typeof HourAppeals>>();
 let formVersion = 0;

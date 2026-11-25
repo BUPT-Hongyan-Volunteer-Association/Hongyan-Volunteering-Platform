@@ -10,16 +10,6 @@ export function parseCalendarDate(value: unknown): Date | null {
   return Number.isFinite(date.getTime()) && date.toISOString().startsWith(value + 'T') ? date : null;
 }
 
-export function serviceDayMilliseconds(times: readonly ScheduleSlot[], serviceDate: string) {
-  const start = Date.parse(serviceDate + 'T00:00:00+08:00');
-  const end = start + day;
-  return times.reduce((total, slot) => {
-    const from = Math.max(start, Date.parse(slot.starts_at));
-    const until = Math.min(end, Date.parse(slot.ends_at));
-    return total + Math.max(0, until - from);
-  }, 0);
-}
-
 export function* occurrences(
   schedule: ActivitySchedule,
   weeklyWindow?: { from: number; to: number },
@@ -80,9 +70,12 @@ export function* servicePeriods(schedule: ActivitySchedule | undefined, from: nu
   }
 }
 
-export function slots(schedule?: ActivitySchedule) {
-  if (!schedule) return [];
-  return Array.from(occurrences(schedule), ({ slot }) => slot);
+export function serviceDayMilliseconds(schedule: ActivitySchedule | undefined, serviceDate: string) {
+  const from = Date.parse(serviceDate + 'T00:00:00+08:00'), to = from + day;
+  let duration = 0;
+  for (const { start, end } of servicePeriods(schedule, from, to))
+    duration += Math.min(end, to) - Math.max(start, from);
+  return duration;
 }
 
 export function validateSchedule(schedule: ActivitySchedule) {

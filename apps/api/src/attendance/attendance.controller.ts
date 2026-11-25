@@ -7,7 +7,7 @@ import type {
   VersionAction,
 } from '@hongyan/contracts/types';
 import { workspaceScope, pagination, publishedRevision, type LoadedActivity } from '../activities/read.js';
-import { parseCalendarDate, serviceDayMilliseconds, slots } from '../activities/schedule.js';
+import { parseCalendarDate, serviceDayMilliseconds } from '../activities/schedule.js';
 import { validate } from '../validation.js';
 import { checkVersion, BusinessError, envelope, invalid, invisible } from '../http.js';
 import { Workflow } from '../workflow.js';
@@ -29,7 +29,7 @@ function dateOnly(value: string): Date {
 function checkSchedule(activity: LoadedActivity, day: string) {
   const approved = publishedRevision(activity);
   const schedule = (approved?.content as unknown as ActivityInput | undefined)?.schedule;
-  if (!(serviceDayMilliseconds(slots(schedule), day) > 0))
+  if (!(serviceDayMilliseconds(schedule, day) > 0))
     invalid('service_date', '请选择活动获批安排内的服务日期');
 }
 

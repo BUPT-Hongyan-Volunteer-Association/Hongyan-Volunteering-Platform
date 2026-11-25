@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { NoticeWorker } from '../dist/notices/notice.worker.js';
-import { slots } from '../dist/activities/schedule.js';
 import { createScheduleDataset, createScheduleDemo } from './timeline-fixture.mjs';
 
 import { withPages, lostTeamMessage, link, button, accountSecurity, visible, openOptions, chooseDate, pickOption, holdResponse, settleRender, capture, fits } from './page-environment.mjs';
@@ -1443,7 +1442,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       }
     });
 
-    await t.test('撤回或驳回后工作区和表单回到获批版本，原内容可再次选用', async () => {
+    await t.test('撤回或驳回后工作区和表单回到获批版本，原内容可再次选用', async (t) => {
       await owner.goto(web + '/managed/' + first.id + '/edit');
       const title = owner.getByLabel('活动标题', { exact: true });
       await title.fill('准备撤回的标题');
@@ -1460,8 +1459,29 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await button(owner, '保存草稿').click();
       await button(owner, '提交审核').click();
       await visible(button(owner, '撤回送审'));
+      await teacher.setViewportSize({ width: 1440, height: 900 });
+      const reads = { queue: 0, detail: 0, managed: 0 };
+      const countReads = req => {
+        if (req.method() !== 'GET') return;
+        const path = new URL(req.url()).pathname;
+        if (path === '/api/v1/admin/activity-reviews') reads.queue++;
+        else if (path.startsWith('/api/v1/admin/activity-reviews/')) reads.detail++;
+        else if (path.startsWith('/api/v1/organizer/activities/')) reads.managed++;
+      };
+      teacher.on('request', countReads);
+      t.after(() => teacher.off('request', countReads));
       await teacher.goto(admin + '/reviews');
-      await teacher.getByRole('link', { name: /准备撤回的标题/ }).click();
+      const revised = teacher.getByRole('link', { name: /准备撤回的标题/ });
+      await revised.click();
+      await visible(teacher.getByRole('heading', { name: /准备撤回的标题 · 送审版本/ }));
+      const other = demoActivities.pending.title;
+      await teacher.getByRole('link', { name: new RegExp(other + ' · 版本') }).click();
+      await visible(teacher.getByRole('heading', { name: new RegExp(other + ' · 送审版本') }));
+      assert.deepEqual(reads, { queue: 1, detail: 2, managed: 0 });
+      await link(teacher, '返回审核队列').click();
+      await visible(revised);
+      assert.equal(reads.queue, 2);
+      await revised.click();
       await teacher.getByLabel('审核意见（驳回必填）').fill('沿用原安排');
       await button(teacher, '驳回').click();
       await visible(teacher.getByText('已驳回', { exact: true }).first());
@@ -1908,12 +1928,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
     });
 
     await t.test('负责人跨页批量登记现场异常并可按日期查回和撤销', async () => {
-      const activity = await db.activity.findUniqueOrThrow({ where: { id: first.id } });
-      const { content } = await db.activityRevision.findUniqueOrThrow({
-        where: { activity_id_revision: { activity_id: first.id, revision: activity.published_revision } },
-      });
-      const [slot] = slots(content.schedule);
-      const date = new Date(Date.parse(slot.starts_at) + 8 * 3600000).toISOString().slice(0, 10);
+      const date = firstDate;
       await owner.setViewportSize({ width: 1440, height: 900 });
       await owner.goto(web + '/managed');
       await link(owner, demoActivities.open.title).click();

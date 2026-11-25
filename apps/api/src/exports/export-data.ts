@@ -106,12 +106,13 @@ export async function resolveExportScope(tx: Tx, actor: Actor, input: ExportInpu
     await authorizeHourLedger(tx, actor, { type: 'activity_hours', activity_id });
     const student_ids = input.student_ids;
     if (student_ids) {
-      const found = await tx.hourRecord.findMany({
-        where: { activity_id, student_id: { in: student_ids }, ...approvedOrigin },
-        select: { student_id: true },
-        distinct: ['student_id'],
+      const count = await tx.student.count({
+        where: {
+          id: { in: student_ids },
+          hour_records: { some: { activity_id, ...approvedOrigin } },
+        },
       });
-      if (found.length !== student_ids.length)
+      if (count !== student_ids.length)
         invalid('student_ids', '所选学生不在该活动时长范围内');
     }
     return compact({

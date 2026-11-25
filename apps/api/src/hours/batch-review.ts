@@ -63,10 +63,11 @@ async function checkedRows(tx: Tx, batch: HourImportBatch, activity: LoadedActiv
   const { existing, daily } = indexHistory(await readHistory(tx, rows));
   const facts = await readFactReviews(tx, rows);
   const coverage = approvedCoverage(activity.revisions);
+  const today = beijingDay(now);
   const entries = rows.map((row) => {
     const record = existing.get(recordKey(row));
     const duration = coverage(row.bound_schedule_revision, row.service_date);
-    if (duration === 0 || row.service_date > beijingDay(now)) versionConflict();
+    if (duration === 0 || row.service_date > today) versionConflict();
     if (row.action === 'add') {
       if (record || row.bound_schedule_revision !== (batch.metadata as unknown as SourceInfo).schedule_revision)
         versionConflict();

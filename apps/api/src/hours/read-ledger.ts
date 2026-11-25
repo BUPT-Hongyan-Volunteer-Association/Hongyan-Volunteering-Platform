@@ -1,5 +1,5 @@
 import type { HourRecord as HourView } from '@hongyan/contracts/types';
-import type { HourRecord, Prisma } from '../generated/prisma/client.js';
+import { Prisma, type HourRecord } from '../generated/prisma/client.js';
 import { type Actor, studentId } from '../auth/session.guard.js';
 import { managedScope, pagination, staff } from '../activities/read.js';
 import { parseCalendarDate } from '../activities/schedule.js';
@@ -111,14 +111,20 @@ export async function readHourLedgerWithScope(
   filters: HourLedgerFilters,
   page?: ReturnType<typeof pagination>,
 ) {
-  const where = { ...scopeWhere, ...approvedOrigin, service_date: ledgerDateRange(filters) };
-  const visible = { ...where, ...(!filters.include_history && { status: 'current' }) };
+  const where = { ...scopeWhere, ...approvedOrigin, service_date: ledgerDateRange(filters),
+    ...(!filters.include_history && { status: 'current' }) };
   const records = await tx.hourRecord.findMany({
-    where: visible, include: hourRecordInclude,
+    where, include: hourRecordInclude,
     ...(page && { skip: page.skip, take: page.page_size }),
     orderBy: [{ service_date: 'desc' }, { created_at: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
   });
-  const total = page ? await tx.hourRecord.count({ where: visible }) : records.length;
-  const sum = await tx.hourRecord.aggregate({ where: { ...where, status: 'current' }, _sum: { hours: true } });
-  return { items: await hourRecordViews(tx, records), total, total_hours: sum._sum.hours?.toFixed(1) ?? '0.0' };
+  const items = await hourRecordViews(tx, records);
+  if (!page) {
+    const hours = records.reduce((sum, row) => row.status === 'current' ? sum.plus(row.hours) : sum, new Prisma.Decimal(0));
+    return { items, total: records.length, total_hours: hours.toFixed(1) };
+  }
+  const groups = await tx.hourRecord.groupBy({ by: ['status'], where, _count: true, _sum: { hours: true } });
+  const total = groups.reduce((count, group) => count + group._count, 0);
+  const current = groups.find(group => group.status === 'current');
+  return { items, total, total_hours: current?._sum.hours?.toFixed(1) ?? '0.0' };
 }
