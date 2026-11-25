@@ -189,6 +189,7 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   await page.getByRole('navigation', { name: '后台导航' }).getByRole('link', { name: '学生档案', exact: true }).click();
   await page.waitForURL('**/manage/students');
   await page.getByRole('heading', { name: '学生档案' }).waitFor();
+  assert.equal(await page.getByRole('combobox', { name: '级部', exact: true }).count(), 0);
   await page.getByLabel('学号或姓名').fill('0000001201');
   await button('查询').click();
   const studentRow = page.getByRole('row', { name: /0000001201/ });
