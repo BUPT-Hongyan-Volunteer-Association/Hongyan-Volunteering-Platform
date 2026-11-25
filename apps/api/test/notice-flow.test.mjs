@@ -25,10 +25,10 @@ test('活动时间按北京时间显示，入群信息只在正文里提示更�
   assert.doesNotMatch(body, /旧群号|新群号/);
 });
 
-test('结果日期和联系方式依当前快照显示', () => {
+test('时长导入日期和联系方式依当前快照显示', () => {
   const message = changeNoticeBody([
-    { contacts: ['13800000000'], result_expected_date: '2026-11-25' },
-    { contacts: ['13800000000', '13900000000'], result_expected_date: '2026-11-26' },
+    { contacts: ['13800000000'], hours_import_date: '2026-11-25' },
+    { contacts: ['13800000000', '13900000000'], hours_import_date: '2026-11-26' },
   ]);
   assert.match(message, /2026-11-25 → 2026-11-26/);
   assert.match(message, /联系方式：13800000000 → 13800000000、13900000000/);

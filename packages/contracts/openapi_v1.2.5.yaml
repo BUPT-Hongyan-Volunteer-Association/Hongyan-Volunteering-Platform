@@ -7114,9 +7114,6 @@ components:
           maxLength: 2000
         contacts:
           $ref: '#/components/schemas/activity_contacts'
-        result_expected_date:
-          type: string
-          format: date
         hours_import_date:
           type: string
           format: date
@@ -7218,10 +7215,6 @@ components:
           maxLength: 2000
         contacts:
           $ref: '#/components/schemas/activity_contacts'
-        result_expected_date:
-          type: string
-          nullable: true
-          format: date
         hours_import_date:
           type: string
           nullable: true
@@ -7325,9 +7318,6 @@ components:
           maxLength: 2000
         contacts:
           $ref: '#/components/schemas/activity_contacts'
-        result_expected_date:
-          type: string
-          format: date
         hours_import_date:
           type: string
           format: date
@@ -10232,9 +10222,6 @@ components:
           maxLength: 2000
         contacts:
           $ref: '#/components/schemas/activity_contacts'
-        result_expected_date:
-          type: string
-          format: date
         hours_import_date:
           type: string
           format: date
@@ -11289,7 +11276,7 @@ components:
       - accepted_count
       - capacity
     activity_publication_content:
-      description: 送审和批准要求完整内容。入群文字或二维码至少一项，联系方式至少一项。日期活动的起止日须齐全，校区限沙河校区、西土城校区或沙河及西土城校区，报名时刻按整分钟填写，预计结果公布使用 result_expected_date，预计导入日使用 hours_import_date。预计小时数与口径必须成对填写。
+      description: 送审和批准要求完整内容。入群文字或二维码至少一项，联系方式至少一项。日期活动的起止日须齐全，校区限沙河校区、西土城校区或沙河及西土城校区，报名时刻按整分钟填写，预计导入日使用 hours_import_date。预计小时数与口径必须成对填写。
       allOf:
       - $ref: '#/components/schemas/activity_input'
       - required: [title, description, beneficiaries, campus, location, meeting_point, transport_notes, registration_opens_at, registration_closes_at, capacity, hours_rule_text, schedule]

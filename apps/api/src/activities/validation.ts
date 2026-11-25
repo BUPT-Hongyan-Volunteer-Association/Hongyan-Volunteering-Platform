@@ -26,8 +26,6 @@ export function content(value: unknown, publication = false) {
       if (!schedule?.duration_end_date) need('duration_end_date', '请选择活动结束日期');
     }
     if (!a.contacts?.length) need('contacts', '请至少填写一项联系方式');
-    if (!a.result_expected_date)
-      need('result_expected_date', '请选择预计结果公布日期');
     if (!a.group_join_instructions?.trim() && !a.group_qr_id)
       need('group_join_instructions', '请填写入群方式或上传群二维码');
     if (!a.hours_import_date)

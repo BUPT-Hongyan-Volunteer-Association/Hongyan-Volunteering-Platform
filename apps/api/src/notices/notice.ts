@@ -16,7 +16,6 @@ const fieldLabels = {
   schedule: '活动时间',
   registration_opens_at: '报名开始时间',
   registration_closes_at: '报名截止时间',
-  result_expected_date: '预计结果公布日期',
   contacts: '联系方式',
   campus: '校区',
   location: '活动地点',

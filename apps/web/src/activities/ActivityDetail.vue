@@ -20,7 +20,6 @@ const props = defineProps<{
 const emit = defineEmits<{ applied: [registration: Registration] }>();
 const saving = ref(false);
 const applyError = ref('');
-const statement = ref('');
 const command = createCommand();
 const showSignupDates = computed(() => props.showRegistrations && props.activity.status === 'published' &&
   (!props.activity.my_registration_status || props.activity.my_registration_status === 'withdrawn'));
@@ -45,12 +44,11 @@ async function submit() {
   saving.value = true;
   applyError.value = '';
   const id = props.activity.id;
-  const body = statement.value.trim() ? { statement: statement.value.trim() } : {};
   try {
     const { data } = await applyForActivity({
       path: { id },
-      body,
-      headers: command.headers('apply_for_activity', id, body),
+      body: {},
+      headers: command.headers('apply_for_activity', id, {}),
       throwOnError: true,
     });
     command.confirmed();
@@ -128,30 +126,42 @@ const conditions: [keyof Activity, string, IconName][] = [
         <dl class="facts">
           <dt><UiIcon name="Calendar" />活动日期</dt>
           <dd>{{ serviceDateText(activity.schedule) }}</dd>
-          <template v-if="showSignupDates && activity.registration_closes_at"
-            ><dt><UiIcon name="Calendar" />报名截止</dt>
-            <dd>
-              <mark>{{ date(activity.registration_closes_at) }}</mark>
-            </dd></template
-          >
           <dt><UiIcon name="User" />录取名额</dt>
           <dd>{{ activity.capacity }} 人</dd>
-          <template v-if="activity.expected_hours"
-            ><dt><UiIcon name="Timer" />预计时长</dt>
-            <dd>
-              {{ activity.expected_hours_basis === 'whole_activity' ? '整期' : '每次' }}
-              {{ activity.expected_hours }} 小时
-            </dd></template
-          >
+          <template v-if="showSignupDates && activity.registration_opens_at">
+            <dt><UiIcon name="Calendar" />报名开放</dt>
+            <dd><time :datetime="activity.registration_opens_at">{{ date(activity.registration_opens_at) }}</time></dd>
+          </template>
+          <template v-if="showSignupDates && activity.registration_closes_at">
+            <dt><UiIcon name="Calendar" />报名截止</dt>
+            <dd><mark><time :datetime="activity.registration_closes_at">{{ date(activity.registration_closes_at) }}</time></mark></dd>
+          </template>
         </dl>
+        <section v-if="activity.expected_hours || activity.hours_import_date || activity.hours_rule_text" class="service-hours">
+          <h2>服务时长</h2>
+          <dl>
+            <template v-if="activity.expected_hours">
+              <dt>预计时长</dt>
+              <dd>{{ activity.expected_hours_basis === 'whole_activity' ? '整期' : '每次' }} {{ activity.expected_hours }} 小时</dd>
+            </template>
+            <template v-if="activity.hours_rule_text">
+              <dt>时长认定</dt>
+              <dd>{{ activity.hours_rule_text }}</dd>
+            </template>
+            <template v-if="activity.hours_import_date">
+              <dt>预计时长导入日期</dt>
+              <dd><time :datetime="activity.hours_import_date">{{ activity.hours_import_date }}</time></dd>
+            </template>
+          </dl>
+        </section>
       </div>
       <div class="detail-body">
         <section v-if="activity.description || activity.beneficiaries">
           <h2>服务内容</h2>
-          <p>{{ activity.description }}</p>
+          <p v-if="activity.description">{{ activity.description }}</p>
           <p v-if="activity.beneficiaries">服务对象 · {{ activity.beneficiaries }}</p>
         </section>
-        <section>
+        <section v-if="activity.group_qr_id || conditions.some(([key]) => activity[key])">
           <h2>集合与参与条件</h2>
           <dl class="conditions">
             <template v-if="activity.group_qr_id"><dt>入群二维码</dt><dd><img width="180" style="max-width:100%" :src="'/api/v1/activity-group-images/' + activity.group_qr_id" alt="活动群二维码" /></dd></template>
@@ -163,41 +173,6 @@ const conditions: [keyof Activity, string, IconName][] = [
             </template>
           </dl>
         </section>
-        <details v-if="canApply" class="apply-statement">
-          <summary>报名说明（选填）</summary>
-          <label
-            >申请说明<textarea v-model="statement" maxlength="1000" :disabled="saving" />
-          </label>
-        </details>
-        <details
-          v-if="
-            (showSignupDates && activity.registration_opens_at) ||
-            activity.result_expected_date ||
-            activity.selection_text ||
-            activity.hours_rule_text
-          "
-        >
-          <summary>{{ showSignupDates ? '录取、时长与报名时间' : '录取与时长' }}</summary>
-          <dl>
-            <template v-if="activity.selection_text"
-              ><dt>录取说明</dt>
-              <dd>{{ activity.selection_text }}</dd></template
-            >
-            <template v-if="activity.hours_import_date"><dt>预计时长导入日期</dt><dd>{{ activity.hours_import_date }}</dd></template>
-            <template v-if="activity.hours_rule_text"
-              ><dt>时长认定</dt>
-              <dd>{{ activity.hours_rule_text }}</dd></template
-            >
-            <template v-if="showSignupDates && activity.registration_opens_at"
-              ><dt>报名开放</dt>
-              <dd>{{ date(activity.registration_opens_at) }}</dd></template
-            >
-            <template v-if="activity.result_expected_date"
-              ><dt>结果公布</dt>
-              <dd>{{ activity.result_expected_date }}</dd></template
-            >
-          </dl>
-        </details>
       </div>
     </div>
     <footer class="detail-footer">
@@ -314,20 +289,15 @@ p {
   font-size: 14px;
   overflow-wrap: anywhere;
 }
-details {
-  margin-top: 8px;
+.service-hours {
+  margin-top: 18px;
 }
-summary {
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.service-hours dl {
+  grid-template-columns: max-content minmax(0, 1fr);
 }
-summary::before {
-  content: '▸';
-}
-details[open] summary::before {
-  content: '▾';
+.service-hours dt,
+.service-hours time {
+  white-space: nowrap;
 }
 .detail-footer {
   display: flex;

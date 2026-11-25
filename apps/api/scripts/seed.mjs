@@ -43,7 +43,6 @@ function activityContent(scene) {
     transport_notes: '请步行至集合地点', capacity: 30,
     registration_opens_at: at(d - 10, '09:00').toISOString(),
     registration_closes_at: at(d - 2, '18:00').toISOString(),
-    result_expected_date: day(d - 1),
     schedule: { schedule_type: 'continuous', starts_at: at(d, '09:00').toISOString(), ends_at: at(d, '11:00').toISOString() },
     eligibility_text: '本院学生', selection_text: '负责人核对报名信息后确认',
     expected_hours: '2.0', expected_hours_basis: 'per_occurrence',

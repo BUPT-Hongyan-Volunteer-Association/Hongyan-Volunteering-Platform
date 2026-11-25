@@ -358,7 +358,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       const savedContent = (await db.activityRevision.findFirstOrThrow({
         where: { activity_id:first.id }, orderBy: { revision:'desc' },
       })).content;
-      for (const key of ['schedule','registration_opens_at','registration_closes_at','result_expected_date','hours_import_date'])
+      for (const key of ['schedule','registration_opens_at','registration_closes_at','hours_import_date'])
         assert.deepEqual(savedContent[key], oldContent[key]);
       await button(owner, '提交审核').click();
       await visible(owner.getByText('已送审，内容已冻结'));
@@ -1475,8 +1475,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await link(student, demoActivities.open.title).click();
       const instructions = '录取后向负责人领取群号';
       assert.equal(await student.getByText(instructions, { exact: true }).count(), 0);
-      await student.getByText('报名说明（选填）', { exact: true }).click();
-      await student.getByLabel('申请说明').fill('可准时到场');
+      assert.equal(await student.getByLabel('申请说明').count(), 0);
       await button(student, '申请报名').click();
       await visible(button(student, '已提交，待审核'));
 
@@ -1486,8 +1485,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await button(student, '撤回报名').click();
       await visible(student.getByText('已撤回报名', { exact: true }));
       await link(student, '查看活动详情').click();
-      await student.getByText('报名说明（选填）', { exact: true }).click();
-      await student.getByLabel('申请说明').fill('可准时到场');
       await button(student, '重新申请报名').click();
       await visible(button(student, '已提交，待审核'));
 
@@ -1496,13 +1493,12 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await link(owner, '报名名单').click();
       await owner.getByLabel('姓名或学号').fill('0000000001');
       await button(owner, '查看体验学生').click();
-      await visible(owner.getByText('可准时到场', { exact: true }));
       await button(owner, '录取此人').click();
       await visible(owner.getByText('已录取体验学生', { exact: true }));
 
       await student.goto(web);
       await link(student, '我的报名').click();
-      await visible(student.locator('.summary-list li').filter({ hasText: demoActivities.open.title }).getByText('可准时到场', { exact: false }));
+      await visible(student.locator('.summary-list li').filter({ hasText: demoActivities.open.title }));
       await visible(student.getByText('已录取', { exact: true }));
       await link(student, '查看活动详情').click();
       await visible(student.getByText(instructions, { exact: true }));
@@ -1708,7 +1704,6 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         expected_hours_basis: 'per_occurrence',
         registration_opens_at: dateAt(-1) + 'T09:00:00+08:00',
         registration_closes_at: dateAt(firstSaturday - 1) + 'T18:00:00+08:00',
-        result_expected_date: dateAt(firstSaturday - 1),
         schedule: {
           schedule_type: 'weekly',
           duration_start_date: dateAt(firstSaturday),
@@ -1824,11 +1819,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         ['预计时长导入日期', '2027-05-06'],
         ['报名开放日期', '2027-04-30'],
         ['报名截止日期', '2027-05-01'],
-        ['预计结果公布日期', '2027-05-01'],
       ])
         await chooseDate(owner, label, day);
       assert.equal(await owner.locator('.field.invalid').count(), 0);
-      assert.equal(await owner.locator('.field').filter({hasText:'预计结果公布日期'}).getByRole('combobox').count(), 0);
+      assert.equal(await owner.locator('.field').filter({hasText:'预计结果公布日期'}).count(), 0);
       const time = owner.getByRole('combobox', { name: '报名截止时分' });
       await time.click();
       const clock = owner.locator('.activity-clock:visible');
@@ -1864,7 +1858,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await visible(owner.getByText('草稿已保存', { exact: true }));
       await owner.reload();
       assert.equal(await owner.getByLabel('联系方式 3',{exact:true}).inputValue(),'13900000000');
-      assert.match(await button(owner,'预计结果公布日期').innerText(),/2027-05-01/);
+      assert.match(await button(owner,'预计时长导入日期').innerText(),/2027-05-06/);
       assert.equal(await time.inputValue(), chosen);
       await owner.waitForFunction(() => document.querySelector('.group-qr')?.naturalWidth > 0);
       await button(owner, '提交审核').click();
@@ -1875,8 +1869,25 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await button(teacher,'批准发布').click();
       await visible(teacher.getByText('已批准发布',{exact:true}));
       await student.goto(web + '/activities/' + activityId);
-      await student.getByText('录取、时长与报名时间',{exact:true}).click();
-      assert.equal(await student.locator('dt').filter({hasText:'结果公布'}).locator('+ dd').innerText(),'2027-05-01');
+      const detail = student.locator('.activity-detail');
+      await visible(detail.getByRole('heading', {name:'服务时长'}));
+      assert.equal(await detail.getByText(/结果公布|录取说明|报名说明/).count(), 0);
+      const opens = detail.locator('dt').filter({hasText:'报名开放'});
+      assert.match(await opens.locator('+ dd').innerText(), /2027.04.30/);
+      assert.equal(await opens.locator('+ dd + dt').innerText(), '报名截止');
+      const importDate = detail.getByText('预计时长导入日期', {exact:true});
+      for (const width of [390, 1440]) {
+        await student.setViewportSize({width, height:900});
+        assert.equal(await importDate.locator('+ dd').innerText(), '2027-05-06');
+        for (const field of [importDate, importDate.locator('+ dd time')]) {
+          assert.equal(await field.evaluate(el => {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            return range.getClientRects().length;
+          }), 1);
+        }
+        await fits(student);
+      }
       await button(student,'联系负责人').click();
       const contactDialog = student.getByRole('dialog',{name:'联系负责人'});
       for (const text of ['13800000000','library@example.org','13900000000'])

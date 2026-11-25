@@ -384,7 +384,6 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       'duration_start_date',
       'duration_end_date',
       'contacts',
-      'result_expected_date',
       'group_join_instructions',
       'hours_import_date',
     ])
@@ -394,7 +393,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       );
     for (const [field, value] of Object.entries({
       phone: '13800000000', wechat: 'reader01', contact_text: '服务台',
-      result_expected_at: '2026-11-25T01:00:00Z', hours_import_expected_at: '2026-11-25T01:00:00Z',
+      result_expected_date: '2026-11-25', result_expected_at: '2026-11-25T01:00:00Z', hours_import_expected_at: '2026-11-25T01:00:00Z',
     })) {
       const retired = await save({ [field]: value });
       assert.equal(retired.status, 422, field);
@@ -403,8 +402,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     const invalidContacts = await save({ contacts: ['13800000000','  '] });
     assert.equal(invalidContacts.status, 422);
     assert.ok(invalidContacts.details.some(d => d.field === 'contacts.1'));
-    assert.equal((await save({result_expected_date:'2027-01-01T09:30:00+08:00'})).status,422);
-    assert.equal((await save({contacts:[], result_expected_date:'2025-05-01'})).status,200);
+    assert.equal((await save({contacts:[]})).status,200);
     assert.ok((await send()).details.some(d => d.field === 'contacts'));
     const png =
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6kSAAAAAASUVORK5CYII=';
@@ -429,7 +427,6 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       },
       registration_opens_at: at('09:00:00'),
       registration_closes_at: at('09:30:00'),
-      result_expected_date: '2025-05-01',
       group_qr_upload: png,
       hours_rule_text: '以实到记录为准',
       hours_import_date: '2025-05-05',
@@ -453,7 +450,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       assert.equal(items.length, 1);
       assert.equal(items[0].group_qr_id, undefined);
       assert.deepEqual(items[0].contacts, ['13800000000', '志协办公室 A205', '13900000000']);
-      assert.equal(items[0].result_expected_date, '2025-05-01');
+      assert.equal(items[0].result_expected_date, undefined);
       assert.equal(items[0].result_expected_at, undefined);
     }
     assert.equal((await student.request(publicPath)).data.group_qr_id, undefined);

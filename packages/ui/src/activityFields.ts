@@ -28,7 +28,6 @@ export const fieldGroups: { title: string; icon: IconName; fields: Field[] }[] =
       ['duration_end_date', '活动结束日期', 'date'],
       ['registration_opens_at', '报名开放', 'datetime-local'],
       ['registration_closes_at', '报名截止', 'datetime-local'],
-      ['result_expected_date', '预计结果公布日期', 'date'],
     ],
   },
   {
