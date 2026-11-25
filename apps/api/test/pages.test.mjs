@@ -1372,12 +1372,12 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
     });
 
     await t.test('审核日程时间轴同时显示进行中与待审核', async () => {
-      const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+      const now = Date.now();
+      const workingStart = now + 5 * 86400000;
       const account = await db.account.findUniqueOrThrow({ where: { username: '0000000003' } });
       const approved = await db.activityRevision.findFirstOrThrow({
         where: { activity_id: first.id, revision: 1 },
       });
-      const dayMs = 86400000;
       const revised = await db.activity.create({
         data: {
           activity_code: 'TL-9301',
@@ -1397,8 +1397,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
                   title: '待审修订演示',
                   schedule: {
                     schedule_type: 'continuous',
-                    starts_at: new Date(Date.now() - 1800_000).toISOString(),
-                    ends_at: new Date(Date.now() + 1800_000).toISOString(),
+                    starts_at: new Date(now - 1800_000).toISOString(),
+                    ends_at: new Date(now + 1800_000).toISOString(),
                   },
                 },
               },
@@ -1411,8 +1411,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
                   title: '待审修订演示',
                   schedule: {
                     schedule_type: 'continuous',
-                    starts_at: new Date(Date.now() + 5 * dayMs).toISOString(),
-                    ends_at: new Date(Date.now() + 5 * dayMs + 5400_000).toISOString(),
+                    starts_at: new Date(workingStart).toISOString(),
+                    ends_at: new Date(workingStart + 5400_000).toISOString(),
                   },
                 },
               },
@@ -1425,9 +1425,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       });
       try {
         await teacher.setViewportSize({ width: 1200, height: 900 });
-        for (const revision of ['working', 'published']) {
+        for (const [revision, instant] of [['working', workingStart], ['published', now]]) {
+          const date = new Date(instant + 8 * 3600_000).toISOString().slice(0, 10);
           await teacher.goto(
-            admin + '/schedule?date=' + today + '&unit=month&view=chart&revision=' + revision +
+            admin + '/schedule?date=' + date + '&unit=month&view=chart&revision=' + revision +
               '&q=' + encodeURIComponent('待审修订演示'),
           );
           const row = teacher.locator('.chart tbody tr').filter({ hasText: '待审修订演示' });
