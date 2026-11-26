@@ -102,7 +102,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const wrongSheet = await uploadImport(
         teacher,
         buildWorkbook({
-          sheets: [rosterSheet([{ number: 2, values: ['0000000901', '测试', '', '', ''] }], { name: '填写说明' })],
+          sheets: [rosterSheet([{ number: 2, values: ['0000000901', '测试', '', ''] }], { name: '填写说明' })],
         }),
       );
       assert.equal(wrongSheet.status, 'invalid');
@@ -118,7 +118,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
                 {
                   number: 1,
                   cells: Object.fromEntries(
-                    ['学号', '姓名', '级部', '年级', '编号'].map((value, index) => [
+                    ['学号', '姓名', '年级', '编号'].map((value, index) => [
                       String.fromCharCode(65 + index),
                       value,
                     ]),
@@ -138,7 +138,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
         workbook(
           Array.from({ length: 5_001 }, (_, index) => ({
             number: index + 2,
-            values: [String(8100000000 + index), '超限学生' + index, '', '', ''],
+            values: [String(8100000000 + index), '超限学生' + index, '', ''],
           })),
         ),
       );
@@ -147,7 +147,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
     });
 
     await t.test('上传幂等键只受理一次，内容变化时冲突', async () => {
-      const bytes = workbook([{ number: 2, values: ['0000000903', '幂等甲', '', '', ''] }]);
+      const bytes = workbook([{ number: 2, values: ['0000000903', '幂等甲', '', ''] }]);
       const key = randomUUID();
       const first = await teacher.upload('/admin/student-imports', bytes, '幂等.xlsx', key);
       assert.equal(first.status, 202);
@@ -156,7 +156,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       assert.equal((await waitImport(teacher, first.data.id)).status, 'ready');
       const changed = await teacher.upload(
         '/admin/student-imports',
-        workbook([{ number: 2, values: ['0000000904', '幂等乙', '', '', ''] }]),
+        workbook([{ number: 2, values: ['0000000904', '幂等乙', '', ''] }]),
         '幂等.xlsx',
         key,
       );
@@ -166,21 +166,21 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
 
     await t.test('预览按原表行号定位格式、公式、数值、未知列与资料冲突', async () => {
       const rows = [
-        { number: 2, values: ['0000000101', '张三', '本科生', '2026', '0000000201'] },
-        { number: 3, values: ['0000000001', '体验学生', '', '', ''] },
-        { number: 4, values: ['0000000002', '甲负责人改名', '', '', ''] },
-        { number: 5, values: ['0000000101', '张三', '本科生', '2026', '0000000201'] },
-        { number: 6, values: ['0000000102', '李四', '', '', '123'] },
-        { number: 7, values: [num(1234567890), '数值学号', '', '', ''] },
-        { number: 8, values: [formula('A2', '0000000101'), '公式学号', '', '', ''] },
+        { number: 2, values: ['0000000101', '张三', '2026', '0000000201'] },
+        { number: 3, values: ['0000000001', '体验学生', '', ''] },
+        { number: 4, values: ['0000000002', '甲负责人改名', '', ''] },
+        { number: 5, values: ['0000000101', '张三', '2026', '0000000201'] },
+        { number: 6, values: ['0000000102', '李四', '', '123'] },
+        { number: 7, values: [num(1234567890), '数值学号', '', ''] },
+        { number: 8, values: [formula('A2', '0000000101'), '公式学号', '', ''] },
         {
           number: 9,
           values: [],
           extra: { A: { blank: true }, B: { blank: true }, C: { blank: true }, D: { blank: true }, E: { blank: true } },
         },
-        { number: 10, values: ['0000000103', { inline: '王五' }, '', '', ''] },
-        { number: 11, values: ['0000000104', '未知列', '', '', ''], extra: { G: '多余' } },
-        { number: 250, values: ['0000000105', '赵六', '', '', ''] },
+        { number: 10, values: ['0000000103', { inline: '王五' }, '', ''] },
+        { number: 11, values: ['0000000104', '未知列', '', ''], extra: { G: '多余' } },
+        { number: 250, values: ['0000000105', '赵六', '', ''] },
       ];
       const sheet = rosterSheet(rows, { dimension: 'A1:E201', tableRef: 'A1:E201' });
       const batch = await uploadImport(
@@ -248,7 +248,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
     });
 
     await t.test('相同资料的第二行有行级错误时不被去重掩盖', async () => {
-      const profile = ['0000000801', '重复行学生', '本科生', '2026', '0000000901'];
+      const profile = ['0000000801', '重复行学生', '2026', '0000000901'];
       const batch = await uploadImport(
         teacher,
         workbook([
@@ -282,8 +282,8 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const batch = await uploadImport(
         teacher,
         workbook([
-          { number: 2, values: ['0000000201', '陈一', '本科生', '2026', '0000000301'] },
-          { number: 3, values: ['0000000202', '陈二', '', '', ''] },
+          { number: 2, values: ['0000000201', '陈一', '2026', '0000000301'] },
+          { number: 3, values: ['0000000202', '陈二', '', ''] },
         ]),
       );
       assert.equal(batch.status, 'ready');
@@ -310,7 +310,6 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       assert.equal(stored.must_change_password, true);
       assert.deepEqual(stored.roles.map((role) => role.role), ['student']);
       assert.equal(stored.student.student_no, '0000000201');
-      assert.equal(stored.student.cohort, '本科生');
       assert.equal(stored.student.grade, '2026');
       assert.equal(stored.student.class_name, '0000000301');
 
@@ -341,7 +340,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
     await t.test('确认事务复核版本与源摘要，冲突整批回滚', async () => {
       const batch = await uploadImport(
         teacher,
-        workbook([{ number: 2, values: ['0000000203', '顾三', '', '', ''] }]),
+        workbook([{ number: 2, values: ['0000000203', '顾三', '', ''] }]),
       );
       assert.equal(batch.status, 'ready');
       const stale = await teacher.write(
@@ -377,8 +376,8 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const batch = await uploadImport(
         teacher,
         workbook([
-          { number: 2, values: ['0000000201', '陈一', '本科生', '2026', '0000000301'] },
-          { number: 3, values: ['0000000202', '陈二', '', '', ''] },
+          { number: 2, values: ['0000000201', '陈一', '2026', '0000000301'] },
+          { number: 3, values: ['0000000202', '陈二', '', ''] },
         ]),
       );
       assert.equal(batch.status, 'ready');
@@ -410,16 +409,16 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
 
     await t.test('另一批先写入相同资料则跳过，资料冲突整批回滚', async () => {
       const firstBytes = workbook([
-        { number: 2, values: ['0000000301', '甲同学', '本科生', '2026', ''] },
-        { number: 3, values: ['0000000302', '乙同学', '', '', ''] },
+        { number: 2, values: ['0000000301', '甲同学', '2026', ''] },
+        { number: 3, values: ['0000000302', '乙同学', '', ''] },
       ]);
       const first = await uploadImport(teacher, firstBytes);
       const duplicate = await uploadImport(teacher, firstBytes);
       const conflict = await uploadImport(
         teacher,
         workbook([
-          { number: 2, values: ['0000000301', '甲同学改名', '本科生', '2026', ''] },
-          { number: 3, values: ['0000000303', '丙同学', '', '', ''] },
+          { number: 2, values: ['0000000301', '甲同学改名', '2026', ''] },
+          { number: 3, values: ['0000000303', '丙同学', '', ''] },
         ]),
       );
       assert.equal(first.status, 'ready');
@@ -456,7 +455,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
     await t.test('系统失败可按契约重试，invalid 与 committed 不允许重试', async () => {
       const batch = await uploadImport(
         teacher,
-        workbook([{ number: 2, values: ['0000000401', '丁同学', '', '', ''] }]),
+        workbook([{ number: 2, values: ['0000000401', '丁同学', '', ''] }]),
       );
       assert.equal(batch.status, 'ready');
       await db.studentImportBatch.update({
@@ -502,7 +501,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
 
       const invalidBatch = await uploadImport(
         teacher,
-        workbook([{ number: 2, values: [num(1234567890), '错误学号', '', '', ''] }]),
+        workbook([{ number: 2, values: [num(1234567890), '错误学号', '', ''] }]),
       );
       assert.equal(invalidBatch.status, 'invalid');
       const invalidState = await teacher.write(
@@ -546,14 +545,9 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const byName = (await teacher.request('/admin/students?q=' + encodeURIComponent('陈二'))).data;
       assert.equal(byName.total, 1);
       assert.equal(byName.items[0].student_no, '0000000202');
-      const cohort = (await teacher.request('/admin/students?cohort=' + encodeURIComponent('本科生'))).data;
-      assert(cohort.items.some((item) => item.student_no === '0000000201'));
-      assert(cohort.items.every((item) => item.cohort === '本科生'));
-      assert(cohort.cohort_options.includes('本科生'));
-      assert(cohort.cohort_options.every((value) => value.length > 0));
+      assert.equal((await teacher.request('/admin/students?unknown=legacy')).status, 422);
       const grade = (await teacher.request('/admin/students?grade=2026&page_size=100')).data;
       assert(grade.grade_options.every((value) => /^[0-9]{4}$/.test(value)));
-      assert(grade.cohort_options.includes('本科生'));
       const active = (await teacher.request('/admin/students?status=active&page_size=100')).data;
       assert(active.items.every((item) => item.status === 'active'));
       const inactive = (await teacher.request('/admin/students?status=inactive')).data;
@@ -573,11 +567,11 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const injected = workbook([
         {
           number: 2,
-          values: ["0000000001' OR '1'='1", "注入姓名'); DROP TABLE student;--", '', '', ''],
+          values: ["0000000001' OR '1'='1", "注入姓名'); DROP TABLE student;--", '', ''],
         },
         {
           number: 3,
-          values: ['0000000003', "x' OR 1=1 --", '', '', "0000000001' OR '1'='1"],
+          values: ['0000000003', "x' OR 1=1 --", '', "0000000001' OR '1'='1"],
         },
       ]);
       const batch = await uploadImport(teacher, injected, '注入.xlsx');
@@ -600,11 +594,10 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       );
       assert.equal(byQuery.status, 200);
       assert.equal(byQuery.data.total, 0);
-      const byCohort = await teacher.request(
-        '/admin/students?cohort=' + encodeURIComponent("' OR 1=1 --"),
+      const badFilter = await teacher.request(
+        '/admin/students?unknown=' + encodeURIComponent("' OR 1=1 --"),
       );
-      assert.equal(byCohort.status, 200);
-      assert.equal(byCohort.data.total, 0);
+      assert.equal(badFilter.status, 422);
       for (const bad of ["1' OR '1'='1", '1;DROP TABLE student']) {
         const response = await teacher.request(
           '/admin/student-imports/' + encodeURIComponent(bad),
@@ -669,9 +662,9 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
         workbook([
           {
             number: 2,
-            values: ['0000001101', '学院甲', '本科生', '2026', '0000001201', '信息与通信工程学院'],
+            values: ['0000001101', '学院甲', '2026', '0000001201', '信息与通信工程学院'],
           },
-          { number: 3, values: ['0000001102', '学院乙', '', '', '', '计算机学院'] },
+          { number: 3, values: ['0000001102', '学院乙', '', '', '计算机学院'] },
         ]),
       );
       assert.equal(batch.status, 'ready');
@@ -696,11 +689,11 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
         workbook([
           {
             number: 2,
-            values: ['0000001103', '学院冲突', '本科生', '2026', '0000001202', '信息与通信工程学院'],
+            values: ['0000001103', '学院冲突', '2026', '0000001202', '信息与通信工程学院'],
           },
           {
             number: 3,
-            values: ['0000001103', '学院冲突', '本科生', '2026', '0000001202', '计算机学院'],
+            values: ['0000001103', '学院冲突', '2026', '0000001202', '计算机学院'],
           },
         ]),
       );
@@ -715,17 +708,16 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       );
     });
 
-    await t.test('v1.5 五列名单不含级部列也可导入，非法年级按原表行报错', async () => {
+    await t.test('v1.5 五列名单可导入，非法年级按原表行报错', async () => {
       const fiveColumns = buildWorkbook({
         sheets: [
           rosterSheet(
             [
               {
                 number: 2,
-                values: ['2026123456', '五列学生', '', '2026', '0000001901'],
+                values: ['2026123456', '五列学生', '2026', '0000001901'],
               },
             ],
-            { includeCohort: false },
           ),
         ],
         prefix: true,
@@ -734,7 +726,6 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const batch = await uploadImport(teacher, fiveColumns);
       assert.equal(batch.status, 'ready');
       const preview = (await teacher.request('/admin/student-imports/' + batch.id + '/rows')).data;
-      assert.equal(preview.items[0].cohort, undefined);
       assert.equal(preview.items[0].grade, '2026');
       assert.equal(
         (
@@ -747,13 +738,12 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
         200,
       );
       const stored = await db.student.findUniqueOrThrow({ where: { student_no: '2026123456' } });
-      assert.equal(stored.cohort, null);
       assert.equal(stored.grade, '2026');
 
       const badGrade = await uploadImport(
         teacher,
         workbook([
-          { number: 2, values: ['2026001902', '非法年级', '', '大一', ''] },
+          { number: 2, values: ['2026001902', '非法年级', '大一', ''] },
         ]),
       );
       assert.equal(badGrade.status, 'invalid');
@@ -777,23 +767,18 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       );
     });
 
-    await t.test('只按随名单提供的列比较，预览和确认均保留旧档案的级部', async () => {
-      const values = ['2026999101', '跨模板学生', '本科生', '2026', '2026000101', '示例学院'];
-      const roster = (fields, options) => workbook([{ number: 2, values: fields }], options);
+    await t.test('缺少学院列时确认批次保留已有档案资料', async () => {
+      const values = ['2026999101', '跨模板学生', '2026', '2026000101', '示例学院'];
+      const rows = [{ number: 2, values }];
       const confirm = batch => teacher.write('POST', '/admin/student-imports/' + batch.id + '/commit', commitBody(batch));
-      const newFile = roster(values, { includeCohort: false });
-      const pending = await uploadImport(teacher, newFile);
-      assert.equal(pending.status, 'ready');
-      const old = await uploadImport(teacher, roster(values));
-      assert.equal((await confirm(old)).data.created_count, 1);
+      const pending = await uploadImport(teacher, workbook(rows, { includeCollege: false }));
+      const full = await uploadImport(teacher, workbook(rows));
+      assert.equal((await confirm(full)).data.created_count, 1);
       assert.equal((await confirm(pending)).data.skipped_count, 1);
-      const replay = await uploadImport(teacher, newFile);
-      assert.equal(replay.skipped_count, 1);
-      assert.equal((await confirm(replay)).data.skipped_count, 1);
       const student = await db.student.findUniqueOrThrow({ where: { student_no: values[0] } });
-      assert.equal(student.cohort, '本科生');
-      // An explicitly present, empty cohort must still conflict with an existing value.
-      assert.equal((await uploadImport(teacher, roster(values.with(2, '')))).status, 'invalid');
+      assert.equal(student.college, '示例学院');
+      const changed = await uploadImport(teacher, workbook([{ number: 2, values: values.with(4, '') }]));
+      assert.equal(changed.status, 'invalid');
     });
 
     await t.test('年级缺省取学号前四位，统一保存为 YYYY 并支持年级筛选', async () => {
@@ -802,11 +787,11 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
         workbook([
           {
             number: 2,
-            values: ['2026123401', '年级缺省甲', '本科生', '', '0000001801', '信息与通信工程学院'],
+            values: ['2026123401', '年级缺省甲', '', '0000001801', '信息与通信工程学院'],
           },
           {
             number: 3,
-            values: ['2025123402', '年级显式乙', '本科生', '2025级', '', ''],
+            values: ['2025123402', '年级显式乙', '2025级', '', ''],
           },
         ]),
       );
@@ -835,8 +820,6 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       assert.equal(none.total, 0);
       assert.deepEqual(none.grade_options, listed.grade_options);
       assert.deepEqual(none.grade_options, [...new Set(none.grade_options)].sort().reverse());
-      assert.deepEqual(none.cohort_options, listed.cohort_options);
-      assert.equal(new Set(none.cohort_options).size, none.cohort_options.length);
       assert.equal((await teacher.request('/admin/students?grade=26')).status, 422);
     });
 
@@ -847,10 +830,10 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
             [
               {
                 number: 2,
-                values: ['0000001601', '乱序学生', '本科生', '2026', '0000001701', '信息与通信工程学院'],
+                values: ['0000001601', '乱序学生', '2026', '0000001701', '信息与通信工程学院'],
               },
             ],
-            { columnOrder: ['学院', '班级', '年级', '姓名', '学号', '级部'] },
+            { columnOrder: ['学院', '班级', '年级', '姓名', '学号'] },
           ),
         ],
         prefix: true,
@@ -862,7 +845,6 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const row = preview.items[0];
       assert.equal(row.student_no, '0000001601');
       assert.equal(row.name, '乱序学生');
-      assert.equal(row.cohort, '本科生');
       assert.equal(row.grade, '2026');
       assert.equal(row.class_name, '0000001701');
       assert.equal(row.college, '信息与通信工程学院');
@@ -883,7 +865,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
             [
               {
                 number: 2,
-                values: ['0000001401', '缺省学院学生', '本科生', '2026', '0000001501'],
+                values: ['0000001401', '缺省学院学生', '2026', '0000001501'],
               },
             ],
             { includeCollege: false },
@@ -910,7 +892,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
     await t.test('5,000 条非空数据行可校验，表格范围外与空行按规则处理', async () => {
       const rows = Array.from({ length: 5_000 }, (_, index) => ({
         number: index + 2,
-        values: [String(8200000000 + index), '批量学生' + index, '', '', ''],
+        values: [String(8200000000 + index), '批量学生' + index, '', ''],
       }));
       const batch = await uploadImport(
         teacher,
@@ -935,7 +917,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       };
       const batch = await uploadImport(
         teacher,
-        workbook([{ number: 2, values: ['0000000701', '鉴权批次学生', '', '', ''] }]),
+        workbook([{ number: 2, values: ['0000000701', '鉴权批次学生', '', ''] }]),
       );
 
       // 匿名访问
@@ -961,7 +943,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const pendingNo = '0000000702';
       const pending = await uploadImport(
         teacher,
-        workbook([{ number: 2, values: [pendingNo, '待改密学生', '', '', ''] }]),
+        workbook([{ number: 2, values: [pendingNo, '待改密学生', '', ''] }]),
       );
       assert.equal(
         (
@@ -1031,8 +1013,8 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const replayBatch = await uploadImport(
         teacher,
         workbook([
-          { number: 2, values: ['0000000703', '回放学生甲', '', '', ''] },
-          { number: 3, values: ['0000000704', '回放学生乙', '', '', ''] },
+          { number: 2, values: ['0000000703', '回放学生甲', '', ''] },
+          { number: 3, values: ['0000000704', '回放学生乙', '', ''] },
         ]),
       );
       const commitKey = randomUUID();
@@ -1089,7 +1071,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
     });
 
     await t.test('服务启动时恢复已受理但未完成校验的批次', async () => {
-      const bytes = workbook([{ number: 2, values: ['0000000901', '重启恢复学生', '', '', ''] }]);
+      const bytes = workbook([{ number: 2, values: ['0000000901', '重启恢复学生', '', ''] }]);
       const teacherAccount = await db.account.findUniqueOrThrow({ where: { username: 'demo.teacher' } });
       const stuck = await db.studentImportBatch.create({
         data: {

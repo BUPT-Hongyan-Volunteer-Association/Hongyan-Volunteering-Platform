@@ -3,7 +3,7 @@ import { buildWorkbook, rosterSheet } from './xlsx-fixture.mjs';
 
 const mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const workbook = (rows) =>
-  buildWorkbook({ sheets: [rosterSheet(rows, { includeCohort: false })], prefix: true, sharedStrings: true });
+  buildWorkbook({ sheets: [rosterSheet(rows)], prefix: true, sharedStrings: true });
 
 /** 老师从后台真实上传名单、按原表行定位错误、修正后确认，并在学生档案中查到新学生。 */
 export async function checkStudentImportPages(page, admin, { fits, pickOption, db, holdResponse }) {
@@ -17,13 +17,13 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
     await picker.click();
     await (await chooser).setFiles(file);
   };
-  const profile = ['0000001201', '页面导入学生', '本科生', '2026', '0000001301'];
+  const profile = ['0000001201', '页面导入学生', '2026', '0000001301'];
   const invalid = workbook([
     { number: 2, values: profile },
     { number: 3, values: profile, extra: { G: '多余列' } },
     ...Array.from({ length: 99 }, (_, index) => ({
       number: index + 4,
-      values: [String(2026940000 + index), '分页学生' + index, '', index === 0 ? '大一' : '2026', ''],
+      values: [String(2026940000 + index), '分页学生' + index, index === 0 ? '大一' : '2026', ''],
     })),
   ]);
   const fixed = workbook([{ number: 2, values: profile }]);
@@ -90,7 +90,7 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
     const before = new URL(page.url()).pathname;
     await upload({
       name,
-      buffer: workbook([{ number: 2, values: [studentNo, '切换学生' + studentNo.slice(-2), '', '2026', ''] }]),
+      buffer: workbook([{ number: 2, values: [studentNo, '切换学生' + studentNo.slice(-2), '2026', ''] }]),
       mimeType,
     });
     await page.waitForURL(
@@ -127,7 +127,7 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   const beforeConflict = new URL(page.url()).pathname;
   await upload({
     name: '资料冲突.xlsx',
-    buffer: workbook([{ number: 2, values: [conflictNo, '页面冲突甲', '', '2026', ''] }]),
+    buffer: workbook([{ number: 2, values: [conflictNo, '页面冲突甲', '2026', ''] }]),
     mimeType,
   });
   await page.waitForURL((url) => url.pathname !== beforeConflict);
@@ -189,7 +189,6 @@ export async function checkStudentImportPages(page, admin, { fits, pickOption, d
   await page.getByRole('navigation', { name: '后台导航' }).getByRole('link', { name: '学生档案', exact: true }).click();
   await page.waitForURL('**/manage/students');
   await page.getByRole('heading', { name: '学生档案' }).waitFor();
-  assert.equal(await page.getByRole('combobox', { name: '级部', exact: true }).count(), 0);
   await page.getByLabel('学号或姓名').fill('0000001201');
   await button('查询').click();
   const studentRow = page.getByRole('row', { name: /0000001201/ });

@@ -9,7 +9,6 @@ export function studentView(student: {
   id: string;
   version: number;
   student_no: string;
-  cohort: string | null;
   grade: string | null;
   class_name: string | null;
   college: string | null;
@@ -25,7 +24,6 @@ export function studentView(student: {
     updated_at: student.updated_at.toISOString(),
     student_no: student.student_no,
     name: student.account.display_name,
-    ...(student.cohort && { cohort: student.cohort }),
     ...(student.grade && { grade: student.grade }),
     ...(student.class_name && { class_name: student.class_name }),
     ...(student.college && { college: student.college }),
@@ -34,7 +32,7 @@ export function studentView(student: {
   };
 }
 
-const profileFields = ['cohort', 'grade', 'class_name', 'college'] as const;
+const profileFields = ['grade', 'class_name', 'college'] as const;
 
 export async function updateStudent(tx: Tx, id: string, actor: Actor, input: StudentPatch) {
   const include = { account: { select: { display_name: true, active: true } } } as const;

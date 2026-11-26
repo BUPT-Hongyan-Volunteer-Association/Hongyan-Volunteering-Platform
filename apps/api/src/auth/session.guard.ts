@@ -84,7 +84,11 @@ export class SessionGuard implements CanActivate {
       roles: a.roles.map((g) => g.role),
       must_change_password: a.must_change_password,
       ...(a.student && {
-        student: { ...a.student, name: a.display_name, status: 'active' as const },
+        student: {
+          ...a.student,
+          name: a.display_name,
+          status: 'active' as const,
+        },
       }),
     };
     return true;

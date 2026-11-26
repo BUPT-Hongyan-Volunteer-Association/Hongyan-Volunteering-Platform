@@ -216,24 +216,30 @@ async function checkExports(t, db, app, { staffPassword, adminPassword, password
   });
 
   await t.test('后台学生档案可按筛选批量导出，仅教职工可用', async () => {
+    const currentJob = await createExport(teacher, { type: 'admin_students', student_ids: [aliceStudent.id] });
+    const currentFile = await download(teacher, (await waitExport(teacher, currentJob.id)).id);
+    const currentRows = await sheetRows(currentFile.body, '学生档案');
+    assert.deepEqual(currentRows[0], ['学号', '姓名', '年级', '班级', '学院', '账号状态']);
+    assert.equal(currentRows[1][0], aliceStudent.student_no);
+
     for (const [index, account] of synthetic.slice(0, 2).entries()) {
       await db.student.update({
         where: { id: account.student.id },
         data: {
-          cohort: '本科生', grade: '2026', class_name: '0000009' + String(index).padStart(3, '0'),
+          grade: '2026', class_name: '0000009' + String(index).padStart(3, '0'),
           college: '信息与通信工程学院',
         },
       });
     }
-    const expected = result(await teacher.request('/admin/students?cohort=' + encodeURIComponent('本科生') +
-      '&grade=2026&q=' + encodeURIComponent('合成学生0') + '&page_size=100'), 200);
+    const expected = result(await teacher.request('/admin/students?grade=2026&q=' + encodeURIComponent('合成学生0') + '&page_size=100'), 200);
     assert.equal(expected.total, 2);
+    assert.equal((await teacher.write('POST', '/exports', { type: 'admin_students', unsupported: 'x' }, randomUUID())).status, 422);
     const job = await createExport(teacher, {
-      type: 'admin_students', cohort: '本科生', grade: '2026', q: '合成学生0',
+      type: 'admin_students', grade: '2026', q: '合成学生0',
     });
     const file = await download(teacher, (await waitExport(teacher, job.id)).id);
     const rows = await sheetRows(file.body, '学生档案');
-    assert.deepEqual(rows[0], ['学号', '姓名', '级部', '年级', '班级', '学院', '账号状态']);
+    assert.deepEqual(rows[0], ['学号', '姓名', '年级', '班级', '学院', '账号状态']);
     assert.deepEqual(rows.slice(1).map((row) => row[0]), expected.items.map((row) => row.student_no));
     assert.equal(rows.length, 3);
     assert(rows.slice(1).every((row) => row[1].startsWith('合成学生0') && /^0\d{9}$/.test(row[0])));

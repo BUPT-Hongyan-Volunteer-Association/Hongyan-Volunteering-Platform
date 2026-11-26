@@ -144,7 +144,6 @@ export async function resolveExportScope(tx: Tx, actor: Actor, input: ExportInpu
     return compact({
       type: input.type,
       q: input.q?.trim() || undefined,
-      cohort: input.cohort?.trim() || undefined,
       grade: input.grade,
       account_status: input.account_status,
       student_ids,
@@ -378,13 +377,7 @@ async function hoursContent(tx: Tx, scope: StoredScope): Promise<ExportContent> 
 
 async function studentsContent(tx: Tx, scope: StoredScope): Promise<ExportContent> {
   const rows = await tx.student.findMany({
-    where: studentWhere({
-      q: scope.q,
-      cohort: scope.cohort,
-      grade: scope.grade,
-      status: scope.account_status,
-      student_ids: scope.student_ids,
-    }),
+    where: studentWhere({ q: scope.q, grade: scope.grade, status: scope.account_status, student_ids: scope.student_ids }),
     include: { account: { select: { display_name: true, active: true } } },
     orderBy: { student_no: 'asc' },
   });
@@ -392,12 +385,11 @@ async function studentsContent(tx: Tx, scope: StoredScope): Promise<ExportConten
     fileName: '学生档案_' + workbookDate() + '.xlsx',
     sheet: {
       name: '学生档案',
-      headers: ['学号', '姓名', '级部', '年级', '班级', '学院', '账号状态'],
-      widths: [18, 18, 16, 12, 18, 24, 12],
+      headers: ['学号', '姓名', '年级', '班级', '学院', '账号状态'],
+      widths: [18, 18, 12, 18, 24, 12],
       rows: rows.map((row) => [
         row.student_no,
         row.account.display_name,
-        row.cohort ?? '',
         row.grade ?? '',
         row.class_name ?? '',
         row.college ?? '',

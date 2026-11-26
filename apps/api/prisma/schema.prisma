@@ -69,7 +69,6 @@ model Student {
   account_id    String         @unique @db.Uuid
   student_no    String         @unique @db.Char(10)
   version       Int            @default(1)
-  cohort        String?
   grade         String?
   class_name    String?
   college       String?
@@ -107,7 +106,6 @@ model StudentImportRow {
   action                   String
   student_no               String?
   name                     String?
-  cohort                   String?
   grade                    String?
   class_name               String?
   college                  String?

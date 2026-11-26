@@ -5,7 +5,7 @@ export const importSheetName = '学生建档';
 export const maxImportBytes = 5_242_880;
 export const maxImportRows = 5_000;
 
-export const importFields = ['student_no', 'name', 'cohort', 'grade', 'class_name', 'college'] as const;
+export const importFields = ['student_no', 'name', 'grade', 'class_name', 'college'] as const;
 export type ImportField = (typeof importFields)[number];
 
 export interface FieldIssue {
@@ -20,7 +20,6 @@ export type ImportAction = 'create' | 'skip_identical' | 'error';
 export interface NormalizedValues {
   student_no?: string;
   name?: string;
-  cohort?: string;
   grade?: string;
   class_name?: string;
   college?: string;
@@ -37,7 +36,6 @@ export interface EvaluatedRow {
 
 export interface ProfileValues {
   name?: string | null;
-  cohort?: string | null;
   grade?: string | null;
   class_name?: string | null;
   college?: string | null;
@@ -57,7 +55,6 @@ export interface ExistingStudent {
   /** 是否已有学生档案；仅有同名账号时不能当作可跳过的已有档案。 */
   has_record: boolean;
   name: string;
-  cohort: string;
   grade: string;
   class_name: string;
   college: string;
@@ -84,7 +81,6 @@ interface ParsedRow {
 const fieldLabels: Record<ImportField, string> = {
   student_no: '学号',
   name: '姓名',
-  cohort: '级部',
   grade: '年级',
   class_name: '班级',
   college: '学院',
@@ -145,7 +141,7 @@ function parseRow(row: SheetRow, columns: Map<ImportField, number>): ParsedRow {
     errors.push({ field, code: 'unknown_column', message: '表格之外的第 ' + field + ' 列有值' });
   }
   const values: NormalizedValues = {};
-  const signature: ParsedRow['signature'] = { name: '', cohort: '', grade: '', class_name: '', college: '' };
+  const signature: ParsedRow['signature'] = { name: '', grade: '', class_name: '', college: '' };
   for (const field of importFields) {
     const column = columns.get(field);
     const cell = column === undefined ? undefined : cells.get(column);
@@ -247,7 +243,7 @@ export async function parseImportWorkbook(buffer: Buffer): Promise<ParsedImport>
   if (!columns)
     return {
       file_error:
-        '第 1 行表头须包含 学号、姓名、年级、班级（级部兼容旧名单可选，学院可选），列顺序不限，且不使用其他列',
+        '第 1 行表头须包含 学号、姓名、年级、班级（学院可选），列顺序不限，且不使用其他列',
       rows: [],
       row_count: 0,
     };
@@ -263,7 +259,6 @@ export async function parseImportWorkbook(buffer: Buffer): Promise<ParsedImport>
 const signatureOf = (row: ParsedRow) =>
   JSON.stringify([
     row.signature.name,
-    row.signature.cohort,
     row.signature.grade,
     row.signature.class_name,
     row.signature.college,
