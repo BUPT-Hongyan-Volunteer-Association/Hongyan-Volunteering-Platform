@@ -388,16 +388,17 @@ async function studentsContent(tx: Tx, scope: StoredScope): Promise<ExportConten
     include: { account: { select: { display_name: true, active: true } } },
     orderBy: { student_no: 'asc' },
   });
+  const hasCohort = rows.some(row => row.cohort?.trim());
   return {
     fileName: '学生档案_' + workbookDate() + '.xlsx',
     sheet: {
       name: '学生档案',
-      headers: ['学号', '姓名', '级部', '年级', '班级', '学院', '账号状态'],
-      widths: [18, 18, 16, 12, 18, 24, 12],
+      headers: ['学号', '姓名', ...(hasCohort ? ['级部'] : []), '年级', '班级', '学院', '账号状态'],
+      widths: [18, 18, ...(hasCohort ? [16] : []), 12, 18, 24, 12],
       rows: rows.map((row) => [
         row.student_no,
         row.account.display_name,
-        row.cohort ?? '',
+        ...(hasCohort ? [row.cohort ?? ''] : []),
         row.grade ?? '',
         row.class_name ?? '',
         row.college ?? '',

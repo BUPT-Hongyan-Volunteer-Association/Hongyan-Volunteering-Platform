@@ -46,9 +46,8 @@ export async function listStudents(db: Database, query: Record<string, string>) 
   return db.$transaction(
     async (tx) => {
       const total = await tx.student.count({ where });
-      const [options] = await tx.$queryRaw<Pick<StudentPage, 'grade_options' | 'cohort_options'>[]>`
-        SELECT COALESCE(array_agg(DISTINCT grade ORDER BY grade DESC) FILTER (WHERE grade <> ''), '{}') AS grade_options,
-               COALESCE(array_agg(DISTINCT cohort ORDER BY cohort) FILTER (WHERE cohort <> ''), '{}') AS cohort_options
+      const [options] = await tx.$queryRaw<Pick<StudentPage, 'grade_options'>[]>`
+        SELECT COALESCE(array_agg(DISTINCT grade ORDER BY grade DESC) FILTER (WHERE grade <> ''), '{}') AS grade_options
         FROM student
       `;
       const items =

@@ -26,6 +26,7 @@ const { data, loading, error, refresh: load } = usePageRead(() => route.query, a
     page: page.value, page_size: size,
   }, signal, throwOnError: true })).data.data);
 const rows = computed(() => data.value?.items ?? []);
+const showCohort = computed(() => rows.value.some(student => student.cohort));
 const total = computed(() => data.value?.total ?? 0);
 watch(data, async result => {
   const focusId = window.history.state?.returnFocus;
@@ -133,7 +134,7 @@ function goPage(next: number) {
             </th>
             <th scope="col">学号</th>
             <th scope="col">姓名</th>
-            <th scope="col">级部</th>
+            <th v-if="showCohort" scope="col">级部</th>
             <th scope="col">年级</th>
             <th scope="col">班级</th>
             <th scope="col">学院</th>
@@ -153,7 +154,7 @@ function goPage(next: number) {
             </td>
             <th scope="row">{{ student.student_no }}</th>
             <td>{{ student.name }}</td>
-            <td>{{ student.cohort || '—' }}</td>
+            <td v-if="showCohort">{{ student.cohort || '—' }}</td>
             <td>{{ student.grade ? student.grade + '级' : '—' }}</td>
             <td>{{ student.class_name || '—' }}</td>
             <td>{{ student.college || '—' }}</td>

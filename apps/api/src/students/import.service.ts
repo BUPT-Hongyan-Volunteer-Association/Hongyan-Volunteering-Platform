@@ -77,17 +77,19 @@ function rowView(row: {
   errors: Prisma.JsonValue;
   resulting_account_status: string | null;
 }) {
+  const raw = { ...row.raw_values as Record<string, string> };
+  if (!raw.cohort?.trim()) delete raw.cohort;
   return {
     row_number: row.row_number,
     action: row.action,
     ...(row.student_no && { student_no: row.student_no }),
     ...(row.name && { name: row.name }),
-    ...(row.cohort && { cohort: row.cohort }),
+    ...(row.cohort?.trim() && { cohort: row.cohort }),
     ...(row.grade && { grade: row.grade }),
     ...(row.class_name && { class_name: row.class_name }),
     ...(row.college && { college: row.college }),
     errors: row.errors as unknown as FieldIssue[],
-    raw_values: row.raw_values as unknown as Record<string, string>,
+    raw_values: raw,
     ...(row.resulting_account_status && {
       resulting_account_status: row.resulting_account_status,
     }),

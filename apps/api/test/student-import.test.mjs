@@ -549,11 +549,9 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const cohort = (await teacher.request('/admin/students?cohort=' + encodeURIComponent('本科生'))).data;
       assert(cohort.items.some((item) => item.student_no === '0000000201'));
       assert(cohort.items.every((item) => item.cohort === '本科生'));
-      assert(cohort.cohort_options.includes('本科生'));
-      assert(cohort.cohort_options.every((value) => value.length > 0));
       const grade = (await teacher.request('/admin/students?grade=2026&page_size=100')).data;
+      assert.equal(Object.hasOwn(grade, 'cohort_options'), false);
       assert(grade.grade_options.every((value) => /^[0-9]{4}$/.test(value)));
-      assert(grade.cohort_options.includes('本科生'));
       const active = (await teacher.request('/admin/students?status=active&page_size=100')).data;
       assert(active.items.every((item) => item.status === 'active'));
       const inactive = (await teacher.request('/admin/students?status=inactive')).data;
@@ -735,6 +733,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       assert.equal(batch.status, 'ready');
       const preview = (await teacher.request('/admin/student-imports/' + batch.id + '/rows')).data;
       assert.equal(preview.items[0].cohort, undefined);
+      assert.equal(Object.hasOwn(preview.items[0].raw_values, 'cohort'), false);
       assert.equal(preview.items[0].grade, '2026');
       assert.equal(
         (
@@ -835,8 +834,6 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       assert.equal(none.total, 0);
       assert.deepEqual(none.grade_options, listed.grade_options);
       assert.deepEqual(none.grade_options, [...new Set(none.grade_options)].sort().reverse());
-      assert.deepEqual(none.cohort_options, listed.cohort_options);
-      assert.equal(new Set(none.cohort_options).size, none.cohort_options.length);
       assert.equal((await teacher.request('/admin/students?grade=26')).status, 422);
     });
 

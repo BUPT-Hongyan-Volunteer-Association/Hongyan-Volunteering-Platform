@@ -25,7 +25,7 @@ export function studentView(student: {
     updated_at: student.updated_at.toISOString(),
     student_no: student.student_no,
     name: student.account.display_name,
-    ...(student.cohort && { cohort: student.cohort }),
+    ...(student.cohort?.trim() && { cohort: student.cohort }),
     ...(student.grade && { grade: student.grade }),
     ...(student.class_name && { class_name: student.class_name }),
     ...(student.college && { college: student.college }),

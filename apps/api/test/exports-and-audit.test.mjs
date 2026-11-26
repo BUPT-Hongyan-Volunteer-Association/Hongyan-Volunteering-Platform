@@ -216,6 +216,14 @@ async function checkExports(t, db, app, { staffPassword, adminPassword, password
   });
 
   await t.test('后台学生档案可按筛选批量导出，仅教职工可用', async () => {
+    const profile = result(await alice.request('/me'), 200);
+    assert.equal(Object.hasOwn(profile.student, 'cohort'), false);
+    const currentJob = await createExport(teacher, { type: 'admin_students', student_ids: [aliceStudent.id] });
+    const currentFile = await download(teacher, (await waitExport(teacher, currentJob.id)).id);
+    const currentRows = await sheetRows(currentFile.body, '学生档案');
+    assert.deepEqual(currentRows[0], ['学号', '姓名', '年级', '班级', '学院', '账号状态']);
+    assert.equal(currentRows[1][0], aliceStudent.student_no);
+
     for (const [index, account] of synthetic.slice(0, 2).entries()) {
       await db.student.update({
         where: { id: account.student.id },
