@@ -69,7 +69,6 @@ function rowView(row: {
   action: string;
   student_no: string | null;
   name: string | null;
-  cohort: string | null;
   grade: string | null;
   class_name: string | null;
   college: string | null;
@@ -77,19 +76,16 @@ function rowView(row: {
   errors: Prisma.JsonValue;
   resulting_account_status: string | null;
 }) {
-  const raw = { ...row.raw_values as Record<string, string> };
-  if (!raw.cohort?.trim()) delete raw.cohort;
   return {
     row_number: row.row_number,
     action: row.action,
     ...(row.student_no && { student_no: row.student_no }),
     ...(row.name && { name: row.name }),
-    ...(row.cohort?.trim() && { cohort: row.cohort }),
     ...(row.grade && { grade: row.grade }),
     ...(row.class_name && { class_name: row.class_name }),
     ...(row.college && { college: row.college }),
     errors: row.errors as unknown as FieldIssue[],
-    raw_values: raw,
+    raw_values: row.raw_values as Record<string, string>,
     ...(row.resulting_account_status && {
       resulting_account_status: row.resulting_account_status,
     }),
@@ -123,7 +119,6 @@ export class StudentImportService implements OnApplicationBootstrap {
         student_no: record.student_no,
         has_record: true,
         name: record.account.display_name,
-        cohort: record.cohort ?? '',
         grade: record.grade ?? '',
         class_name: record.class_name ?? '',
         college: record.college ?? '',
@@ -139,7 +134,6 @@ export class StudentImportService implements OnApplicationBootstrap {
           student_no: account.username,
           has_record: false,
           name: account.display_name,
-          cohort: '',
           grade: '',
           class_name: '',
           college: '',
@@ -214,7 +208,6 @@ export class StudentImportService implements OnApplicationBootstrap {
               action: row.action,
               student_no: row.values.student_no ?? null,
               name: row.values.name ?? null,
-              cohort: row.values.cohort ?? null,
               grade: row.values.grade ?? null,
               class_name: row.values.class_name ?? null,
               college: row.values.college ?? null,
@@ -369,7 +362,6 @@ export class StudentImportService implements OnApplicationBootstrap {
             student: {
               create: {
                 student_no,
-                cohort: row.cohort,
                 grade: row.grade,
                 class_name: row.class_name,
                 college: row.college,

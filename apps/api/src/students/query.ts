@@ -30,7 +30,8 @@ export async function listStudents(db: Database, query: Record<string, string>) 
   const { page, page_size, skip } = pagination(query);
   if (query.q !== undefined && (typeof query.q !== 'string' || query.q.length > 100))
     invalid('q', '搜索词过长');
-  if (query.cohort !== undefined) invalid('cohort', '级部筛选已移除，请按年级筛选');
+  if (Object.keys(query).some(key => !['q', 'grade', 'status', 'page', 'page_size'].includes(key)))
+    invalid('query', '含有不支持的查询参数');
   const status = query.status;
   if (status !== undefined && status !== 'active' && status !== 'inactive')
     invalid('status', '账号状态筛选值无效');

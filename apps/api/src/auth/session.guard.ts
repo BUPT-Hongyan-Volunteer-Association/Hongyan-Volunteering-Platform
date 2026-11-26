@@ -19,7 +19,6 @@ export interface Actor {
     account_id: string;
     name: string;
     student_no: string;
-    cohort?: string;
     version: number;
     status: 'active';
   };
@@ -87,7 +86,6 @@ export class SessionGuard implements CanActivate {
       ...(a.student && {
         student: {
           ...a.student,
-          cohort: a.student.cohort?.trim() || undefined,
           name: a.display_name,
           status: 'active' as const,
         },

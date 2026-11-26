@@ -84,7 +84,7 @@ function stopPolling() {
 }
 function display(
   row: StudentImportRow,
-  field: 'student_no' | 'name' | 'cohort' | 'grade' | 'class_name' | 'college',
+  field: 'student_no' | 'name' | 'grade' | 'class_name' | 'college',
 ) {
   if (field === 'grade') {
     if (row.errors?.some(issue => issue.field === 'grade')) return row.raw_values?.grade || '—';
@@ -92,7 +92,6 @@ function display(
   }
   return row[field] || row.raw_values?.[field] || '—';
 }
-const showCohort = computed(() => rows.value.some(r => display(r, 'cohort') !== '—'));
 const showCollege = computed(() => rows.value.some(r => display(r, 'college') !== '—'));
 function currentRoute(version: number) {
   return !disposed && version === routeVersion;
@@ -378,7 +377,6 @@ watch(
             <th scope="col">原表行</th>
             <th scope="col">学号</th>
             <th scope="col">姓名</th>
-            <th v-if="showCohort" scope="col">级部</th>
             <th scope="col">年级</th>
             <th scope="col">班级</th>
             <th v-if="showCollege" scope="col">学院</th>
@@ -396,7 +394,6 @@ watch(
             <th scope="row">{{ row.row_number }}</th>
             <td>{{ display(row, 'student_no') }}</td>
             <td>{{ display(row, 'name') }}</td>
-            <td v-if="showCohort">{{ display(row, 'cohort') }}</td>
             <td>{{ display(row, 'grade') }}</td>
             <td>{{ display(row, 'class_name') }}</td>
             <td v-if="showCollege">{{ display(row, 'college') }}</td>

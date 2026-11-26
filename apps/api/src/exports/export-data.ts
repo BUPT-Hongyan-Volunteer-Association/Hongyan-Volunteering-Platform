@@ -35,8 +35,7 @@ const hourStatusLabels: Record<string, string> = {
   voided: '已撤销',
 };
 
-// 已提交的旧导出任务继续遵守提交时保存的范围。
-export type StoredScope = ExportInput & { student_id?: string; cohort?: string };
+export type StoredScope = ExportInput & { student_id?: string };
 
 const beijing = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Shanghai',
@@ -378,24 +377,19 @@ async function hoursContent(tx: Tx, scope: StoredScope): Promise<ExportContent> 
 
 async function studentsContent(tx: Tx, scope: StoredScope): Promise<ExportContent> {
   const rows = await tx.student.findMany({
-    where: {
-      ...studentWhere({ q: scope.q, grade: scope.grade, status: scope.account_status, student_ids: scope.student_ids }),
-      ...(scope.cohort && { cohort: scope.cohort }),
-    },
+    where: studentWhere({ q: scope.q, grade: scope.grade, status: scope.account_status, student_ids: scope.student_ids }),
     include: { account: { select: { display_name: true, active: true } } },
     orderBy: { student_no: 'asc' },
   });
-  const hasCohort = rows.some(row => row.cohort?.trim());
   return {
     fileName: '学生档案_' + workbookDate() + '.xlsx',
     sheet: {
       name: '学生档案',
-      headers: ['学号', '姓名', ...(hasCohort ? ['级部'] : []), '年级', '班级', '学院', '账号状态'],
-      widths: [18, 18, ...(hasCohort ? [16] : []), 12, 18, 24, 12],
+      headers: ['学号', '姓名', '年级', '班级', '学院', '账号状态'],
+      widths: [18, 18, 12, 18, 24, 12],
       rows: rows.map((row) => [
         row.student_no,
         row.account.display_name,
-        ...(hasCohort ? [row.cohort ?? ''] : []),
         row.grade ?? '',
         row.class_name ?? '',
         row.college ?? '',
