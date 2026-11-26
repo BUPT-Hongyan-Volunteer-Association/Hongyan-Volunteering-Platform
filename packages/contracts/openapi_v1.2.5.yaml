@@ -3355,11 +3355,6 @@ paths:
         required: false
         schema:
           type: string
-      - name: cohort
-        in: query
-        required: false
-        schema:
-          type: string
       - name: grade
         in: query
         required: false
@@ -9258,10 +9253,6 @@ components:
           type: string
           description: 复用名单或学生档案的姓名或学号筛选。
           maxLength: 100
-        cohort:
-          type: string
-          description: admin_students 按级部筛选。
-          maxLength: 100
         grade:
           type: string
           description: admin_students 按四位入学年份筛选。
@@ -9308,8 +9299,6 @@ components:
           - required:
             - student_ids
           - required:
-            - cohort
-          - required:
             - grade
           - required:
             - account_status
@@ -9339,8 +9328,6 @@ components:
           - required:
             - student_ids
           - required:
-            - cohort
-          - required:
             - grade
           - required:
             - account_status
@@ -9367,8 +9354,6 @@ components:
             - q
           - required:
             - follow_up_only
-          - required:
-            - cohort
           - required:
             - grade
           - required:
@@ -9401,8 +9386,6 @@ components:
           - required:
             - student_ids
           - required:
-            - cohort
-          - required:
             - grade
           - required:
             - account_status
@@ -9429,8 +9412,6 @@ components:
             - follow_up_only
           - required:
             - student_ids
-          - required:
-            - cohort
           - required:
             - grade
           - required:

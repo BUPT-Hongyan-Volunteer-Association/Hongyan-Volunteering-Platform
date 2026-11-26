@@ -546,9 +546,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const byName = (await teacher.request('/admin/students?q=' + encodeURIComponent('陈二'))).data;
       assert.equal(byName.total, 1);
       assert.equal(byName.items[0].student_no, '0000000202');
-      const cohort = (await teacher.request('/admin/students?cohort=' + encodeURIComponent('本科生'))).data;
-      assert(cohort.items.some((item) => item.student_no === '0000000201'));
-      assert(cohort.items.every((item) => item.cohort === '本科生'));
+      assert.equal((await teacher.request('/admin/students?cohort=legacy')).status, 422);
       const grade = (await teacher.request('/admin/students?grade=2026&page_size=100')).data;
       assert.equal(Object.hasOwn(grade, 'cohort_options'), false);
       assert(grade.grade_options.every((value) => /^[0-9]{4}$/.test(value)));
@@ -601,8 +599,7 @@ test('学生名单导入校验、预览、确认与首次登录在真实 Postgre
       const byCohort = await teacher.request(
         '/admin/students?cohort=' + encodeURIComponent("' OR 1=1 --"),
       );
-      assert.equal(byCohort.status, 200);
-      assert.equal(byCohort.data.total, 0);
+      assert.equal(byCohort.status, 422);
       for (const bad of ["1' OR '1'='1", '1;DROP TABLE student']) {
         const response = await teacher.request(
           '/admin/student-imports/' + encodeURIComponent(bad),

@@ -233,11 +233,11 @@ async function checkExports(t, db, app, { staffPassword, adminPassword, password
         },
       });
     }
-    const expected = result(await teacher.request('/admin/students?cohort=' + encodeURIComponent('本科生') +
-      '&grade=2026&q=' + encodeURIComponent('合成学生0') + '&page_size=100'), 200);
+    const expected = result(await teacher.request('/admin/students?grade=2026&q=' + encodeURIComponent('合成学生0') + '&page_size=100'), 200);
     assert.equal(expected.total, 2);
+    assert.equal((await teacher.write('POST', '/exports', { type: 'admin_students', cohort: '本科生' }, randomUUID())).status, 422);
     const job = await createExport(teacher, {
-      type: 'admin_students', cohort: '本科生', grade: '2026', q: '合成学生0',
+      type: 'admin_students', grade: '2026', q: '合成学生0',
     });
     const file = await download(teacher, (await waitExport(teacher, job.id)).id);
     const rows = await sheetRows(file.body, '学生档案');

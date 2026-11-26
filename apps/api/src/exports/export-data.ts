@@ -35,7 +35,8 @@ const hourStatusLabels: Record<string, string> = {
   voided: '已撤销',
 };
 
-export type StoredScope = ExportInput & { student_id?: string };
+// 已提交的旧导出任务继续遵守提交时保存的范围。
+export type StoredScope = ExportInput & { student_id?: string; cohort?: string };
 
 const beijing = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Shanghai',
@@ -144,7 +145,6 @@ export async function resolveExportScope(tx: Tx, actor: Actor, input: ExportInpu
     return compact({
       type: input.type,
       q: input.q?.trim() || undefined,
-      cohort: input.cohort?.trim() || undefined,
       grade: input.grade,
       account_status: input.account_status,
       student_ids,
@@ -378,13 +378,10 @@ async function hoursContent(tx: Tx, scope: StoredScope): Promise<ExportContent> 
 
 async function studentsContent(tx: Tx, scope: StoredScope): Promise<ExportContent> {
   const rows = await tx.student.findMany({
-    where: studentWhere({
-      q: scope.q,
-      cohort: scope.cohort,
-      grade: scope.grade,
-      status: scope.account_status,
-      student_ids: scope.student_ids,
-    }),
+    where: {
+      ...studentWhere({ q: scope.q, grade: scope.grade, status: scope.account_status, student_ids: scope.student_ids }),
+      ...(scope.cohort && { cohort: scope.cohort }),
+    },
     include: { account: { select: { display_name: true, active: true } } },
     orderBy: { student_no: 'asc' },
   });
