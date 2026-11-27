@@ -1977,6 +1977,37 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await button(owner,'设为候补此人').click();
       await visible(owner.getByText('已将体验学生设为候补',{exact:true}));
       await link(owner.getByRole('navigation',{name:'活动工作区'}),'编辑与送审').click();
+      const parallel = await owner.context().newPage();
+      try {
+        await parallel.goto(editUrl);
+        await owner.getByLabel('第 1 题题目').fill('是否完成岗前培训');
+        const firstPool = parallel.getByRole('group',{name:'报名项 1',exact:true});
+        await firstPool.getByLabel('录取人数').fill('10');
+        await button(parallel,'保存草稿').click();
+        await visible(parallel.getByText('草稿已保存',{exact:true}));
+        await owner.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await button(owner,'刷新版本并复核').click();
+        assert.equal(await owner.getByLabel('第 1 题题目').inputValue(),'是否完成岗前培训');
+        assert.equal(await owner.getByRole('group',{name:'报名项 1',exact:true}).getByLabel('录取人数').inputValue(),'10');
+        await button(owner,'保存草稿').click();
+        await visible(owner.getByText('草稿已保存',{exact:true}));
+
+        await parallel.reload();
+        await parallel.getByLabel('第 1 题题目').fill('已参加培训的时间');
+        await owner.getByLabel('第 1 题题目').fill('本地培训确认');
+        await button(parallel,'保存草稿').click();
+        await visible(parallel.getByText('草稿已保存',{exact:true}));
+        await owner.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await button(owner,'刷新版本并复核').click();
+        const conflict = owner.getByRole('region',{name:'报名问卷版本冲突'});
+        await visible(conflict);
+        assert.equal(await button(owner,'保存草稿').isDisabled(),true);
+        await conflict.getByText('对照本地与最新内容').click();
+        assert.match(await conflict.innerText(),/已参加培训的时间/);
+        assert.match(await conflict.innerText(),/本地培训确认/);
+        await button(conflict,'采用最新内容').click();
+        assert.equal(await owner.getByLabel('第 1 题题目').inputValue(),'已参加培训的时间');
+      } finally { await parallel.close(); }
       await owner.getByLabel('相关说明',{exact:true}).fill('核对服务台领取资料');
       await button(owner,'保存草稿').click();
       await visible(owner.getByText('草稿已保存',{exact:true}));

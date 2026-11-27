@@ -2,7 +2,7 @@
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import ActivityDateField from '@hongyan/ui/ActivityDateField.vue';
 import RecruitmentEditor from './RecruitmentEditor.vue';
-import { formValues, buildPatch, recruitmentValues, recruitmentPatch } from './activityForm';
+import { formValues, buildPatch, recruitmentValues, recruitmentPatch, changedRecruitmentFields, rebaseRecruitment, copyRecruitmentField, type RecruitmentField } from './activityForm';
 import { campuses } from '@hongyan/contracts/activity';
 import { ref, computed, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -23,7 +23,7 @@ import {
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import { noAccess } from '@hongyan/ui/usePageRead';
 import ActivityHistory from './ActivityHistory.vue';
-import { fieldGroups, fieldLabel, activityFields as fields } from '@hongyan/ui/activityFields';
+import { fieldGroups, fieldLabel, fieldValue, activityFields as fields } from '@hongyan/ui/activityFields';
 import {
   revisionLabels,
 } from '@hongyan/ui/activityDisplay';
@@ -58,7 +58,23 @@ async function changeContactRows(remove?: number) {
 }
 const recruitment = ref(recruitmentValues());
 const savedRecruitment = computed(() => recruitmentValues(detail.value?.working_snapshot.content));
-const changedRecruitment = computed(() => JSON.stringify(recruitment.value) !== JSON.stringify(savedRecruitment.value));
+const recruitmentEdits = computed(() => changedRecruitmentFields(savedRecruitment.value, recruitment.value));
+const unresolved = ref<RecruitmentField[]>([]);
+const batchFields = ['registration_mode','allow_multiple_roles','allow_multiple_slots','registration_items'] as const;
+function conflictSummary(key: RecruitmentField, data: ReturnType<typeof recruitmentValues>) {
+  const config = recruitmentPatch(data);
+  return key === 'registration_mode'
+    ? batchFields.map(field => fieldLabel(field) + '　' + fieldValue(field,config[field])).join('\n')
+    : fieldValue(key,config[key]);
+}
+function resolveRecruitment(key: RecruitmentField, useLatest: boolean) {
+  if (useLatest) {
+    const latest = recruitmentValues(detail.value?.working_snapshot.content);
+    const keys = key === 'registration_mode' ? batchFields : [key];
+    for (const field of keys) copyRecruitmentField(recruitment.value, latest, field);
+  }
+  unresolved.value = unresolved.value.filter(field => field !== key);
+}
 const quotaField = (key: string) => key === 'capacity' || key === 'waitlist_capacity';
 const reason = ref(''),
   message = ref(''),
@@ -140,7 +156,7 @@ function restoreVersion(item: ActivityRevision['content']) {
 let serial = 0;
 async function load(preserve = false, snapshot?: ManagedActivityDetail) {
   const keepContacts = preserve && contactsChanged.value;
-  const keepRecruitment = preserve && changedRecruitment.value;
+  const previousRecruitment = savedRecruitment.value;
   const n = ++serial,
     local = Object.entries(form.value).filter(([k, v]) => v !== base.value[k]);
   loading.value = true;
@@ -159,12 +175,21 @@ async function load(preserve = false, snapshot?: ManagedActivityDetail) {
     if (!preserve) restore.value = undefined;
     if (data && !snapshot) emit('loaded', data);
     if (!keepContacts) resetContacts(data?.working_snapshot.content);
-    if (!keepRecruitment) recruitment.value = recruitmentValues(data?.working_snapshot.content);
+    const latest = recruitmentValues(data?.working_snapshot.content);
+    if (preserve) {
+      const { merged, conflicts } = rebaseRecruitment(previousRecruitment, recruitment.value, latest);
+      recruitment.value = merged;
+      unresolved.value = [...new Set([...unresolved.value, ...conflicts])];
+    } else {
+      recruitment.value = latest;
+      unresolved.value = [];
+    }
     base.value = formValues(data?.working_snapshot.content);
     form.value = { ...base.value, ...(preserve ? Object.fromEntries(local) : {}) };
   } catch (e) {
     if (n === serial) {
-      detail.value = undefined;
+      if (preserve && detail.value && !noAccess(e)) conflict.value = true;
+      else detail.value = undefined;
       readError.value = e instanceof Error ? e.message : '读取失败';
       if (noAccess(e)) emit('denied');
     }
@@ -196,7 +221,9 @@ function report(e: unknown) {
 function payload(partial: boolean) {
   const patch = buildPatch(form.value, base.value, detail.value?.working_snapshot.content, restore.value,
     contactsChanged.value ? contacts.value : undefined, partial);
-  if (!partial || changedRecruitment.value) Object.assign(patch, recruitmentPatch(recruitment.value));
+  const config = recruitmentPatch(recruitment.value);
+  if (!partial || recruitmentEdits.value.includes('registration_mode')) Object.assign(patch, config);
+  else for (const field of recruitmentEdits.value) patch[field] = config[field];
   if (recruitment.value.registration_mode === 'batch') {
     delete patch.capacity;
     delete patch.waitlist_capacity;
@@ -206,7 +233,7 @@ function payload(partial: boolean) {
 const command = createCommand();
 async function run(action: 'save' | 'submit' | 'withdraw') {
   if (
-    imageLoading.value ||
+    unresolved.value.length || imageLoading.value ||
     busy.value ||
     props.writesPaused ||
     (action === 'save' && id.value && !dirty.value)
@@ -311,7 +338,7 @@ watch(
 const dirty = computed(
   () =>
     !!restore.value ||
-    contactsChanged.value || changedRecruitment.value ||
+    contactsChanged.value || recruitmentEdits.value.length > 0 ||
     fields.some(([k]) => form.value[k] !== base.value[k]),
 );
 watch([() => props.snapshot, busy, loading], ([snapshot]) => {
@@ -343,7 +370,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
   <p v-if="confirmation?.id === id" role="status" class="notice">{{ confirmation.text }}</p>
   <p v-if="readError" role="alert">最新版本读取失败：{{ readError }}</p>
   <p v-if="message" role="status" class="notice">{{ message }}</p>
-  <button v-if="conflict || (id && !detail && !loading)" @click="load(confirmation?.id !== id)">
+  <button v-if="conflict || (id && !detail && !loading)" @click="load(conflict)">
     <UiIcon name="Refresh" />刷新版本并复核
   </button>
   <template v-if="!loading && (!id || detail)">
@@ -374,6 +401,17 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
       </button>
     </div>
     <p v-if="!readonly" class="editor-hint">填写标题即可保存草稿。送审时请补齐各组字段，选填项和二选一项已标注</p>
+    <section v-for="key in unresolved" :key="key" class="notice recruitment-conflict" :aria-label="fieldLabel(key) + '版本冲突'">
+      <strong>两人都修改了{{ fieldLabel(key) }}，请核对后选择</strong>
+      <details><summary>对照本地与最新内容</summary>
+        <dl><dt>本地修改</dt><dd>{{ conflictSummary(key, recruitment) }}</dd>
+          <dt>最新版本</dt><dd>{{ conflictSummary(key, savedRecruitment) }}</dd></dl>
+      </details>
+      <div class="page-actions">
+        <button @click="resolveRecruitment(key, true)">采用最新内容</button>
+        <button @click="resolveRecruitment(key, false)">保留本地修改</button>
+      </div>
+    </section>
     <ul v-if="Object.keys(fieldErrors).length" class="error-summary" aria-label="待修正字段">
       <li v-for="(error, key) in fieldErrors" :key="key">
         {{ fieldLabel(key) }} · {{ error }}
@@ -520,7 +558,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
           form="activity-form"
           :class="{ primary: !detail || dirty }"
           :disabled="
-            !!readonly || imageLoading || busy || writesPaused || conflict || (!!id && !dirty)
+            !!readonly || imageLoading || busy || writesPaused || conflict || unresolved.length > 0 || (!!id && !dirty)
           "
         >
           <UiIcon name="Document" />保存草稿
@@ -528,7 +566,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
         <button
           v-if="detail && !readonly && detail.working_snapshot.revision_state === 'draft'"
           class="primary"
-          :disabled="writesPaused || busy || dirty || conflict"
+          :disabled="writesPaused || busy || dirty || conflict || unresolved.length > 0"
           @click="run('submit')"
         >
           <UiIcon name="Position" />提交审核
@@ -562,6 +600,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
   justify-self: start;
 }
 
+.recruitment-conflict dd { white-space: pre-line; }
 .quota-fields { width: 100%; }
 .version-strip {
   display: flex;

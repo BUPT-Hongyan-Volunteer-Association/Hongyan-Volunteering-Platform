@@ -15,7 +15,7 @@ function setDay(item: RecruitmentForm['registration_items'][number], event: Even
 }
 function addItem(copy?: RecruitmentForm['registration_items'][number]) {
   config.value.registration_items.push({ role: '', start: '', end: '', allDay: false, capacity: 1, waitlist_capacity: 0,
-    ...copy, id: crypto.randomUUID() });
+    originalStart: undefined, originalEnd: undefined, ...copy, id: crypto.randomUUID() });
 }
 function addQuestion() {
   config.value.questions.push({ id: crypto.randomUUID(), title: '', description: '', type: 'single', required: true, options: [option(),option()] });
