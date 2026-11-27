@@ -74,11 +74,18 @@ const labels: Record<string, string> = {
   end_time: '结束时间',
   end_day_offset: '结束日期',
 };
-export const fieldLabel = (path: string) =>
-  path
-    .split('.')
-    .map((key) => /^\d+$/.test(key) ? '第 ' + (Number(key) + 1) + ' 项' : labels[key] ?? key)
-    .join(' / ');
+const questionLabels: Record<string, string> = { title: '题目', description: '题目说明' };
+export function fieldLabel(path: string) {
+  const parts = path.split('.');
+  return parts.map((key, index) => {
+    if (/^\d+$/.test(key)) {
+      const unit = parts[index - 1] === 'questions' ? '题' : '项';
+      return '第 ' + (Number(key) + 1) + ' ' + unit;
+    }
+    if (parts[0] === 'questions' && index === 2 && questionLabels[key]) return questionLabels[key];
+    return labels[key] ?? key;
+  }).join(' / ');
+}
 
 export function fieldValue(key: string, value: unknown): string {
   if (value == null || value === '') return '未填写';
@@ -91,7 +98,7 @@ export function fieldValue(key: string, value: unknown): string {
   if (typeof value === 'object')
     return Object.entries(value)
       .filter(([key]) => key !== 'schedule_type' && key !== 'id')
-      .map(([k, v]) => (key === 'questions' && k === 'title' ? '题目' : key === 'questions' && k === 'description' ? '题目说明' : fieldLabel(k)) + '　' + fieldValue(k, v))
+      .map(([k, v]) => ((key === 'questions' && questionLabels[k]) || fieldLabel(k)) + '　' + fieldValue(k, v))
       .join('\n');
   const part = key.split('.').at(-1) || key;
   if (part.endsWith('_at') && typeof value === 'string' && Number.isFinite(Date.parse(value)))
