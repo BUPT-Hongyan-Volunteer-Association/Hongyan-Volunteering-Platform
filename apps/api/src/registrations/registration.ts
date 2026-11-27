@@ -1,4 +1,4 @@
-import { activeRegistrationStatuses, canChangeRegistration } from '@hongyan/contracts/activity';
+import { activeRegistrationStatuses, activityBounds, canChangeRegistration } from '@hongyan/contracts/activity';
 import { audit } from '../audit.js';
 import type {
   ActivityPublicationContent,
@@ -14,7 +14,12 @@ import { type Tx } from '../database.js';
 
 import { answerView, checkCapacity, checkReactivation, checkSelections, pools, responseFor, wholeItemId } from './enrollment.js';
 
-export const includeResponse = { response: { include: { answers: { orderBy: { position: 'asc' } } } } } as const;
+const responseWithAnswers = { include: { answers: { orderBy: { position: 'asc' } } } } as const;
+export const includeResponse = {
+  response: responseWithAnswers,
+  history: { where: { response_id: { not: null } }, orderBy: { version: 'desc' },
+    select: { submitted_at: true, response: responseWithAnswers } },
+} as const;
 export const rosterOrderBy = [
   { submitted_at: 'asc' },
   { id: 'asc' },
@@ -31,16 +36,19 @@ function answerConditions(value?: string): Prisma.RegistrationWhereInput[] {
   let conditions: unknown;
   try { conditions = JSON.parse(value); } catch { invalid('answer_filters','答案筛选格式无效'); }
   if (!Array.isArray(conditions) || conditions.length > 100) invalid('answer_filters','答案筛选格式无效');
-  return conditions.map(c => {
+  const entries: Prisma.QuestionnaireResponseWhereInput[] = conditions.map(c => {
     if (!c || typeof c.question_id !== 'string' || !uuid.test(c.question_id) ||
         (c.option_id !== undefined && (typeof c.option_id !== 'string' || !uuid.test(c.option_id))) ||
         (c.answer_text !== undefined && (typeof c.answer_text !== 'string' || !c.answer_text.trim())) ||
         (Boolean(c.option_id) === Boolean(c.answer_text)))
       invalid('answer_filters','请选择题目和选项或填写关键词');
-    return {response:{answers:{some:{question_id:c.question_id,
+    return {answers:{some:{question_id:c.question_id,
       ...(c.option_id ? {option_ids:{has:c.option_id}} : {text:{contains:c.answer_text.trim(),mode:'insensitive'}}),
-    }}}};
+    }}};
   });
+  if (!entries.length) return [];
+  const response = { AND: entries };
+  return [{ OR: [{response}, {history:{some:{response}}}] }];
 }
 export function rosterSearchWhere(filters: RosterFilters): Prisma.RegistrationWhereInput {
   const search = filters.q?.trim();
@@ -61,9 +69,19 @@ export function approvedContent(activity: LoadedActivity) {
   return revision?.content as unknown as ActivityPublicationContent | undefined;
 }
 
+type LoadedResponse = QuestionnaireResponse & {answers?: QuestionnaireAnswer[]};
 export function registrationView(row: Registration & {
-  response?: (QuestionnaireResponse & {answers?:QuestionnaireAnswer[]}) | null;
+  response?: LoadedResponse | null;
+  history?: {submitted_at:Date;response?:LoadedResponse|null}[];
 }): View {
+  const seen = new Set([row.response_id]);
+  const answer_history = (row.history ?? []).flatMap(h => {
+    const response = h.response;
+    if (!response?.answers || seen.has(response.id)) return [];
+    seen.add(response.id);
+    return [{submitted_at:h.submitted_at.toISOString(),questionnaire_version:response.questionnaire_version,
+      answers:response.answers.map(answerView)}];
+  });
   return {
     id: row.id,
     activity_id: row.activity_id,
@@ -72,6 +90,7 @@ export function registrationView(row: Registration & {
     status: row.status as View['status'],
     submitted_at: row.submitted_at.toISOString(),
     ...(row.item_id !== wholeItemId && { item_id:row.item_id, item_label:row.item_label ?? undefined }),
+    ...(answer_history.length && {answer_history}),
     ...(row.response?.answers && {questionnaire_version:row.response.questionnaire_version,answers:row.response.answers.map(answerView)}),
     ...(row.decision_reason !== null && { decision_reason: row.decision_reason }),
   };
@@ -84,6 +103,7 @@ function history(row: Registration, changed_at: Date | null, actor_id: string | 
     status: row.status,
     submitted_at: row.submitted_at,
     statement: row.statement,
+    response_id:row.status === 'submitted' ? row.response_id : null,
     decision_reason: row.decision_reason,
     changed_at,
     actor_id,
@@ -109,17 +129,22 @@ export function canWithdraw(activityStatus: string, registrationStatus: string) 
   return activityStatus === 'published' && ['submitted', 'waitlisted'].includes(registrationStatus);
 }
 
-export function canDecide(activityStatus: string, approved: ActivityPublicationContent | undefined) {
-  return activityStatus === 'published' && canRecruit(approved);
+function itemTime(approved:ActivityPublicationContent|undefined,id?:string) {
+  return approved?.registration_mode === 'batch' ? approved.registration_items?.find(item=>item.id===id) : undefined;
+}
+
+export function canDecide(activityStatus: string, approved: ActivityPublicationContent | undefined, itemId?:string, now=Date.now()) {
+  const bounds = activityBounds(approved?.schedule);
+  const end = itemTime(approved,itemId)?.ends_at;
+  return activityStatus === 'published' && !!bounds && now < bounds.end && (!end || now < Date.parse(end));
 }
 
 export function canRequest(kind: 'exit' | 'restoration', activityStatus: string, status: string, approved: ActivityPublicationContent | undefined, itemId?:string) {
-  if (kind === 'exit' && itemId && approved?.registration_mode === 'batch') {
-    const start = approved.registration_items?.find(item=>item.id.toLowerCase()===itemId)?.starts_at;
-    if (start) return status === 'accepted' && activityStatus === 'published' && Date.now()<Date.parse(start);
-  }
-  if (kind === 'restoration') return status === 'exited' && canDecide(activityStatus, approved);
-  return status === 'accepted' && activityStatus === 'published' && canRecruit(approved, true);
+  if (activityStatus !== 'published') return false;
+  if (kind === 'restoration') return status === 'exited' && (approved?.registration_mode === 'batch'
+    ? canDecide(activityStatus,approved,itemId) : canRecruit(approved));
+  const start = itemTime(approved,itemId)?.starts_at;
+  return status === 'accepted' && (start ? Date.now() < Date.parse(start) : canRecruit(approved,true));
 }
 
 export async function apply(
@@ -235,7 +260,8 @@ export async function decideBatch(
       code = 'version_conflict';
       message = '版本已更新，请刷新后复核';
     } else if (!enabled.has(row.student_id)) message = '学生已停用';
-    else if (!available) message = '活动已结束或没有可办理的获批时段';
+    else if (!available || (input.decision !== 'rejected' && !canDecide(activity.status,approved,row.item_id,now.getTime())))
+      message = '活动或该服务时段已结束';
     else if (!canChangeRegistration(row.status, input.decision))
       message = '当前报名状态不能作此决定';
     return message ? [{ field: 'items', row: i + 1, resource_id, code, message }] : [];

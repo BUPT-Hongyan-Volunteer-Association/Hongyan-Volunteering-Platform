@@ -451,6 +451,16 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     const changed = await roster('item_id='+role+'&answer_filters='+filters);
     assert.equal(changed.items.find(r=>r.id!==bRow.id).answers[0].title,'培训');
     assert.equal(changed.question_versions.length,2);
+    const reapplyId = supplemental.id;
+    success(await write(alice,'/me/registrations/'+reapplyId+'/withdraw',{expected_version:supplemental.version}));
+    const updatedAnswers = [{question_id:single,option_ids:[other.id]},answers[1],{question_id:fill,text:'可协助摄影'}];
+    const updated = success(await submit(alice,[later],{answers:updatedAnswers,questionnaire_version:newVersion}),201).items[0];
+    assert.equal(updated.id,reapplyId);
+    assert.equal(updated.answer_history[0].questionnaire_version,version);
+    assert.equal(updated.answer_history[0].answers[0].labels[0],'培训已完成');
+    assert.equal((await roster('answer_filters='+filters+'&item_id='+later)).total,1);
+    const incompatible = encodeURIComponent(JSON.stringify([{question_id:single,option_id:other.id},{question_id:fill,answer_text:'讲解'}]));
+    assert.equal((await roster('answer_filters='+incompatible+'&item_id='+later)).total,0);
     const aliceRows = (await detail(alice)).my_registrations;
     const picked = aliceRows.filter(r=>[role,second].includes(r.item_id));
     const acceptedRows = success(await write(owner,'/organizer'+path+'/registration-decisions',{
@@ -475,8 +485,10 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
         ],
       }}},
     }});
-    const fixtureStudents = await db.student.findMany({where:{student_no:{startsWith:'810000'}},take:14});
-    assert.equal(fixtureStudents.length,14);
+    const prepared = Array.from({length:14},(_,i)=>({id:randomUUID(),username:String(8200000000+i),display_name:'名额测试'+i}));
+    await db.account.createMany({data:prepared});
+    const fixtureStudents = prepared.map(a=>({id:randomUUID(),student_no:a.username,account_id:a.id}));
+    await db.student.createMany({data:fixtureStudents});
     await db.registration.createMany({data:fixtureStudents.map(r=>({student_id:r.id,activity_id:next.id,item_id:full,item_label:'讲解',status:'submitted'}))});
     const post = (u, ids) => write(u,'/activities/'+next.id+'/registrations',{item_ids:ids});
     const results = await Promise.all([post(alice,[full]),post(bob,[full])]);
@@ -493,6 +505,31 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     success(await decide(rows.slice(9),'waitlisted'));
     const noWait = success(await post(lose,[free]),201).items[0];
     assert.equal((await decide([noWait],'waitlisted')).code,'capacity_conflict');
+  });
+
+  await t.test('活动已开始仍可录取当前场次，未来场次按自身开始时刻申请退出', async () => {
+    const created_by = activity.revisions[0].created_by;
+    const now = Date.now(), offset = hours => new Date(now + hours * 3600000).toISOString();
+    const current = randomUUID(), future = randomUUID(), ended = randomUUID();
+    const batch = await db.activity.create({data:{
+      activity_code:'RECRUIT-IN-PROGRESS',status:'published',working_revision:1,published_revision:1,
+      members:{create:{account_id:created_by,member_role:'owner'}},
+      revisions:{create:{revision:1,revision_state:'approved',created_by,content:{...content,capacity:3,
+        schedule:{schedule_type:'continuous',starts_at:offset(-48),ends_at:offset(48)},
+        registration_opens_at:offset(-72),registration_closes_at:offset(24),registration_mode:'batch',allow_multiple_slots:true,
+        registration_items:[
+          {id:current,starts_at:offset(-1),ends_at:offset(1),capacity:1,waitlist_capacity:0},
+          {id:future,starts_at:offset(24),ends_at:offset(26),capacity:1,waitlist_capacity:0},
+          {id:ended,starts_at:offset(-12),ends_at:offset(-10),capacity:1,waitlist_capacity:0},
+        ],
+      }}},
+    }});
+    const rows = success(await write(alice,'/activities/'+batch.id+'/registrations',{item_ids:[current,future,ended]}),201).items;
+    const decide = rows => write(owner,'/organizer/activities/'+batch.id+'/registration-decisions',{items:items(rows),decision:'accepted'});
+    assert.equal((await decide([rows[2]])).code,'invalid_state');
+    const accepted = success(await decide(rows.slice(0,2))).items;
+    assert.equal((await request(alice,'exit',accepted[0])).code,'invalid_state');
+    success(await request(alice,'exit',accepted[1]),201);
   });
 
 });

@@ -11,7 +11,6 @@ import { Database } from '../database.js';
 import type { ExitRequest, Registration } from '../generated/prisma/client.js';
 import {
   approvedContent,
-  canRecruit,
   canWithdraw,
   canRequest,
   enabledStudents,
@@ -172,7 +171,7 @@ export class RecruitmentRequests {
           if (r.status !== (kind === 'exit' ? 'accepted' : 'exited')) wrongState();
           if (kind === 'restoration') {
             const approved = approvedContent(activity!);
-            if (!(await enabledStudents(tx, [r.student_id])).size || !canRecruit(approved)) wrongState();
+            if (!(await enabledStudents(tx, [r.student_id])).size || !canRequest('restoration',activity!.status,r.status,approved,r.item_id)) wrongState();
             await checkCapacity(tx,r.activity_id,approved!,[{item_id:r.item_id,id:r.id,status:'accepted',previous:'exited'}]);
             await checkReactivation(tx,r.activity_id,approved!,[r]);
           }
