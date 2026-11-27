@@ -53,12 +53,28 @@ const buttonLabel = computed(() => {
   if (!batch.value && remaining() === 0) return '报名已满';
   return !batch.value && wholeStatus.value === 'withdrawn' ? '重新申请报名' : '申请报名';
 });
-watch(() => props.activity.questionnaire_version, (version, previous) => {
-  if (!previous || version === previous) return;
-  for (const question of questions.value) {
-    const ids = new Set(question.options?.map(option => option.id));
-    choices.value[question.id] = (choices.value[question.id] ?? []).filter(id => ids.has(id)).slice(0, question.type === 'single' ? 1 : undefined);
+watch(() => props.activity, (current, previous) => {
+  if (!previous) return;
+  const itemIds = new Set(current.registration_items?.map(item => item.id));
+  if (selected.value.some(id => !itemIds.has(id))) {
+    selected.value = selected.value.filter(id => itemIds.has(id));
+    error.value = '报名项目已调整，请复核所选项目';
   }
+  if (previous.questionnaire_version === current.questionnaire_version) return;
+  const previousQuestions = new Map(previous.questions?.map(q => [q.id, q]));
+  const validChoices: Record<string, string[]> = {}, validTexts: Record<string, string> = {};
+  for (const q of current.questions ?? []) {
+    const before = previousQuestions.get(q.id);
+    if (!before || before.type !== q.type || before.title !== q.title || before.description !== q.description) continue;
+    if (q.type === 'text') validTexts[q.id] = texts.value[q.id] ?? '';
+    else {
+      const oldLabels = new Map(before.options?.map(option => [option.id, option.label]));
+      const unchanged = new Set(q.options?.filter(option => oldLabels.get(option.id) === option.label).map(option => option.id));
+      validChoices[q.id] = (choices.value[q.id] ?? []).filter(id => unchanged.has(id));
+    }
+  }
+  choices.value = validChoices;
+  texts.value = validTexts;
   error.value = '问卷已更新，请复核后提交';
 });
 function fail(message: string, id?: string) {
@@ -127,7 +143,7 @@ async function submit() {
       <fieldset v-else v-for="(question, index) in questions" :key="question.id" :id="'question-' + question.id" tabindex="-1" :disabled="saving" class="signup-group">
         <legend>{{ index + 1 }}. {{ question.title }} <small>{{ question.required ? '必答' : '选答' }}</small></legend>
         <p v-if="question.description">{{ question.description }}</p>
-        <textarea v-if="question.type === 'text'" v-model="texts[question.id]" rows="3" :aria-label="question.title" />
+        <textarea v-if="question.type === 'text'" v-model="texts[question.id]" maxlength="6000" rows="3" :aria-label="question.title" />
         <label v-else v-for="option in question.options" :key="option.id" class="answer-option">
           <input v-if="question.type === 'single'" type="radio" :name="question.id" :checked="choices[question.id]?.includes(option.id)"
             @change="choices[question.id] = [option.id]" />

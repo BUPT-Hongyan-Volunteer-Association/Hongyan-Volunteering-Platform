@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { button, fits, link, pickOption, visible, withPages } from './page-environment.mjs';
+import { button, fits, link, openOptions, pickOption, visible, withPages } from './page-environment.mjs';
 
 test('手机共答问卷、按项目报名，负责人实时筛选与逐项办理', async t => {
-  await withPages(t, async ({ first, db, owner, student, web }) => {
+  await withPages(t, async ({ first, db, owner, student, helper, web }) => {
     const base = await db.activityRevision.findFirstOrThrow({ where: { activity_id: first.id, revision: first.published_revision } });
     const ownerMember = await db.activityMember.findFirstOrThrow({ where: {activity_id:first.id, member_role:'owner'} });
     const items = ['讲解岗', '签到岗', '布展岗'].map(role => ({ id: randomUUID(), role,
@@ -90,5 +90,41 @@ test('手机共答问卷、按项目报名，负责人实时筛选与逐项办�
     await student.goto(web + '/registrations');
     await visible(student.locator('.summary-list li').filter({hasText:'讲解岗'}).getByText('已退出',{exact:true}));
     await visible(student.locator('.summary-list li').filter({hasText:'签到岗'}).getByText('已提交，待审核',{exact:true}));
+
+    // Change one option's meaning while another student has the previous form open.
+    await helper.goto(web);
+    await link(helper, title).click();
+    const other = helper.locator('form.signup');
+    await other.getByRole('checkbox', {name:/讲解岗/}).check();
+    await other.getByRole('radio', {name:'有经验'}).check();
+    await other.getByRole('checkbox', {name:'接待',exact:true}).check();
+    await other.getByRole('textbox', {name:'备注'}).fill('保留这段内容');
+    const revision = await db.activityRevision.findFirstOrThrow({where:{activity_id:activity.id,revision:1}});
+    const revised = structuredClone(questions);
+    revised[0].options[0].label = '仅限周日';
+    await db.$transaction([
+      db.activityRevision.create({data:{activity_id:activity.id,revision:2,revision_state:'approved',created_by:ownerMember.account_id,
+        approved_at:new Date(),content:{...revision.content,questions:revised}}}),
+      db.activity.update({where:{id:activity.id},data:{working_revision:2,published_revision:2,version:{increment:1}}}),
+    ]);
+    await button(helper,'申请报名').click();
+    await visible(other.getByText('问卷已更新，请复核后提交'));
+    assert.equal(await other.getByRole('textbox',{name:'备注'}).inputValue(), '保留这段内容');
+    assert.ok(await other.getByRole('checkbox',{name:'接待',exact:true}).isChecked());
+    assert.ok(!await other.getByRole('radio',{name:'仅限周日'}).isChecked());
+    await other.getByRole('radio',{name:'仅限周日'}).check();
+    await button(helper,'申请报名').click();
+    await visible(other.getByText('已提交 1 项报名'));
+    await link(nav, '报名名单').click();
+    await button(owner, '按答卷筛选').click();
+    await pickOption(owner, '筛选答案', '仅限周日');
+    await visible(owner.getByText('共 1 人次、1 人', {exact:false}));
+    await visible(owner.getByRole('cell', {name:'0000000004', exact:true}));
+    const versions = await openOptions(owner, '筛选问卷版本');
+    await versions.list.getByRole('option', {name:/历史问卷/}).click();
+    await pickOption(owner, '筛选答案', '有经验');
+    await visible(owner.getByText('共 2 人次、1 人', {exact:false}));
+    assert.equal(await owner.getByRole('cell', {name:'0000000004', exact:true}).count(), 0);
+    assert.equal(await owner.getByRole('cell', {name:'0000000001', exact:true}).count(), 2);
   });
 });
