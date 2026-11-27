@@ -46,6 +46,37 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     assert.equal((await decide(await submit(), 'approved')).status, 200);
     assert.equal((await publicDetail()).data.location, 'A');
   });
+  await t.test('删除未发布草稿按负责人、状态和版本核验，确认请求可安全重试', async () => {
+    const create = await owner.write('POST', '/organizer/activities', { ...sample.revisions[0].content, title: '删除测试草稿' });
+    assert.equal(create.status, 201);
+    const url = '/organizer/activities/' + create.data.id;
+    const remove = (client, expected_version, key) => client.write('DELETE', url, {expected_version}, key);
+    const collaborator = await db.account.findUniqueOrThrow({where:{username:'0000000003'}});
+    await db.activityMember.create({data:{activity_id:create.data.id, account_id:collaborator.id, member_role:'collaborator'}});
+    assert.equal((await remove(other, create.data.version)).status, 404);
+    assert.equal((await remove(student, create.data.version)).status, 404);
+    const sent = await owner.write('POST', url + '/submit', {expected_version:create.data.version});
+    assert.equal(sent.status, 201);
+    const pending = (await owner.request(url)).data;
+    assert.equal((await remove(owner, create.data.version)).status, 409);
+    assert.equal((await remove(owner, pending.activity.version)).status, 409);
+    assert.equal((await decide(sent.data, 'rejected', '请重新核对')).status, 200);
+    const draft = (await owner.request(url)).data.activity;
+    const key = randomUUID();
+    const [one,two] = await Promise.all([remove(owner,draft.version,key),remove(owner,draft.version,key)]);
+    assert.equal(one.status, 200);
+    assert.deepEqual(one.data,two.data);
+    assert.equal((await remove(owner,draft.version)).status,404);
+    assert.equal((await owner.request(url)).status,404);
+    assert.equal((await owner.request(url + '/members')).status,404);
+    const pastReview = await teacher.request('/admin/activity-reviews/' + sent.data.id);
+    assert.equal(pastReview.data.status, 'rejected');
+    assert.equal(pastReview.data.is_current_pending, false);
+    assert.equal((await owner.request('/organizer/activities?q=' + encodeURIComponent('删除测试草稿'))).data.total,0);
+    assert.equal(await db.auditEvent.count({where:{resource_id:create.data.id,action:'delete_activity_draft'}}),1);
+    assert.equal(await db.activityReview.count({where:{id:sent.data.id,status:'rejected'}}),1);
+    assert.equal((await owner.write('DELETE',path,{expected_version:await version()})).status,409);
+  });
   const participant = await db.student.findUniqueOrThrow({ where: { student_no: '0000000004' } });
   await db.registration.create({
     data: { activity_id: id, student_id: participant.id, status: 'accepted' },

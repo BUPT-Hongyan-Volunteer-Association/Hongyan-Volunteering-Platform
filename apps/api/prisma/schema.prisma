@@ -155,6 +155,7 @@ model Activity {
   status             String             @default("draft")
   version            Int                @default(1)
   team_version       Int                @default(1)
+  deleted_at         DateTime?          @db.Timestamptz(3)
   working_revision   Int
   published_revision Int?
   members            ActivityMember[]

@@ -14,7 +14,7 @@ export type Target =
   | { requestId: string }
   | { registrationId: string }
   | null;
-type Access = 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 'team' | 'tech' | 'export';
+type Access = 'deleteDraft' | 'create' | 'manage' | 'review' | 'apply' | 'workspace' | 'self' | 'team' | 'tech' | 'export';
 type CommandArgs = [tx: Tx, row: LoadedActivity | null, actor: Actor, reauthorize: Reauthorize];
 type Write = () => Promise<unknown>;
 
@@ -99,7 +99,7 @@ export class Workflow {
         // Enrollment, promotion and restoration compete for the same item capacity.
         await tx.$queryRaw`SELECT id FROM activity WHERE id=${id}::uuid FOR UPDATE`;
         row = await tx.activity.findUnique({ where: { id }, include: includeView });
-        if (!row) invisible();
+        if (!row || (row.deleted_at && access !== 'deleteDraft')) invisible();
       }
       if (access === 'tech' && !target)
         await tx.$queryRaw`SELECT id FROM account WHERE id=${account_id}::uuid FOR UPDATE`;
@@ -122,6 +122,8 @@ export class Workflow {
         if (access === 'apply' && (studentId(actor) !== account.student?.id || !row?.published_revision))
           invisible();
         if (access === 'self' && studentId(actor) !== account.student?.id) invisible();
+        if (access === 'deleteDraft' && (!actor.roles.includes('organizer') || row?.members[0]?.account_id !== account_id))
+          invisible();
         if (access === 'create' && !actor.roles.includes('organizer')) denied();
         if (access === 'tech' && !actor.roles.includes('tech_admin')) denied();
         if (access === 'review' && !staff(actor)) denied();

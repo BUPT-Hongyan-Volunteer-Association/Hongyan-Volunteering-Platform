@@ -9,9 +9,9 @@ export const eligibleOrganizer = (now: Date): Prisma.AccountWhereInput => ({
   active: true, password_hash: { not: null }, roles: { some: { role: 'organizer', OR: [{ expires_at: null }, { expires_at: { gt: now } }] } },
 });
 export function teamManagerScope(actor: Actor): Prisma.ActivityWhereInput {
-  if (staff(actor)) return {};
+  if (staff(actor)) return { deleted_at: null };
   if (!actor.roles.includes('organizer')) denied();
-  return { members: { some: { account_id: actor.account_id, member_role: 'owner' } } };
+  return { deleted_at: null, members: { some: { account_id: actor.account_id, member_role: 'owner' } } };
 }
 export function managedScope(
   actor: Actor,
@@ -19,11 +19,11 @@ export function managedScope(
 ): Prisma.ActivityWhereInput {
   if (scope === 'all') {
     if (!staff(actor)) denied();
-    return {};
+    return { deleted_at: null };
   }
   if (scope !== 'managed') invalid('scope', '管理范围无效');
   if (!actor.roles.includes('organizer')) denied();
-  return { members: { some: { account_id: actor.account_id } } };
+  return { deleted_at: null, members: { some: { account_id: actor.account_id } } };
 }
 export function workspaceScope(actor: Actor, scope?: string) {
   return managedScope(actor, scope ?? (actor.roles.includes('organizer') ? 'managed' : undefined));

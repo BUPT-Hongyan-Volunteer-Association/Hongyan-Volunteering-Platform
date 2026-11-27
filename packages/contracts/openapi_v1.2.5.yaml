@@ -589,6 +589,28 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
   /organizer/activities/{id}:
+    delete:
+      operationId: delete_activity_draft
+      summary: 主负责人删除尚未发布的草稿
+      description: 按活动版本删除，保留审核与操作历史。待审核及已发布活动不能删除。
+      tags: [活动]
+      x-roles: [organizer]
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      - $ref: '#/components/parameters/csrf'
+      - $ref: '#/components/parameters/idempotency'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/version_action'}
+      responses:
+        '200': {$ref: '#/components/responses/ActionResultResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/ValidationError'}
     patch:
       operationId: update_activity_draft
       summary: 修改活动草稿版本
