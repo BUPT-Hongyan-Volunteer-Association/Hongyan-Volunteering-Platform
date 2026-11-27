@@ -2,6 +2,7 @@ import type { ActivityInput, ActivityPublicationContent } from '@hongyan/contrac
 import { activityBounds, campuses, campusName } from '@hongyan/contracts/activity';
 import { BusinessError, invalid } from '../http.js';
 import { issues, validate } from '../validation.js';
+import { prepareRecruitment } from './recruitment.js';
 import { validateSchedule } from './schedule.js';
 
 export function content(value: unknown, publication: true): ActivityPublicationContent;
@@ -10,6 +11,7 @@ export function content(value: unknown, publication = false) {
   const a = validate<ActivityInput>('activity_input', value);
   if (a.campus) a.campus = campusName(a.campus);
   if (!a.title.trim()) invalid('title', '请填写活动标题');
+  prepareRecruitment(a, publication);
   const problems = publication ? issues('activity_publication_content', a) : [];
   const need = (field: string, message: string) =>
     problems.push({ field, code: 'validation_error', message });
@@ -30,11 +32,6 @@ export function content(value: unknown, publication = false) {
       need('group_join_instructions', '请填写入群方式或上传群二维码');
     if (!a.hours_import_date)
       need('hours_import_date', '请选择预计时长导入日期');
-    if (!!a.expected_hours !== !!a.expected_hours_basis)
-      need(
-        a.expected_hours ? 'expected_hours_basis' : 'expected_hours',
-        '预计时长和口径须成对填写',
-      );
     if (dateOnly && a.campus && !campuses.includes(a.campus))
       need('campus', '请选择活动校区');
   }

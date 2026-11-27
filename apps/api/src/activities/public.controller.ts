@@ -4,6 +4,9 @@ import { Database } from '../database.js';
 import { envelope, invalid, invisible } from '../http.js';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { activityPage } from './list.js';
+import type { ActivityPublicationContent } from '@hongyan/contracts/types';
+import { questionnaireVersion, registrationInventory } from '../registrations/enrollment.js';
+import { registrationView, includeResponse } from '../registrations/registration.js';
 import { includeView, project } from './read.js';
 
 @Controller('activities')
@@ -27,7 +30,7 @@ export class PublicController {
         where: { id, status: { in: ['published', 'cancelled', 'completed'] } },
         include: {
           members: includeView.members,
-          registrations: studentId ? { where: { student_id: studentId }, select: { status: true } } : false,
+          registrations: studentId ? { where: { student_id: studentId }, include: includeResponse } : false,
         },
       });
       if (!row || row.published_revision === null) invisible();
@@ -36,7 +39,13 @@ export class PublicController {
       });
       if (!revision) invisible();
       const view = project({ ...row, revisions: [revision], reviews: [] }, 'public-detail', new Date());
-      return envelope(view ?? invisible());
+      if (!view) invisible();
+      const config = revision.content as unknown as ActivityPublicationContent;
+      const item_availability = await registrationInventory(tx, id, config);
+      return envelope({
+        ...view, item_availability, questionnaire_version: questionnaireVersion(config.questions ?? []),
+        my_registrations: (row.registrations ?? []).map(r => registrationView(r)),
+      });
     }, { isolationLevel: 'RepeatableRead' });
   }
 }

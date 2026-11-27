@@ -110,8 +110,12 @@ export function project(
     ...(row.published_revision !== null && { published_revision: row.published_revision }),
   };
   if (!management) {
-    const own = row.registrations?.[0];
+    const own = row.registrations?.find(r => r.status === 'accepted') ?? row.registrations?.[0];
     if (own) item.my_registration_status = own.status as View['my_registration_status'];
+    if (scope === 'public') {
+      delete item.questions;
+      delete item.registration_items;
+    }
     if (scope !== 'public-detail' || own?.status !== 'accepted') {
       delete item.group_join_instructions;
       delete item.group_qr_id;

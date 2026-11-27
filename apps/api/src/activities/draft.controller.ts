@@ -15,17 +15,19 @@ import type {
   ActivityDraftPatchWritable,
   ActivityInputWritable,
   ActivityInput,
+  ActivityPublicationContent,
   ReasonAction,
   VersionAction,
 } from '@hongyan/contracts/types';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database, json } from '../database.js';
 import { envelope, invisible, checkVersion, wrongState, invalid } from '../http.js';
-import { managedScope, includeView, project, pagination, workingRevision } from './read.js';
+import { managedScope, includeView, project, pagination, publishedRevision, workingRevision } from './read.js';
 import { Workflow } from '../workflow.js';
 import { reviewView, detail, snapshot } from './views.js';
 import { parseGroupImage } from './group-image.js';
 import { content } from './validation.js';
+import { checkRecruitmentRevision } from './recruitment.js';
 import { validate } from '../validation.js';
 
 @Controller('organizer')
@@ -207,7 +209,8 @@ export class DraftController {
         row.reviews.some((r) => r.status === 'pending')
       )
         wrongState();
-      content(old.content, true);
+      const proposed = content(old.content, true);
+      await checkRecruitmentRevision(tx, id, publishedRevision(row)?.content as unknown as ActivityPublicationContent | undefined, proposed);
       await tx.activityRevision.update({
         where: { activity_id_revision: { activity_id: id, revision } },
         data: { revision_state: 'pending_review' },

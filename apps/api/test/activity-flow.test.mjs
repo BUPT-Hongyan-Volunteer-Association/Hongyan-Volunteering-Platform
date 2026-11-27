@@ -117,8 +117,9 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
         expected.slice((page - 1) * 2, page * 2).map((r) => r.id),
       );
       for (const review of result.data.items) {
-        const { is_current_pending, ...snapshot } = (await teacher.request(queue + '/' + review.id)).data;
+        const { is_current_pending, item_availability, ...snapshot } = (await teacher.request(queue + '/' + review.id)).data;
         assert.deepEqual(review, snapshot);
+        assert.ok(Array.isArray(item_availability));
         assert.equal(is_current_pending, review.status === 'pending');
         assert.equal(review.snapshot.activity_id, review.activity_id);
         seen.push(review);
@@ -280,6 +281,41 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     assert.equal((await owner.request(base)).data.current_review.status, 'pending');
     assert.equal((await student.request('/activities/' + draft.id)).status, 404);
   });
+  await t.test('分批活动沿用总日期，修订在锁内保护已有报名项和容量', async () => {
+    const date = offset => new Date(Date.now() + 8 * 3600000 + offset * 86400000).toISOString().slice(0,10);
+    const at = (offset,time) => date(offset) + 'T' + time + '+08:00';
+    const firstItem = { id: randomUUID(), role: '图书整理', starts_at: at(-1,'08:30:00'), ends_at: at(-1,'16:00:00'), capacity: 1, waitlist_capacity: 1 };
+    const nextItem = { ...firstItem, id: randomUUID(), starts_at: at(1,'08:30:00'), ends_at: at(1,'16:00:00') };
+    const config = {
+      ...sample.revisions[0].content, title: '服务时段分批', registration_mode: 'batch',
+      registration_opens_at: at(-2,'14:00:00'), registration_closes_at: at(1,'12:00:00'),
+      schedule: { schedule_type: 'date_range', duration_start_date: date(-1), duration_end_date: date(1) },
+      registration_items: [firstItem,nextItem], allow_multiple_slots: true,
+    };
+    const made = await owner.write('POST', '/organizer/activities', config);
+    assert.equal(made.status, 201);
+    assert.equal(made.data.capacity, 2);
+    const path = '/organizer/activities/' + made.data.id;
+    const send = async () => owner.write('POST', path + '/submit', { expected_version: (await owner.request(path)).data.activity.version });
+    const edit = async fields => owner.write('PATCH', path, { ...fields, expected_version: (await owner.request(path)).data.activity.version });
+    const approve = async () => decide((await send()).data,'approved');
+    assert.equal((await approve()).status, 200);
+    const publicPath = '/activities/' + made.data.id;
+    const publicView = (await student.request(publicPath)).data;
+    assert.equal(publicView.is_ongoing, true);
+    assert.equal(publicView.registration_phase,'open');
+    assert.equal(publicView.item_availability[0].remaining,2);
+    assert.equal((await student.write('POST',publicPath + '/registrations',{item_ids:[nextItem.id]})).status,201);
+    await edit({ registration_items: [firstItem,{...nextItem,role:'校内引导'}] });
+    assert.equal((await send()).status,409);
+    await edit({ registration_items:[firstItem,{...nextItem,waitlist_capacity:0}] });
+    const changed = (await send()).data;
+    assert.equal((await other.write('POST',publicPath + '/registrations',{item_ids:[nextItem.id]})).status,201);
+    const summary = (await teacher.request('/admin/activity-reviews/' + changed.id)).data.item_availability;
+    assert.equal(summary.find(row=>row.item_id===nextItem.id).submitted_count,2);
+    assert.equal((await decide(changed,'approved')).code,'capacity_conflict');
+    assert.equal((await student.request(publicPath)).data.item_availability[1].waitlist_capacity,1);
+  });
   await t.test('活动列表跨批筛选后仍返回准确总数和稳定页序', async () => {
     const original = sample.revisions[0],
       count = 104;
@@ -349,7 +385,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
 
   await t.test('两名学生竞争最后一席时只写入一次录取和决定事件', async () => {
     // One participant is already accepted.
-    assert.equal((await edit({ capacity: 2 })).status, 200);
+    assert.equal((await edit({ capacity: 2, waitlist_capacity: 1 })).status, 200);
     assert.equal((await decide(await submit(), 'approved')).status, 200);
     const applications = await Promise.all([student, other].map((actor) =>
       actor.write('POST', '/activities/' + id + '/registrations', {}),
@@ -357,8 +393,8 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     const commands = applications.map((r) => {
       assert.equal(r.status, 201);
       const key = randomUUID();
-      return () => owner.write('POST', '/organizer/registrations/' + r.data.id + '/decision?scope=managed',
-        { expected_version: r.data.version, decision: 'accepted' }, key);
+      return () => owner.write('POST', '/organizer/registrations/' + r.data.items[0].id + '/decision?scope=managed',
+        { expected_version: r.data.items[0].version, decision: 'accepted' }, key);
     });
     const decisions = await Promise.all(commands.map((run) => run()));
     assert.deepEqual(decisions.map((r) => r.status).sort(), [200, 409]);
@@ -398,6 +434,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
         key,
       );
     for (const [field, value] of Object.entries({
+      eligibility_text: '旧条件', selection_text: '旧说明', expected_hours: '1.0', expected_hours_basis: 'whole_activity',
       phone: '13800000000', wechat: 'reader01', contact_text: '服务台',
       result_expected_date: '2026-11-25', result_expected_at: '2026-11-25T01:00:00Z', hours_import_expected_at: '2026-11-25T01:00:00Z',
     })) {
@@ -431,13 +468,22 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
         duration_start_date: '2025-05-01',
         duration_end_date: '2025-05-01',
       },
-      registration_opens_at: at('09:00:00'),
+      registration_opens_at: '2025-04-30T23:59:00+08:00',
       registration_closes_at: at('09:30:00'),
       group_qr_upload: png,
       hours_rule_text: '以实到记录为准',
       hours_import_date: '2025-05-05',
     });
     assert.equal(saved.status, 200);
+    for (const patch of [
+      { registration_opens_at: at('00:00:00') },
+      { registration_closes_at: '2025-05-02T00:00:00+08:00' },
+    ]) {
+      const invalidTime = await save(patch);
+      assert.equal(invalidTime.status, 422);
+      assert.equal(invalidTime.details[0].field, Object.keys(patch)[0]);
+    }
+
     const image = '/activity-group-images/' + saved.data.group_qr_id;
     const review = await send();
     assert.equal(review.status, 201);
@@ -469,8 +515,8 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     t.mock.timers.setTime(Date.parse(at('09:30:00')));
     assert.equal((await apply(student)).code, 'registration_closed');
     const admit = (application) =>
-      owner.write('POST', '/organizer/registrations/' + application.data.id + '/decision', {
-        expected_version: application.data.version,
+      owner.write('POST', '/organizer/registrations/' + application.data.items[0].id + '/decision', {
+        expected_version: application.data.items[0].version,
         decision: 'accepted',
       });
     t.mock.timers.setTime(Date.parse(at('23:59:59')));
@@ -481,7 +527,7 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     const replacement = await save({
       group_qr_upload: png,
       group_join_instructions: '书籍整理群',
-      eligibility_text: '自带手套',
+      precautions: '自带手套',
       safety_notes: '活动前培训',
     });
     const nextImage = '/activity-group-images/' + replacement.data.group_qr_id;
@@ -493,9 +539,9 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     assert.equal((await student.raw(nextImage)).status, 200);
     assert.equal((await student.raw(image)).status, 404);
     assert.equal((await teacher.raw(image)).status, 200);
-    const cleared = await save({ group_qr_id: null, eligibility_text: null, safety_notes: null });
+    const cleared = await save({ group_qr_id: null, precautions: null, safety_notes: null });
     assert.equal(cleared.status, 200);
-    for (const key of ['group_qr_id', 'eligibility_text', 'safety_notes'])
+    for (const key of ['group_qr_id', 'precautions', 'safety_notes'])
       assert.equal(cleared.data[key], undefined);
     assert.equal((await send()).status, 201);
   });
