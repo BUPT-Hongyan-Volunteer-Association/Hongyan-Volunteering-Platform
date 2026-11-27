@@ -164,7 +164,7 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
           student_id: payload.student_id, follow_up_closed: false,
           notice: { OR: [{ id: source.id }, { source_notice_id: source.id, is_current: true }] },
         },
-        select: { id: true },
+        select: { student_id: true },
       });
       if (delivered) return 'superseded';
       await tx.notice.create({ data: {
