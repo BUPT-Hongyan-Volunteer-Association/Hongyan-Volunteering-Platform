@@ -1,3 +1,5 @@
+import { registrationItemLabel } from '@hongyan/contracts/activity';
+import type { RegistrationItem } from '@hongyan/contracts';
 import { localDateTime } from './activityDisplay';
 import type { IconName } from './UiIcon.vue';
 
@@ -82,6 +84,10 @@ export function fieldValue(key: string, value: unknown): string {
   if (value == null || value === '') return '未填写';
   if (Array.isArray(value))
     return value.length ? value.map((v) => fieldValue(key, v)).join('\n') : '无';
+  if (key === 'registration_items' && typeof value === 'object' && 'starts_at' in value && 'ends_at' in value) {
+    const item = value as RegistrationItem;
+    return [registrationItemLabel(item), '录取 ' + item.capacity + ' 人', '候补 ' + item.waitlist_capacity + ' 人'].join(' · ');
+  }
   if (typeof value === 'object')
     return Object.entries(value)
       .filter(([key]) => key !== 'schedule_type' && key !== 'id')

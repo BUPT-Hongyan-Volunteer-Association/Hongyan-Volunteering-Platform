@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { registrationItemLabel } from '@hongyan/contracts/activity';
 import { randomUUID } from 'node:crypto';
 import { createApp } from '../dist/app.js';
 import { Database } from '../dist/database.js';
@@ -7,6 +8,16 @@ import { canRecruit } from '../dist/registrations/registration.js';
 import { NoticeWorker } from '../dist/notices/notice.worker.js';
 import { browser } from './api-client.mjs';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
+
+test('报名项按北京时间合并同日日期，并区分跨日和全天', () => {
+  const role = '读者服务岗';
+  const label = (starts_at, ends_at) => registrationItemLabel({ role, starts_at, ends_at });
+  assert.equal(registrationItemLabel({ role }), role);
+  assert.equal(label('2026-12-04T23:00:00Z', '2026-12-05T02:00:00Z'), role + ' · 2026-12-05 07:00–10:00');
+  assert.equal(label('2026-12-05T15:00:00Z', '2026-12-05T16:00:00Z'), role + ' · 2026-12-05 23:00 至 2026-12-06 00:00');
+  assert.equal(label('2026-12-04T16:00:00Z', '2026-12-05T16:00:00Z'), role + ' · 2026-12-05 全天');
+  assert.equal(label('2026-12-04T16:00:30Z', '2026-12-05T16:00:30Z'), role + ' · 2026-12-05 00:00 至 2026-12-06 00:00');
+});
 
 test('按日期与精确时段的退出、录取和恢复边界', () => {
   const dated = {

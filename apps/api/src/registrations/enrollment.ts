@@ -1,33 +1,24 @@
 import { createHash } from 'node:crypto';
 import type {
   ActivityInput,
-  RegistrationItem,
   SurveyQuestion,
   SurveyAnswer,
   RegistrationInput,
 } from '@hongyan/contracts/types';
-import { activeRegistrationStatuses, selectionRestriction } from '@hongyan/contracts/activity';
+import { activeRegistrationStatuses, registrationItemLabel, selectionRestriction } from '@hongyan/contracts/activity';
 import { json, stable, type Tx } from '../database.js';
 import type { QuestionnaireAnswer, Registration } from '../generated/prisma/client.js';
 import { BusinessError, invalid } from '../http.js';
 
 export const wholeItemId = '00000000-0000-0000-0000-000000000000';
 type Questions = SurveyQuestion[];
-const time = (value: string) =>
-  new Date(Date.parse(value) + 8 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
-
-export function itemLabel(item: RegistrationItem) {
-  return [item.role, item.starts_at && item.ends_at && time(item.starts_at) + ' 至 ' + time(item.ends_at)]
-    .filter(Boolean)
-    .join(' · ');
-}
 
 export function pools(content: ActivityInput) {
   if (content.registration_mode === 'batch')
     return (content.registration_items ?? []).map((item) => ({
       ...item,
       id: item.id.toLowerCase(),
-      label: itemLabel(item),
+      label: registrationItemLabel(item),
     }));
   return [
     {

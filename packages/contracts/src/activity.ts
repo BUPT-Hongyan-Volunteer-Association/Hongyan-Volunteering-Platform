@@ -42,6 +42,23 @@ export function matchesCampus(value: string | undefined, filter: string) {
 export const localDate = (value: string | number | Date) =>
   new Date(new Date(value).getTime() + 8 * 3600000).toISOString().slice(0, 10);
 
+function registrationSlotText(start: string, end: string) {
+  const beijing = (value: string) => new Date(Date.parse(value) + 8 * 3600000).toISOString();
+  const first = beijing(start), last = beijing(end);
+  const date = first.slice(0, 10);
+  if (first.endsWith('T00:00:00.000Z') && Date.parse(end) - Date.parse(start) === 86400000)
+    return date + ' 全天';
+  const from = date + ' ' + first.slice(11, 16);
+  return date === last.slice(0, 10)
+    ? from + '–' + last.slice(11, 16)
+    : from + ' 至 ' + last.slice(0, 16).replace('T', ' ');
+}
+
+export function registrationItemLabel(item: Pick<RegistrationItem, 'role' | 'starts_at' | 'ends_at'>) {
+  const slot = item.starts_at && item.ends_at && registrationSlotText(item.starts_at, item.ends_at);
+  return [item.role, slot].filter(Boolean).join(' · ');
+}
+
 type ServiceDates = Pick<DateRangeSchedule, 'duration_start_date' | 'duration_end_date'>;
 
 export function serviceDates(schedule?: ActivitySchedule | ServiceDates): ServiceDates {

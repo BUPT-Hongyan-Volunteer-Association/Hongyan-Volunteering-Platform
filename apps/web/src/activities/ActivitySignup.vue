@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import { ApiError, applyForActivity, createCommand, type Activity, type Registration, type RegistrationInput, type Student } from '@hongyan/contracts';
-import { localDateTime } from '@hongyan/ui/activityDisplay';
-import { activeRegistrationStatuses, selectionRestriction } from '@hongyan/contracts/activity';
+import { activeRegistrationStatuses, registrationItemLabel, selectionRestriction } from '@hongyan/contracts/activity';
 import { registrationLabels } from '../registrations/labels';
 
 const props = defineProps<{ activity: Activity; student?: Student; refreshing: boolean }>();
@@ -28,9 +27,6 @@ const inventory = computed(() => new Map((props.activity.item_availability ?? []
 const isOpen = computed(() => !!props.student && props.activity.status === 'published' && props.activity.registration_phase === 'open');
 const wholeStatus = computed(() => existing.value.get(undefined)?.status ?? props.activity.my_registration_status);
 type Item = NonNullable<Activity['registration_items']>[number];
-function label(item: Item) {
-  return inventory.value.get(item.id)?.item_label || [item.role, item.starts_at && localDateTime(item.starts_at), item.ends_at && localDateTime(item.ends_at)].filter(Boolean).join(' · ');
-}
 function remaining(id?: string) {
   const row = inventory.value.get(id);
   return row?.remaining;
@@ -87,7 +83,7 @@ async function submit() {
     if (!selected.value.length) return fail('请选择报名项目', 'signup-items');
     for (const id of selected.value) {
       const item = items.value.find(row => row.id === id);
-      if (!item || blocked(item)) return fail(item ? label(item) + ' · ' + blocked(item) : '所选项目已变更，请重新选择', 'signup-items');
+      if (!item || blocked(item)) return fail(item ? registrationItemLabel(item) + ' · ' + blocked(item) : '所选项目已变更，请重新选择', 'signup-items');
     }
     body.item_ids = selected.value;
   }
@@ -126,7 +122,7 @@ async function submit() {
       <label v-for="item in items" :key="item.id" class="signup-item">
         <input v-if="student" v-model="selected" type="checkbox" :value="item.id"
           :disabled="!isOpen || saving || (!selected.includes(item.id) && !!blocked(item))" />
-        <span><strong>{{ label(item) }}</strong>
+        <span><strong>{{ registrationItemLabel(item) }}</strong>
           <small>录取 {{ item.capacity }} 人 · 候补 {{ item.waitlist_capacity }} 人<span v-if="remaining(item.id) !== undefined"> · 剩余可报 {{ remaining(item.id) }}</span></small>
         </span><small v-if="blocked(item)" class="item-status">{{ blocked(item) }}</small>
       </label>

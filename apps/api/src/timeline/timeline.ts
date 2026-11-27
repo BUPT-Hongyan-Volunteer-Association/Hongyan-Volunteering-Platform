@@ -1,6 +1,6 @@
 import { parseActivityFilters, publishedActivityFilter } from '../activities/filters.js';
 import { servicePeriods } from '../activities/schedule.js';
-import { localDate, serviceDates } from '@hongyan/contracts/activity';
+import { localDate, registrationItemLabel, serviceDates } from '@hongyan/contracts/activity';
 import { createHash } from 'node:crypto';
 import type {
   Activity, ActivityInput,
@@ -11,7 +11,6 @@ import type { Prisma } from '../generated/prisma/client.js';
 import type { Database, Tx } from '../database.js';
 import type { Actor } from '../auth/session.guard.js';
 import { invalid } from '../http.js';
-import { itemLabel } from '../registrations/enrollment.js';
 import { managedScope, publishedRevision } from '../activities/read.js';
 import { activityViews } from '../activities/list.js';
 
@@ -139,7 +138,7 @@ export async function timelinePage(
         const approved = publishedRevision(row)?.content as unknown as ActivityInput;
         const accepted = new Set(row.registrations?.filter(r => r.status === 'accepted').map(r => r.item_id));
         const mine = approved.registration_items?.filter(item => accepted.has(item.id)) ?? [];
-        if (matched && mine.length) myItems.set(view.id, mine.map(itemLabel));
+        if (matched && mine.length) myItems.set(view.id, mine.map(registrationItemLabel));
         if (overlappingStatuses.includes(view.status)) {
           if (!mine.length || mine.some(item => !item.starts_at)) {
             for (const period of servicePeriods(view.schedule, from, to)) periods.push({ activityId: view.id, ...period });
