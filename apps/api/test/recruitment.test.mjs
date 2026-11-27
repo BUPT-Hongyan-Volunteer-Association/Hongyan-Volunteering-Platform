@@ -511,7 +511,7 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     assert.equal((await decide([noWait],'waitlisted')).code,'capacity_conflict');
   });
 
-  await t.test('活动已开始仍可录取当前场次，未来场次按自身开始时刻申请退出', async () => {
+  await t.test('按统一窗口报名和办理已过及进行中场次，未来场次可独立申请退出', async () => {
     const created_by = activity.revisions[0].created_by;
     const now = Date.now(), offset = hours => new Date(now + hours * 3600000).toISOString();
     const current = randomUUID(), future = randomUUID(), ended = randomUUID();
@@ -530,7 +530,7 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     }});
     const rows = success(await write(alice,'/activities/'+batch.id+'/registrations',{item_ids:[current,future,ended]}),201).items;
     const decide = rows => write(owner,'/organizer/activities/'+batch.id+'/registration-decisions',{items:items(rows),decision:'accepted'});
-    assert.equal((await decide([rows[2]])).code,'invalid_state');
+    assert.equal(success(await decide([rows[2]])).items[0].status,'accepted');
     const accepted = success(await decide(rows.slice(0,2))).items;
     assert.equal((await request(alice,'exit',accepted[0])).code,'invalid_state');
     success(await request(alice,'exit',accepted[1]),201);

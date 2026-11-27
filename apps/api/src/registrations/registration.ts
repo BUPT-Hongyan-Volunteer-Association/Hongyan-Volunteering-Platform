@@ -177,12 +177,10 @@ function itemTime(approved: ActivityPublicationContent | undefined, id?: string)
 export function canDecide(
   activityStatus: string,
   approved: ActivityPublicationContent | undefined,
-  itemId?: string,
   now = Date.now(),
 ) {
   const bounds = activityBounds(approved?.schedule);
-  const end = itemTime(approved, itemId)?.ends_at;
-  return activityStatus === 'published' && !!bounds && now < bounds.end && (!end || now < Date.parse(end));
+  return activityStatus === 'published' && !!bounds && now < bounds.end;
 }
 
 export function canRequest(
@@ -193,14 +191,15 @@ export function canRequest(
   itemId?: string,
 ) {
   if (activityStatus !== 'published') return false;
+  const item = itemTime(approved, itemId);
   if (kind === 'restoration')
     return (
       status === 'exited' &&
       (approved?.registration_mode === 'batch'
-        ? canDecide(activityStatus, approved, itemId)
+        ? canDecide(activityStatus, approved) && (!item?.ends_at || Date.now() < Date.parse(item.ends_at))
         : canRecruit(approved))
     );
-  const start = itemTime(approved, itemId)?.starts_at;
+  const start = item?.starts_at;
   return status === 'accepted' && (start ? Date.now() < Date.parse(start) : canRecruit(approved, true));
 }
 
@@ -341,7 +340,7 @@ export async function decideBatch(
   );
   const now = new Date(),
     approved = approvedContent(activity);
-  const available = canDecide(activity.status, approved);
+  const available = canDecide(activity.status, approved, now.getTime());
   const failures = ids.flatMap((resource_id, i) => {
     const row = byId.get(resource_id);
     let code = 'invalid_state',
@@ -351,8 +350,7 @@ export async function decideBatch(
       code = 'version_conflict';
       message = '版本已更新，请刷新后复核';
     } else if (!enabled.has(row.student_id)) message = '学生已停用';
-    else if (!available || (input.decision !== 'rejected' && !canDecide(activity.status,approved,row.item_id,now.getTime())))
-      message = '活动或该服务时段已结束';
+    else if (!available) message = '活动已结束，无法继续办理';
     else if (!canChangeRegistration(row.status, input.decision))
       message = '当前报名状态不能作此决定';
     return message ? [{ field: 'items', row: i + 1, resource_id, code, message }] : [];
