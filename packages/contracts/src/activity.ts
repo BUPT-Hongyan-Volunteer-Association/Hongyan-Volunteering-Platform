@@ -10,6 +10,12 @@ export function canChangeRegistration(status: string, decision: RegistrationDeci
   return ['submitted', 'waitlisted', 'rejected'].includes(status) && status !== decision;
 }
 
+export function sameRegistrationItem(before: RegistrationItem, after: RegistrationItem) {
+  const instant = (value?: string) => value ? Date.parse(value) : null;
+  return before.id === after.id && before.role === after.role
+    && instant(before.starts_at) === instant(after.starts_at) && instant(before.ends_at) === instant(after.ends_at);
+}
+
 export function selectionRestriction(
   config: Pick<ActivityInput, 'allow_multiple_roles' | 'allow_multiple_slots'>,
   items: readonly RegistrationItem[],

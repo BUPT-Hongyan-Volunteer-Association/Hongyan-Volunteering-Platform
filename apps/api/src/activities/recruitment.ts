@@ -1,5 +1,5 @@
 import type { ActivityInput, ActivityPublicationContent } from '@hongyan/contracts/types';
-import { activeRegistrationStatuses, activityBounds } from '@hongyan/contracts/activity';
+import { activeRegistrationStatuses, activityBounds, sameRegistrationItem } from '@hongyan/contracts/activity';
 import type { Tx } from '../database.js';
 import { BusinessError, invalid } from '../http.js';
 import { checkSelections, registrationInventory, wholeItemId } from '../registrations/enrollment.js';
@@ -93,9 +93,7 @@ export async function checkRecruitmentRevision(
   for (const { item_id } of used) {
     if (item_id === wholeItemId) continue;
     const before = previousItems.get(item_id), after = nextItems.get(item_id);
-    const instant = (value?: string) => value ? Date.parse(value) : null;
-    if (!before || !after || before.role !== after.role ||
-      instant(before.starts_at) !== instant(after.starts_at) || instant(before.ends_at) !== instant(after.ends_at))
+    if (!before || !after || !sameRegistrationItem(before, after))
       conflict('已有报名记录的岗位和时段须保留，可新增其他报名项');
   }
   if ((old.allow_multiple_roles && !next.allow_multiple_roles) || (old.allow_multiple_slots && !next.allow_multiple_slots)) {

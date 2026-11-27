@@ -7778,6 +7778,10 @@ components:
     registration_input:
       type: object
       properties:
+        published_revision:
+          type: integer
+          minimum: 1
+          description: 学生确认的活动公开版本。分批报名必传，版本不一致返回 409 供重新核对岗位和时间。
         item_ids: {type: array, minItems: 1, uniqueItems: true, items: {type: string, format: uuid}}
         questionnaire_version: {type: string}
         answers: {type: array, items: {$ref: '#/components/schemas/answer_input'}}

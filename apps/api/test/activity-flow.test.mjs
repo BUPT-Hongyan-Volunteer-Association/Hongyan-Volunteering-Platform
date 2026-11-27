@@ -343,13 +343,13 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     assert.equal(publicView.is_ongoing, true);
     assert.equal(publicView.registration_phase,'open');
     assert.equal(publicView.item_availability[0].remaining,2);
-    const application = await student.write('POST',publicPath + '/registrations',{item_ids:[nextItem.id]});
+    const application = await student.write('POST',publicPath + '/registrations',{published_revision:publicView.published_revision,item_ids:[nextItem.id]});
     assert.equal(application.status,201);
     await edit({ registration_items: [firstItem,{...nextItem,role:'校内引导'}] });
     assert.equal((await send()).status,409);
     await edit({ registration_items:[firstItem,{...nextItem,waitlist_capacity:0}] });
     const changed = (await send()).data;
-    assert.equal((await other.write('POST',publicPath + '/registrations',{item_ids:[nextItem.id]})).status,201);
+    assert.equal((await other.write('POST',publicPath + '/registrations',{published_revision:publicView.published_revision,item_ids:[nextItem.id]})).status,201);
     const summary = (await teacher.request('/admin/activity-reviews/' + changed.id)).data.item_availability;
     assert.equal(summary.find(row=>row.item_id===nextItem.id).submitted_count,2);
     assert.equal((await decide(changed,'approved')).code,'capacity_conflict');

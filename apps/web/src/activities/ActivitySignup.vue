@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import { ApiError, applyForActivity, createCommand, type Activity, type Registration, type RegistrationInput, type Student } from '@hongyan/contracts';
-import { activeRegistrationStatuses, registrationItemLabel, selectionRestriction } from '@hongyan/contracts/activity';
+import { activeRegistrationStatuses, registrationItemLabel, sameRegistrationItem, selectionRestriction } from '@hongyan/contracts/activity';
 import { registrationLabels } from '../registrations/labels';
 
 const props = defineProps<{ activity: Activity; student?: Student; refreshing: boolean }>();
@@ -49,10 +49,16 @@ const buttonLabel = computed(() => {
 });
 watch(() => props.activity, (current, previous) => {
   if (!previous) return;
-  const itemIds = new Set(current.registration_items?.map(item => item.id));
-  if (selected.value.some(id => !itemIds.has(id))) {
-    selected.value = selected.value.filter(id => itemIds.has(id));
-    error.value = '报名项目已调整，请复核所选项目';
+  const beforeItems = new Map(previous.registration_items?.map(item => [item.id, item]));
+  const unchangedIds = new Set(current.registration_items?.filter(item => {
+    const before = beforeItems.get(item.id);
+    return before && sameRegistrationItem(before, item);
+  }).map(item => item.id));
+  const kept = selected.value.filter(id => unchangedIds.has(id));
+  const itemsChanged = kept.length !== selected.value.length;
+  if (itemsChanged) {
+    selected.value = kept;
+    error.value = '报名项目已调整，请重新选择变更的岗位或时段';
   }
   if (previous.questionnaire_version === current.questionnaire_version) return;
   const previousQuestions = new Map(previous.questions?.map(q => [q.id, q]));
@@ -69,7 +75,7 @@ watch(() => props.activity, (current, previous) => {
   }
   choices.value = validChoices;
   texts.value = validTexts;
-  error.value = '问卷已更新，请复核后提交';
+  error.value = itemsChanged ? '报名项目和问卷已更新，请重新选择变更的项目并复核答案' : '问卷已更新，请复核后提交';
 });
 function fail(message: string, id?: string) {
   error.value = message;
@@ -78,7 +84,7 @@ function fail(message: string, id?: string) {
 async function submit() {
   if (!canApply.value || saving.value || props.refreshing) return;
   error.value = ''; success.value = '';
-  const body: RegistrationInput = {};
+  const body: RegistrationInput = { published_revision: props.activity.published_revision };
   if (batch.value) {
     if (!selected.value.length) return fail('请选择报名项目', 'signup-items');
     for (const id of selected.value) {

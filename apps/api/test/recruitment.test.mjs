@@ -410,10 +410,12 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     const path = '/activities/' + batch.id;
     const detail = async u => success(await u.request(path));
     const version = (await detail(alice)).questionnaire_version;
-    const submit = (u, item_ids, extras, key) => write(u,path+'/registrations',{questionnaire_version:version,item_ids,...extras},key);
+    let revision = 1;
+    const submit = (u, item_ids, extras, key) => write(u,path+'/registrations',{published_revision:revision,questionnaire_version:version,item_ids,...extras},key);
     const setConfig = async (n, update) => {
       await db.activityRevision.create({data:{activity_id:batch.id,revision:n,revision_state:'approved',content:update,created_by}});
       await db.activity.update({where:{id:batch.id},data:{published_revision:n,working_revision:n}});
+      revision = n;
     };
     assert.equal((await submit(alice,[role],{})).status,422);
     assert.equal((await submit(alice,[role,second],{answers})).status,422);
@@ -421,7 +423,12 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     assert.equal((await submit(alice,[role,later],{answers})).status,422);
     assert.equal((await submit(alice,[role],{questionnaire_version:'obsolete',answers})).status,409);
     config.allow_multiple_roles = true; config.allow_multiple_slots = true;
+    // Reusing an unclaimed item ID for different work must invalidate an open student form.
+    config.registration_items[0] = {...config.registration_items[0], role:'服务台'};
     await setConfig(2,config);
+    assert.equal((await submit(alice,[general],{published_revision:1,answers})).code, 'version_conflict');
+    assert.equal((await write(alice,path+'/registrations',{item_ids:[general],questionnaire_version:version,answers})).status,422);
+    assert.equal(await db.registration.count({where:{activity_id:batch.id}}),0);
 
     const controller = new AbortController();
     try {
@@ -508,7 +515,7 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     const fixtureStudents = prepared.map(a=>({id:randomUUID(),student_no:a.username,account_id:a.id}));
     await db.student.createMany({data:fixtureStudents});
     await db.registration.createMany({data:fixtureStudents.map(r=>({student_id:r.id,activity_id:next.id,item_id:full,item_label:'讲解',status:'submitted'}))});
-    const post = (u, ids) => write(u,'/activities/'+next.id+'/registrations',{item_ids:ids});
+    const post = (u, ids) => write(u,'/activities/'+next.id+'/registrations',{published_revision:1,item_ids:ids});
     const results = await Promise.all([post(alice,[full]),post(bob,[full])]);
     assert.deepEqual(results.map(r=>r.status).sort(),[201,409]);
     const lose = results[0].status===409 ? alice : bob;
@@ -542,7 +549,7 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
         ],
       }}},
     }});
-    const rows = success(await write(alice,'/activities/'+batch.id+'/registrations',{item_ids:[current,future,ended]}),201).items;
+    const rows = success(await write(alice,'/activities/'+batch.id+'/registrations',{published_revision:1,item_ids:[current,future,ended]}),201).items;
     const decide = rows => write(owner,'/organizer/activities/'+batch.id+'/registration-decisions',{items:items(rows),decision:'accepted'});
     assert.equal(success(await decide([rows[2]])).items[0].status,'accepted');
     const accepted = success(await decide(rows.slice(0,2))).items;

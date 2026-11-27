@@ -14,7 +14,9 @@ import { type Tx } from '../database.js';
 
 import { answerView, checkCapacity, checkReactivation, checkSelections, pools, responseFor, wholeItemId } from './enrollment.js';
 
-const responseWithAnswers = { include: { answers: { orderBy: { position: 'asc' } } } } as const;
+const responseWithAnswers = {
+  select: { id: true, questionnaire_version: true, answers: { orderBy: { position: 'asc' } } },
+} as const;
 export const includeResponse = {
   response: responseWithAnswers,
   history: {
@@ -98,7 +100,7 @@ export function approvedContent(activity: LoadedActivity) {
   return revision?.content as unknown as ActivityPublicationContent | undefined;
 }
 
-type LoadedResponse = QuestionnaireResponse & { answers?: QuestionnaireAnswer[] };
+type LoadedResponse = Pick<QuestionnaireResponse, 'id' | 'questionnaire_version'> & { answers?: QuestionnaireAnswer[] };
 export function registrationView(
   row: Registration & {
     response?: LoadedResponse | null;
@@ -214,6 +216,10 @@ export async function apply(
   const approved = approvedContent(activity);
   if (!approved) invisible();
   if (activity.status !== 'published') wrongState();
+  if (approved.registration_mode === 'batch' && input.published_revision === undefined)
+    invalid('published_revision', '分批报名需要核对活动公开版本');
+  if (input.published_revision !== undefined && input.published_revision !== activity.published_revision)
+    throw new BusinessError(409, 'version_conflict', '活动已更新，请复核报名项目后提交');
   const opens = Date.parse(approved.registration_opens_at);
   const closes = Date.parse(approved.registration_closes_at);
   if (!(opens < closes)) wrongState();
