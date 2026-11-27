@@ -43,9 +43,10 @@ function moveQuestion(index: number, delta: number) {
       </div>
       <fieldset v-for="(item,i) in config.registration_items" :key="item.id" class="card">
         <legend>报名项 {{ i + 1 }}</legend>
-        <div class="row">
-          <label>岗位<input v-model="item.role" :aria-label="'第 '+(i+1)+' 项岗位'" placeholder="按时段报名时可留空"></label>
-          <label class="inline"><input type="checkbox" v-model="item.allDay">全天</label>
+        <label :for="'role-' + item.id">岗位</label>
+        <div class="row role-controls">
+          <input :id="'role-' + item.id" v-model="item.role" :aria-label="'第 '+(i+1)+' 项岗位'" placeholder="按时段报名时可留空">
+          <label class="inline all-day"><input type="checkbox" v-model="item.allDay">全天</label>
         </div>
         <div class="row" v-if="item.allDay">
           <label>服务日期<input type="date" :value="item.start.slice(0,10)" @input="setDay(item,$event)"></label>
@@ -103,7 +104,13 @@ h3 { margin:8px 0 0; font-size:15px; }
 .card button { justify-self:start; }
 .row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .tools, .choices, .option, .card .inline, .choices label { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.all-day { justify-self:start; padding-inline-start:var(--space-12); }
+.all-day input { margin:0; }
 .option { align-items:flex-end; }
 .option label { flex:1; }
-@media (max-width:600px) { .row { grid-template-columns:minmax(0,1fr); } }
+@media (max-width:600px) {
+  .row { grid-template-columns:minmax(0,1fr); }
+  .role-controls { grid-template-columns:minmax(0,1fr) auto; column-gap:var(--space-16); }
+  .all-day { padding-inline-start:0; }
+}
 </style>
