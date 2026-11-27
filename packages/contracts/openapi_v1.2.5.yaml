@@ -7157,6 +7157,8 @@ components:
       type: object
       required: [questionnaire_version, questions]
       properties:
+        is_current: {type: boolean}
+        submitted_at: {type: string, format: date-time, description: 该版本最近一次答卷提交时间}
         questionnaire_version: {type: string}
         questions: {type: array, items: {$ref: '#/components/schemas/survey_question'}}
     answer_input:
@@ -9301,7 +9303,7 @@ components:
       type: object
       properties:
         item_id: {type: string, format: uuid}
-        answer_filters: {type: string, description: 按题目匹配选项或填空关键词的条件数组（JSON）}
+        answer_filters: {type: string, description: 按题目和问卷版本匹配选项或填空关键词的条件数组（JSON）}
         type:
           type: string
           enum:
@@ -10553,6 +10555,7 @@ components:
     timeline_activity:
       type: object
       properties:
+        my_item_labels: {type: array, items: {type: string}, description: 本人日程中已录取的岗位和时段}
         activity_id:
           type: string
           format: uuid
