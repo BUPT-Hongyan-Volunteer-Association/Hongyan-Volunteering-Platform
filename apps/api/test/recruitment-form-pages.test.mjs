@@ -56,7 +56,7 @@ test('负责人编辑三类问卷，教师审核，学生分岗作答，按版�
     await owner.getByLabel('第 1 题题目').fill(questionTitle);
     await button(owner,'保存草稿').click();
     await visible(owner.getByText('草稿已保存',{exact:true}));
-    async function approve(expected, editor = owner) {
+    async function approve(expected, editor = owner, previousDescription) {
       await button(editor,'提交审核').click();
       await visible(editor.getByText('已送审，内容已冻结',{exact:true}));
       await teacher.goto(admin + '/reviews');
@@ -66,10 +66,15 @@ test('负责人编辑三类问卷，教师审核，学生分岗作答，按版�
         await snapshot.locator('summary').first().click();
       const questionText = await snapshot.getByText('报名问卷', {exact:true}).locator('+ dd').innerText();
       for (const text of expected) assert.ok(questionText.includes(text), text);
+      if (previousDescription) {
+        const diff = teacher.locator('.diff dt').filter({hasText:'报名问卷'}).locator('+ dd');
+        assert.ok((await diff.locator('span').innerText()).includes('题目说明　' + previousDescription));
+        assert.ok((await diff.locator('strong').innerText()).includes(expected[0]));
+      }
       await button(teacher,'批准发布').click();
       await visible(teacher.getByText('已批准发布',{exact:true}));
     }
-    await approve([questionTitle, '请考虑以往的服务经历', '单选题','多选题','填空题','有经验','接待','备注']);
+    await approve(['题目　' + questionTitle, '题目说明　请考虑以往的服务经历', '单选题','多选题','填空题','有经验','接待','备注']);
     await owner.goto(web + '/managed');
     await link(owner,title).click();
     const nav = owner.getByRole('navigation',{name:'活动工作区'});
@@ -91,7 +96,7 @@ test('负责人编辑三类问卷，教师审核，学生分岗作答，按版�
       await editor.getByRole('group',{name:'第 1 题',exact:true}).getByLabel('题目说明').fill('请选择最符合实际的一项');
       await button(editor,'保存草稿').click();
       await visible(editor.getByText('草稿已保存',{exact:true}));
-      await approve(['请选择最符合实际的一项'], editor);
+      await approve(['题目说明　请选择最符合实际的一项'], editor, '请考虑以往的服务经历');
       await visible(owner.getByText('问卷已更新，原筛选条件已清除。',{exact:true}));
       assert.equal(await owner.getByRole('combobox',{name:'筛选答案'}).count(),0);
       await visible(button(owner,'按答卷筛选'));
