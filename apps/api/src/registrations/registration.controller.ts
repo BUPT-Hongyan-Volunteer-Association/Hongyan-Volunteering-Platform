@@ -8,6 +8,7 @@ import {
   Post,
   Query,
   Req,
+  Sse,
 } from '@nestjs/common';
 import type {
   RegistrationDecision,
@@ -16,13 +17,16 @@ import type {
   RegistrationInput,
   RosterStatusCounts,
 } from '@hongyan/contracts/types';
+import { filter, map, merge, of, takeUntil, timer } from 'rxjs';
+import { rosterEvents } from './roster-events.js';
+import { registrationInventory, questionnaireVersion } from './enrollment.js';
 import { pagination, workspaceScope } from '../activities/read.js';
 import { Workflow } from '../workflow.js';
 import { validate } from '../validation.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
-import { envelope, invalid, invisible } from '../http.js';
-import { canRequest, canWithdraw, canDecide, decideBatch, apply, registrationView, rosterOrderBy, rosterSearchWhere, rosterWhere } from './registration.js';
+import { denied, envelope, invalid, invisible } from '../http.js';
+import { canRequest, canWithdraw, canDecide, decideBatch, apply, registrationView, includeResponse, rosterOrderBy, rosterSearchWhere } from './registration.js';
 
 const zeroCounts: RosterStatusCounts = {
   submitted: 0,
@@ -39,6 +43,7 @@ function statusFilter(status?: string) {
 }
 @Controller()
 export class RegistrationController {
+  private readonly changes = rosterEvents();
   constructor(
     private db: Database,
     private workflow: Workflow,
@@ -80,7 +85,7 @@ export class RegistrationController {
                 orderBy: [{ submitted_at: 'desc' }, { id: 'asc' }],
                 skip,
                 take: page_size,
-                include: { activity: { select: { published_revision: true, status: true } }, exit_requests: { where: { status: 'pending' }, select: { id: true, kind: true } } },
+                include: { ...includeResponse, activity: { select: { published_revision: true, status: true } }, exit_requests: { where: { status: 'pending' }, select: { id: true, kind: true } } },
               })
             : [];
         const versions = rows.flatMap((r) =>
@@ -105,14 +110,23 @@ export class RegistrationController {
             ...registrationView(r),
             activity_title: approvals.get(r.activity_id)?.title,
             can_withdraw: canWithdraw(r.activity.status, r.status),
-            can_request_exit: !r.exit_requests.length && canRequest('exit', r.activity.status, r.status, approvals.get(r.activity_id)),
-            can_request_restoration: !r.exit_requests.length && canRequest('restoration', r.activity.status, r.status, approvals.get(r.activity_id)),
+            can_request_exit: !r.exit_requests.length && canRequest('exit', r.activity.status, r.status, approvals.get(r.activity_id), r.item_id),
+            can_request_restoration: !r.exit_requests.length && canRequest('restoration', r.activity.status, r.status, approvals.get(r.activity_id), r.item_id),
             ...(r.exit_requests[0] && { [r.exit_requests[0].kind === 'exit' ? 'pending_exit_request_id' : 'pending_restoration_request_id']: r.exit_requests[0].id }),
           })),
         });
       },
       { isolationLevel: 'RepeatableRead' },
     );
+  }
+
+  @Sse('organizer/activities/:id/registration-events')
+  async events(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Query('scope') requested?: string) {
+    const scope = workspaceScope(req.actor,requested);
+    if (!await this.db.activity.count({where:{id,...scope}})) invisible();
+    // Only an invalidation travels over the stream. Reads always reauthorize; reconnects renew the session check.
+    return merge(of('*'),this.changes).pipe(filter(changed => changed === '*' || changed === id),
+      map(changed => ({data:changed === '*' ? 'connected' : 'changed'})),takeUntil(timer(60_000)));
   }
 
   @Get('organizer/activities/:id/registrations') roster(
@@ -131,8 +145,9 @@ export class RegistrationController {
         const { page, page_size, skip } = pagination(q);
         const status = statusFilter(q.status);
         if (q.q !== undefined && typeof q.q !== 'string') invalid('q', '请输入姓名或学号');
-        const search = q.q?.trim();
-        const matching = rosterSearchWhere({ activity_id: id, q: search });
+        const answersVisible = req.actor.roles.includes('organizer') && q.scope !== 'all';
+        if (!answersVisible && q.answer_filters !== undefined) denied();
+        const matching = rosterSearchWhere({ activity_id: id, q:q.q, item_id:q.item_id, answer_filters:q.answer_filters });
         const counts = { ...zeroCounts };
         const grouped = await tx.registration.groupBy({
           by: ['status'],
@@ -154,17 +169,26 @@ export class RegistrationController {
                 select: { content: true },
               });
         const content = approved?.content as unknown as ActivityPublicationContent | undefined;
-        const accepted_count = search
-          ? await tx.registration.count({ where: { activity_id: id, status: 'accepted' } })
-          : counts.accepted;
+        const inventory = await registrationInventory(tx,id,content);
+        const visiblePools = q.item_id ? inventory.filter(p => p.item_id === q.item_id) : inventory;
+        const where = {...matching,status};
+        const unique_student_count = await tx.student.count({where:{registrations:{some:where}}});
+        const schemas = answersVisible ? await tx.$queryRaw<{questionnaire_version:string;questions:unknown}[]>`
+          SELECT DISTINCT ON (questionnaire_version) questionnaire_version, questions FROM questionnaire_response
+          WHERE activity_id=${id}::uuid ORDER BY questionnaire_version` : [];
+        if (content?.questions?.length) {
+          const version = questionnaireVersion(content.questions);
+          if (!schemas.some(q=>q.questionnaire_version===version)) schemas.push({questionnaire_version:version,questions:content.questions});
+        }
         const rows =
           skip < total
             ? await tx.registration.findMany({
-                where: rosterWhere({ activity_id: id, q: search, status }),
+                where,
                 skip,
                 take: page_size,
                 orderBy: rosterOrderBy,
                 include: {
+                  ...(answersVisible && includeResponse),
                   student: {
                     select: { student_no: true, account: { select: { display_name: true } } },
                   },
@@ -176,8 +200,9 @@ export class RegistrationController {
           page_size,
           total,
           status_counts: counts,
-          accepted_count,
-          capacity: content?.capacity ?? 0,
+          accepted_count:visiblePools.reduce((n,p)=>n+p.accepted_count,0),
+          capacity:visiblePools.reduce((n,p)=>n+p.capacity,0),
+          item_availability:inventory, unique_student_count, question_versions:schemas,
           can_decide: canDecide(activity.status, content),
           items: rows.map((r) => ({
             ...registrationView(r),
