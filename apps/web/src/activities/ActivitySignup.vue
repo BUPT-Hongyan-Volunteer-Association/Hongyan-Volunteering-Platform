@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import { ApiError, applyForActivity, createCommand, type Activity, type Registration, type RegistrationInput, type Student } from '@hongyan/contracts';
-import { activeRegistrationStatuses, registrationItemLabel, sameRegistrationItem, selectionRestriction } from '@hongyan/contracts/activity';
+import { activeRegistrationStatuses, registrationItemLabel, sameRegistrationItem, createSelectionCheck } from '@hongyan/contracts/activity';
 import { registrationLabels } from '../registrations/labels';
 
 const props = defineProps<{ activity: Activity; student?: Student; refreshing: boolean }>();
 const emit = defineEmits<{ applied: [registrations: Registration[]]; refresh: [] }>();
 const command = createCommand();
 const saving = ref(false), error = ref(''), success = ref('');
-const selected = ref<string[]>([]);
+const selected = ref(new Set<string>());
 const choices = ref<Record<string, string[]>>({});
 const texts = ref<Record<string, string>>({});
 const items = computed(() => props.activity.registration_items ?? []);
@@ -26,25 +26,27 @@ const existing = computed(() => new Map(mine.value.map(row => [row.item_id, row]
 const inventory = computed(() => new Map((props.activity.item_availability ?? []).map(row => [row.item_id, row])));
 const isOpen = computed(() => !!props.student && props.activity.status === 'published' && props.activity.registration_phase === 'open');
 const wholeStatus = computed(() => existing.value.get(undefined)?.status ?? props.activity.my_registration_status);
-type Item = NonNullable<Activity['registration_items']>[number];
-function remaining(id?: string) {
-  const row = inventory.value.get(id);
-  return row?.remaining;
-}
-const appliedIds = computed(() => new Set(mine.value.filter(row => activeRegistrationStatuses.includes(row.status)).map(row => row.item_id)));
-function blocked(item: Item) {
-  const prior = existing.value.get(item.id);
-  if (prior && prior.status !== 'withdrawn') return registrationLabels[prior.status];
-  if (remaining(item.id) === 0) return '报名已满';
-  const otherItems = items.value.filter(other => other.id !== item.id && (selected.value.includes(other.id) || appliedIds.value.has(other.id)));
-  return selectionRestriction(props.activity, [...otherItems, item]);
-}
-const wholeAvailable = computed(() => (!wholeStatus.value || wholeStatus.value === 'withdrawn') && remaining() !== 0);
-const canApply = computed(() => isOpen.value && (batch.value ? items.value.some(item => !blocked(item)) : wholeAvailable.value));
+const wholeRemaining = computed(() => inventory.value.get(undefined)?.remaining);
+const itemOptions = computed(() => {
+  const held = new Set(selected.value);
+  for (const row of mine.value) {
+    if (row.item_id && activeRegistrationStatuses.includes(row.status)) held.add(row.item_id);
+  }
+  const check = createSelectionCheck(props.activity, items.value.filter(item => held.has(item.id)));
+  return new Map(items.value.map(item => {
+    const prior = existing.value.get(item.id);
+    const pool = inventory.value.get(item.id);
+    const reason = prior && prior.status !== 'withdrawn' ? registrationLabels[prior.status]
+      : pool?.remaining === 0 ? '报名已满' : check(held.has(item.id) ? undefined : item);
+    return [item.id, { item, label: pool?.item_label ?? registrationItemLabel(item), remaining: pool?.remaining, reason }];
+  }));
+});
+const wholeAvailable = computed(() => (!wholeStatus.value || wholeStatus.value === 'withdrawn') && wholeRemaining.value !== 0);
+const canApply = computed(() => isOpen.value && (batch.value ? items.value.some(item => !itemOptions.value.get(item.id)!.reason) : wholeAvailable.value));
 const buttonLabel = computed(() => {
   if (saving.value) return '正在提交…';
   if (!batch.value && wholeStatus.value && (wholeStatus.value !== 'withdrawn' || !canApply.value)) return registrationLabels[wholeStatus.value];
-  if (!batch.value && remaining() === 0) return '报名已满';
+  if (!batch.value && wholeRemaining.value === 0) return '报名已满';
   return !batch.value && wholeStatus.value === 'withdrawn' ? '重新申请报名' : '申请报名';
 });
 watch(() => props.activity, (current, previous) => {
@@ -54,8 +56,8 @@ watch(() => props.activity, (current, previous) => {
     const before = beforeItems.get(item.id);
     return before && sameRegistrationItem(before, item);
   }).map(item => item.id));
-  const kept = selected.value.filter(id => unchangedIds.has(id));
-  const itemsChanged = kept.length !== selected.value.length;
+  const kept = new Set([...selected.value].filter(id => unchangedIds.has(id)));
+  const itemsChanged = kept.size !== selected.value.size;
   if (itemsChanged) {
     selected.value = kept;
     error.value = '报名项目已调整，请重新选择变更的岗位或时段';
@@ -86,12 +88,13 @@ async function submit() {
   error.value = ''; success.value = '';
   const body: RegistrationInput = { published_revision: props.activity.published_revision };
   if (batch.value) {
-    if (!selected.value.length) return fail('请选择报名项目', 'signup-items');
+    if (!selected.value.size) return fail('请选择报名项目', 'signup-items');
     for (const id of selected.value) {
-      const item = items.value.find(row => row.id === id);
-      if (!item || blocked(item)) return fail(item ? registrationItemLabel(item) + ' · ' + blocked(item) : '所选项目已变更，请重新选择', 'signup-items');
+      const option = itemOptions.value.get(id);
+      if (!option) return fail('所选项目已变更，请重新选择', 'signup-items');
+      if (option.reason) return fail(option.label + ' · ' + option.reason, 'signup-items');
     }
-    body.item_ids = selected.value;
+    body.item_ids = [...selected.value];
   }
   if (props.activity.questionnaire_version) body.questionnaire_version = props.activity.questionnaire_version;
   if (questions.value.length && !savedAnswer.value) {
@@ -108,7 +111,7 @@ async function submit() {
     const id = props.activity.id;
     const {data} = await applyForActivity({path:{id}, body, headers:command.headers('apply_for_activity',id,body), throwOnError:true});
     command.confirmed();
-    selected.value = [];
+    selected.value.clear();
     success.value = batch.value ? '已提交 ' + data.data.items.length + ' 项报名' : '报名已提交';
     emit('applied', data.data.items);
   } catch (e) {
@@ -125,12 +128,12 @@ async function submit() {
   <form class="signup" @submit.prevent="submit">
     <fieldset v-if="batch" id="signup-items" tabindex="-1" class="signup-group">
       <legend>报名项目</legend>
-      <label v-for="item in items" :key="item.id" class="signup-item">
+      <label v-for="{ item, label, remaining, reason } in itemOptions.values()" :key="item.id" class="signup-item">
         <input v-if="student" v-model="selected" type="checkbox" :value="item.id"
-          :disabled="!isOpen || saving || (!selected.includes(item.id) && !!blocked(item))" />
-        <span><strong>{{ registrationItemLabel(item) }}</strong>
-          <small>录取 {{ item.capacity }} 人 · 候补 {{ item.waitlist_capacity }} 人<span v-if="remaining(item.id) !== undefined"> · 剩余可报 {{ remaining(item.id) }}</span></small>
-        </span><small v-if="blocked(item)" class="item-status">{{ blocked(item) }}</small>
+          :disabled="!isOpen || saving || (!selected.has(item.id) && !!reason)" />
+        <span><strong>{{ label }}</strong>
+          <small>录取 {{ item.capacity }} 人 · 候补 {{ item.waitlist_capacity }} 人<span v-if="remaining !== undefined"> · 剩余可报 {{ remaining }}</span></small>
+        </span><small v-if="reason" class="item-status">{{ reason }}</small>
       </label>
     </fieldset>
     <section v-if="student && questions.length && (canApply || savedAnswer)" class="questions">

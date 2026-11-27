@@ -7,7 +7,7 @@ import RegistrationAnswers from './RegistrationAnswers.vue';
 import AnswerFilters from './AnswerFilters.vue';
 import StatusFilter from '@hongyan/ui/StatusFilter.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
-import { computed, nextTick, onUnmounted, ref, shallowReactive, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, shallowReactive, shallowRef, watch } from 'vue';
 import { onBeforeRouteLeave, useRoute } from 'vue-router';
 import {
   ApiError,
@@ -17,7 +17,7 @@ import {
   type RegistrationDecision,
   listActivityRegistrations,
   type Registration,
-  type ActivityRosterPage, type QuestionVersion, type ItemInventory,
+  type ActivityRosterPage,
 } from '@hongyan/contracts';
 import { canChangeRegistration } from '@hongyan/contracts/activity';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
@@ -46,14 +46,15 @@ const time = new Intl.DateTimeFormat('zh-CN', {
 const filters = ['submitted', 'accepted', 'waitlisted', ''] as const;
 const lessCommon = ['rejected', 'withdrawn', 'exited'] as const;
 const labels = { ...registrationLabels, submitted: '待处理', waitlisted: '候补' };
-const result = ref<ActivityRosterPage>();
+const result = shallowRef<ActivityRosterPage>();
 const { selected, pageChecked, pageIndeterminate, togglePage } = useIdSelection(
   () => (result.value?.items ?? []).map((row) => row.id),
 );
 const itemId = ref(''), answerFilters = ref('');
-const pools = ref<ItemInventory[]>([]), questionVersions = ref<QuestionVersion[]>([]);
+const pools = computed(() => result.value?.item_availability ?? []);
+const poolsById = computed(() => new Map(pools.value.map(pool => [pool.item_id, pool])));
 const hasItems = computed(() => pools.value.some(pool => pool.item_id));
-const chosenPool = computed(() => pools.value.find(pool => pool.item_id === itemId.value));
+const chosenPool = computed(() => poolsById.value.get(itemId.value));
 const queryFilters = computed(() => ({
   item_id: itemId.value || undefined,
   answer_filters: answerFilters.value || undefined,
@@ -125,8 +126,6 @@ async function load(background = false) {
       return;
     }
     result.value = data.data;
-    pools.value = data.data.item_availability ?? [];
-    questionVersions.value = data.data.question_versions ?? [];
     if (background && inspected.value) inspected.value = data.data.items.find(row => row.id === inspected.value?.id);
     if (reviewing && changingPage.value) refreshRequired.value = false;
   } catch (e) {
@@ -145,7 +144,6 @@ function discardRoster() {
   filterVersion++;
   result.value = undefined;
   changingPage.value = false;
-  pools.value = []; questionVersions.value = [];
   inspected.value = undefined;
   selected.value.clear();
   conflicts.value = [];
@@ -174,7 +172,7 @@ function allowed(decision: Decision, rows: Registration[]) {
     counts.set(row.item_id, count);
   }
   return [...counts].every(([id, count]) => {
-    const pool = pools.value.find(pool => pool.item_id === id);
+    const pool = poolsById.value.get(id);
     if (!pool) return false;
     const seats = decision === 'accepted' ? pool.capacity - pool.accepted_count : pool.waitlist_capacity - pool.waitlisted_count;
     return seats >= count.seats && pool.remaining >= count.newActive;
@@ -298,7 +296,7 @@ onUnmounted(() => {
   <label v-if="hasItems" class="item-filter">报名项目
     <UiSelect label="报名项目" v-model="itemId" :options="[{ value:'', label:'全部岗位和时段' }, ...pools.map(p => ({value:p.item_id!,label:p.item_label}))]" />
   </label>
-  <AnswerFilters :versions="questionVersions" @change="answerFilters = $event" />
+  <AnswerFilters :versions="result?.question_versions ?? []" @change="answerFilters = $event" />
   <div class="page-actions roster-tools">
     <label class="search-field"
       ><UiIcon name="Search" /><input

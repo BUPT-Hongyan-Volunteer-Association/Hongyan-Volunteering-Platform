@@ -16,17 +16,28 @@ export function sameRegistrationItem(before: RegistrationItem, after: Registrati
     && instant(before.starts_at) === instant(after.starts_at) && instant(before.ends_at) === instant(after.ends_at);
 }
 
-export function selectionRestriction(
-  config: Pick<ActivityInput, 'allow_multiple_roles' | 'allow_multiple_slots'>,
-  items: readonly RegistrationItem[],
-) {
-  if (items.length < 2) return '';
-  if (!config.allow_multiple_roles && !config.allow_multiple_slots) return '本活动限报一个报名项';
-  const roles = new Set(items.flatMap(item => item.role ? [item.role.trim()] : []));
-  if (!config.allow_multiple_roles && roles.size > 1) return '本活动限报一个岗位';
-  const slots = new Set(items.flatMap(item => item.starts_at && item.ends_at
-    ? [Date.parse(item.starts_at) + '/' + Date.parse(item.ends_at)] : []));
-  return !config.allow_multiple_slots && slots.size > 1 ? '本活动限报一个时段' : '';
+type SelectionRules = Pick<ActivityInput, 'allow_multiple_roles' | 'allow_multiple_slots'>;
+
+// Check the selected batch on its own, or with one more candidate from the form.
+export function createSelectionCheck(config: SelectionRules, selected: readonly RegistrationItem[]) {
+  if (!config.allow_multiple_roles && !config.allow_multiple_slots)
+    return (extra?: RegistrationItem) => selected.length + (extra ? 1 : 0) > 1 ? '本活动限报一个报名项' : '';
+  if (config.allow_multiple_roles && config.allow_multiple_slots) return () => '';
+  const key = !config.allow_multiple_roles
+    ? (item: RegistrationItem) => item.role ? item.role.trim() : undefined
+    : (item: RegistrationItem) => item.starts_at && item.ends_at
+      ? Date.parse(item.starts_at) + '/' + Date.parse(item.ends_at) : undefined;
+  const selectedKeys = new Set(selected.map(key));
+  selectedKeys.delete(undefined);
+  const reason = !config.allow_multiple_roles ? '本活动限报一个岗位' : '本活动限报一个时段';
+  return (extra?: RegistrationItem) => {
+    const candidate = extra && key(extra);
+    return selectedKeys.size > 1 || (selectedKeys.size === 1 && candidate !== undefined && !selectedKeys.has(candidate)) ? reason : '';
+  };
+}
+
+export function selectionRestriction(config: SelectionRules, items: readonly RegistrationItem[]) {
+  return createSelectionCheck(config, items)();
 }
 
 export const campuses = ['沙河校区', '西土城校区', '沙河及西土城校区'];

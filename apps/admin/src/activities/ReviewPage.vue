@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import StatusFilter from '@hongyan/ui/StatusFilter.vue';
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   ApiError,
@@ -9,7 +9,7 @@ import {
   listActivityReviews,
   reviewActivity,
   createCommand,
-  type ActivityReview,
+  type ActivityReview, type ActivityReviewPage,
 } from '@hongyan/contracts';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import ActivitySnapshot from '@hongyan/ui/ActivitySnapshot.vue';
@@ -21,10 +21,8 @@ import Pager from '@hongyan/ui/Pager.vue';
 const props = defineProps<{ profile: Profile }>();
 const route = useRoute(),
   router = useRouter(),
-  review = ref<ActivityReview>(),
-  rows = ref<ActivityReview[]>([]),
-  total = ref(0),
-  pageSize = ref(20),
+  review = shallowRef<ActivityReview>(),
+  queue = shallowRef<ActivityReviewPage>(),
   busy = ref(false),
   loading = ref(false),
   currentPending = ref(false),
@@ -54,27 +52,19 @@ let completed: ActivityReview | undefined;
 const queueError = ref('');
 const queueLoading = ref(false);
 let queueRequest: AbortController | undefined;
-const queueReady = ref(false);
 async function loadQueue(reset = false, restoreScroll = false) {
   queueRequest?.abort();
   const request = queueRequest = new AbortController();
   queueError.value = '';
   queueLoading.value = true;
-  if (reset) {
-    rows.value = [];
-    total.value = 0;
-    queueReady.value = false;
-  }
+  if (reset) queue.value = undefined;
   try {
     const { data } = await listActivityReviews({
       query: { status: status.value, page: page.value },
       signal: request.signal, throwOnError: true,
     });
     if (request.signal.aborted) return;
-    rows.value = data.data.items;
-    total.value = data.data.total;
-    pageSize.value = data.data.page_size;
-    queueReady.value = true;
+    queue.value = data.data;
     if (restoreScroll && !route.params.id) {
       await nextTick();
       if (!request.signal.aborted) window.scrollTo(0, savedScroll);
@@ -83,9 +73,7 @@ async function loadQueue(reset = false, restoreScroll = false) {
     if (request.signal.aborted) return;
     queueError.value = e instanceof Error ? e.message : '审核队列读取失败';
     if (noAccess(e)) {
-      rows.value = [];
-      total.value = 0;
-      queueReady.value = false;
+      queue.value = undefined;
       detailRequest?.abort();
       review.value = undefined;
       currentPending.value = false;
@@ -219,10 +207,10 @@ onUnmounted(() => {
       <p v-if="queueError" role="alert">
         {{ queueError }} <button @click="refresh">重新读取队列</button>
       </p>
-      <p v-else-if="queueLoading && !queueReady" role="status">正在读取审核队列…</p>
-      <div v-else-if="rows.length" class="entry-list reading-area">
+      <p v-else-if="queueLoading && !queue" role="status">正在读取审核队列…</p>
+      <div v-else-if="queue?.items.length" class="entry-list reading-area">
         <RouterLink
-          v-for="r in rows"
+          v-for="r in queue.items"
           :key="r.id"
           :aria-current="route.params.id === r.id ? 'true' : undefined"
           :to="{ path: '/reviews/' + r.id, query: route.query }"
@@ -246,10 +234,10 @@ onUnmounted(() => {
         <p>暂无匹配的审核</p>
       </div>
       <Pager
-        v-if="total > pageSize && !queueError"
+        v-if="queue && queue.total > queue.page_size && !queueError"
         :page="page"
-        :size="pageSize"
-        :total="total"
+        :size="queue.page_size"
+        :total="queue.total"
         @change="(p) => router.push({ path: '/reviews', query: { ...route.query, page: p } })"
       />
     </template>
