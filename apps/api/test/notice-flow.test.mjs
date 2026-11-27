@@ -354,7 +354,7 @@ test('站内通知、确认回执与事件队列', async (t) => {
     const a = await publish('录取回归', []);
     const applied = await student.write('POST', '/activities/' + a.id + '/registrations', {});
     assert.equal(applied.status, 201);
-    const registration = applied.data;
+    const [registration] = applied.data.items;
     const decided = await owner.write(
       'POST',
       '/organizer/registrations/' + registration.id + '/decision?scope=managed',

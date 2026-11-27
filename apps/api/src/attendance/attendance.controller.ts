@@ -1,3 +1,4 @@
+import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query, Req } from '@nestjs/common';
 import type {
   ActivityInput,
@@ -92,6 +93,32 @@ async function batchStudents(tx: Tx, activity_id: string, input: AttendanceBatch
 export class AttendanceController {
   constructor(private db: Database, private workflow: Workflow) {}
 
+  @Get('participants')
+  participants(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) activity_id: string,
+    @Query() query: Record<string, string>) {
+    const scope = workspaceScope(req.actor, 'managed');
+    const { page, page_size, skip } = pagination(query);
+    const q = query.q?.trim();
+    return this.db.$transaction(async tx => {
+      if (!await tx.activity.findFirst({ where: { id: activity_id, ...scope }, select: { id: true } })) invisible();
+      const where = {
+        registrations: { some: { activity_id } },
+        ...(q && { OR: [{ student_no: { contains: q } }, { account: { display_name: { contains: q } } }] }),
+      };
+      const total = await tx.student.count({ where });
+      const students = await tx.student.findMany({
+        where, skip, take: page_size, orderBy: { student_no: 'asc' },
+        select: { ...studentFields, _count: {
+          select: { registrations: { where: { activity_id, status: { in: activeRegistrationStatuses } } } },
+        } },
+      });
+      return envelope({ total, page, page_size, items: students.map(student => ({
+        student_id: student.id, student_no: student.student_no, student_name: student.account.display_name,
+        has_active_registration: student._count.registrations > 0,
+      })) });
+    }, { isolationLevel: 'RepeatableRead' });
+  }
+
   @Get()
   list(
     @Req() req: SessionRequest,
@@ -175,8 +202,8 @@ export class AttendanceController {
         invalid('status', '未报名参加须按学号及姓名单独补录');
       if (!active) {
         checkSchedule(activity!, day);
-        const registration = await tx.registration.findUnique({
-          where: { activity_id_student_id: { activity_id, student_id } },
+        const registration = await tx.registration.findFirst({
+          where: { activity_id, student_id },
           select: { id: true },
         });
         if (!registration) invisible();

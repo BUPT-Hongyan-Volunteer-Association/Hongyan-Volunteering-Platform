@@ -159,6 +159,14 @@ export class NoticeWorker implements OnModuleInit, OnModuleDestroy {
         id: event.resource_id, activity_id, student_id: payload.student_id, status: 'accepted', version: payload.registration_version,
       } });
       if (!source || !registration) return 'superseded';
+      const delivered = await tx.noticeReceipt.findFirst({
+        where: {
+          student_id: payload.student_id, follow_up_closed: false,
+          notice: { OR: [{ id: source.id }, { source_notice_id: source.id, is_current: true }] },
+        },
+        select: { id: true },
+      });
+      if (delivered) return 'superseded';
       await tx.notice.create({ data: {
         activity_id, title: source.title, body: source.body, notice_kind: 'gathering',
         requires_ack: source.requires_ack, information_version: source.information_version,
@@ -321,8 +329,11 @@ async function resultPublication(
     if ((p.kind !== 'exit' && p.kind !== 'restoration') || !Object.hasOwn(requestResults, p.status))
       throw new DeliveryError('申请通知的类型或决定状态无效');
     const kind = p.kind === 'exit' ? '退出' : '恢复';
+    const request = await tx.exitRequest.findUnique({ where: { id: event.resource_id },
+      select: { registration: { select: { item_label: true } } } });
+    const label = request?.registration.item_label;
     return { ...base, title: activityTitle + kind + '申请结果',
-      body: kind + '申请' + requestResults[p.status as keyof typeof requestResults] +
+      body: (label ? label + ' · ' : '') + kind + '申请' + requestResults[p.status as keyof typeof requestResults] +
         (p.decision_reason ? '。说明：' + p.decision_reason : '') };
   }
   if (!Object.hasOwn(resultTexts, p.status) || typeof p.registration_version !== 'number' ||
@@ -330,12 +341,13 @@ async function resultPublication(
     throw new DeliveryError('报名通知的决定状态或版本无效');
   const current = await tx.registration.findFirst({ where: {
     id: event.resource_id, activity_id, student_id: p.student_id, version: p.registration_version, status: p.status,
-  }, select: { id: true } });
+  }, select: { item_label: true } });
   if (!current) return null;
   const result = resultTexts[p.status as keyof typeof resultTexts];
+  const subject = current.item_label ? activityTitle + ' · ' + current.item_label : activityTitle;
   const body = p.status === 'accepted'
-    ? `恭喜，你${result}：「${activityTitle}」。请确认收到，并按时参加活动`
-    : `「${activityTitle}」的报名结果：你${result}。请在活动详情页查看后续安排`;
+    ? `恭喜，你${result}：「${subject}」。请确认收到，并按时参加活动`
+    : `「${subject}」的报名结果：你${result}。请在活动详情页查看后续安排`;
   return { ...base, title: activityTitle + '报名结果', body: p.decision_reason ? body + '\n说明：' + p.decision_reason : body };
 }
 

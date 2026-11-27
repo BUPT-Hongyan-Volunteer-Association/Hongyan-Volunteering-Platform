@@ -1500,6 +1500,48 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/version_action'
+  /organizer/activities/{id}/attendance/participants:
+    get:
+      operationId: list_activity_participants
+      summary: 按学生查询活动人员，用于现场异常和通知选人
+      tags: [名单]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: q
+        in: query
+        schema: {type: string}
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/page_size'
+      responses:
+        '200':
+          description: 学生去重后分页，每人一行
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, request_id]
+                properties:
+                  request_id: {type: string, format: uuid}
+                  data:
+                    type: object
+                    required: [items, total, page, page_size]
+                    properties:
+                      total: {type: integer}
+                      page: {type: integer}
+                      page_size: {type: integer}
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [student_id, student_no, student_name, has_active_registration]
+                          properties:
+                            student_id: {type: string, format: uuid}
+                            student_no: {type: string}
+                            student_name: {type: string}
+                            has_active_registration: {type: boolean}
   /organizer/activities/{id}/registration-events:
     get:
       operationId: watch_activity_registrations
@@ -1714,7 +1756,7 @@ paths:
     post:
       operationId: create_exit_request
       summary: 录取后申请退出整项活动
-      description: 本人accepted且活动published、尚有未开始时段时申请退出整项活动。日期活动在北京时间开始日零点关闭新退出申请。每个报名最多一个pending退出。pending保留录取及名额，批准后exited释放名额。单次请假在群内处理，本接口不提供整期请假类型。
+      description: 本人accepted且活动published、尚可办理时申请退出该报名项。日期活动在北京时间开始日零点关闭新退出申请。每个报名最多一个pending退出。pending保留录取及名额，批准后exited释放名额。单次请假在群内处理，本接口不提供整期请假类型。
       tags:
       - 报名
       x-requirement: FR02

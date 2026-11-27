@@ -44,8 +44,8 @@ function activityContent(scene) {
     registration_opens_at: at(d - 10, '09:00').toISOString(),
     registration_closes_at: at(d - 2, '18:00').toISOString(),
     schedule: { schedule_type: 'continuous', starts_at: at(d, '09:00').toISOString(), ends_at: at(d, '11:00').toISOString() },
-    eligibility_text: '本院学生', selection_text: '负责人核对报名信息后确认',
-    expected_hours: '2.0', expected_hours_basis: 'per_occurrence',
+    registration_mode: 'whole', waitlist_capacity: 6, questions: [],
+    precautions: '请提前到达集合地点', related_notes: '负责人审核报名后发布录取结果',
     hours_rule_text: '按实际服务和审核结果认定', hours_import_date: day(d + 2),
     contacts: ['志协办公室'], group_join_instructions: '录取后向负责人领取群号',
   }, true);
