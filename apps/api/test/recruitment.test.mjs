@@ -468,6 +468,13 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     assert.equal((await submit(bob,[role],{answers})).status,409);
     const bRow = success(await submit(bob,[role],{answers,questionnaire_version:newVersion}),201).items[0];
     assert.equal(bRow.answers[0].labels[0],'完成新培训');
+    const unfiltered = await roster('');
+    assert.equal(unfiltered.status_counts.submitted,4);
+    assert.equal(unfiltered.unique_student_count,2);
+    const oneItem = await roster('item_id='+role+'&status=submitted');
+    assert.equal(oneItem.status_counts.submitted,2);
+    assert.equal(oneItem.unique_student_count,2);
+    assert.deepEqual(oneItem.item_availability,unfiltered.item_availability);
     const changed = await roster('item_id='+role+'&answer_filters='+filters);
     assert.equal(changed.items.find(r=>r.id!==bRow.id).answers[0].title,'培训');
     assert.equal(changed.question_versions.length,2);

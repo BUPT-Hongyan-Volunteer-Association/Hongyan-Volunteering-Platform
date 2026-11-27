@@ -20,14 +20,14 @@ import type {
 } from '@hongyan/contracts/types';
 import { filter, map, takeUntil, timer } from 'rxjs';
 import { rosterEvents } from './roster-events.js';
-import { registrationInventory, questionnaireVersion } from './enrollment.js';
+import { inventoryFromCounts, registrationInventory, questionnaireVersion, wholeItemId } from './enrollment.js';
 import { pagination, workspaceScope } from '../activities/read.js';
 import { Workflow } from '../workflow.js';
 import { validate } from '../validation.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { Database } from '../database.js';
 import { denied, envelope, invalid, invisible } from '../http.js';
-import { canRequest, canWithdraw, canDecide, decideBatch, apply, registrationView, includeResponse, rosterOrderBy, rosterSearchWhere } from './registration.js';
+import { canRequest, canWithdraw, canDecide, decideBatch, apply, registrationView, includeResponse, rosterOrderBy, rosterWhere } from './registration.js';
 
 const zeroCounts: RosterStatusCounts = {
   submitted: 0,
@@ -155,15 +155,16 @@ export class RegistrationController {
         if (q.q !== undefined && typeof q.q !== 'string') invalid('q', '请输入姓名或学号');
         const answersVisible = req.actor.roles.includes('organizer') && q.scope !== 'all';
         if (!answersVisible && q.answer_filters !== undefined) denied();
-        const matching = rosterSearchWhere({ activity_id: id, q: q.q, item_id: q.item_id, answer_filters: q.answer_filters });
-        const counts = { ...zeroCounts };
-        const grouped = await tx.registration.groupBy({
-          by: ['status'],
-          where: matching,
-          _count: true,
+        const matching = rosterWhere({ activity_id: id, q: q.q, item_id: q.item_id, answer_filters: q.answer_filters });
+        const itemId = q.item_id?.toLowerCase();
+        const byItem = q.q?.trim() || q.answer_filters ? undefined : await tx.registration.groupBy({
+          by: ['item_id', 'status'], where: { activity_id: id }, _count: true,
         });
-        for (const group of grouped)
-          counts[group.status as keyof RosterStatusCounts] = group._count;
+        const groups = byItem
+          ? byItem.filter(row => !itemId || row.item_id === itemId)
+          : await tx.registration.groupBy({ by: ['status'], where: matching, _count: true });
+        const counts = { ...zeroCounts };
+        for (const group of groups) counts[group.status as keyof RosterStatusCounts] += group._count;
         const total = status
           ? counts[status]
           : Object.values(counts).reduce((sum, count) => sum + count, 0);
@@ -177,10 +178,16 @@ export class RegistrationController {
                 select: { content: true },
               });
         const content = approved?.content as unknown as ActivityPublicationContent | undefined;
-        const inventory = await registrationInventory(tx, id, content);
-        const visiblePools = q.item_id ? inventory.filter(p => p.item_id === q.item_id.toLowerCase()) : inventory;
+        const inventory = byItem
+          ? inventoryFromCounts(content, byItem)
+          : await registrationInventory(tx, id, content);
+        const visiblePools = itemId ? inventory.filter(p => (p.item_id ?? wholeItemId) === itemId) : inventory;
         const where = { ...matching, status };
-        const unique_student_count = await tx.student.count({where: {registrations: {some: where}}});
+        // The unique key allows one registration per student in an item, including the whole-activity item.
+        const singleItem = !!itemId || (content && content.registration_mode !== 'batch');
+        const unique_student_count = singleItem || total < 2
+          ? total
+          : await tx.student.count({where: {registrations: {some: where}}});
         const currentQuestions = content?.questions ?? [];
         const currentVersion = questionnaireVersion(currentQuestions);
         const schemas = answersVisible ? await tx.$queryRaw<{
@@ -260,7 +267,7 @@ export class RegistrationController {
         const result = await decideBatch(tx, activity!, req.actor.account_id, {
           ...decision, items: [{ registration_id: id, expected_version }],
         });
-        return result.items[0];
+        return result[0];
       },
       scope,
     );
@@ -269,7 +276,10 @@ export class RegistrationController {
   @Post('organizer/activities/:id/registration-decisions') @HttpCode(200)
   bulk(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string,
        @Body() body: unknown, @Query('scope') scope?: string) {
-    return this.workflow.run(req, { activityId: id }, 'workspace', (tx, activity, actor) =>
-      decideBatch(tx, activity!, actor.account_id, validate<BulkRegistrationDecision>('bulk_registration_decision', body)), scope);
+    return this.workflow.run(req, { activityId: id }, 'workspace', async (tx, activity, actor) => {
+      const items = await decideBatch(tx, activity!, actor.account_id, validate<BulkRegistrationDecision>('bulk_registration_decision', body));
+      const accepted_count = await tx.registration.count({ where: { activity_id: id, status: 'accepted' } });
+      return { items, affected_count: items.length, accepted_count };
+    }, scope);
   }
 }

@@ -13,13 +13,16 @@ import { BusinessError, invalid } from '../http.js';
 export const wholeItemId = '00000000-0000-0000-0000-000000000000';
 type Questions = SurveyQuestion[];
 
-export function pools(content: ActivityInput) {
-  if (content.registration_mode === 'batch')
-    return (content.registration_items ?? []).map((item) => ({
-      ...item,
+export function pools(content: ActivityInput, itemIds?: Set<string>) {
+  if (content.registration_mode === 'batch') {
+    const items = content.registration_items ?? [];
+    return (itemIds ? items.filter(item => itemIds.has(item.id.toLowerCase())) : items).map(item => ({
       id: item.id.toLowerCase(),
+      capacity: item.capacity,
+      waitlist_capacity: item.waitlist_capacity,
       label: registrationItemLabel(item),
     }));
+  }
   return [
     {
       id: wholeItemId,
@@ -30,20 +33,26 @@ export function pools(content: ActivityInput) {
   ];
 }
 
-export async function registrationInventory(tx: Tx, activity_id: string, content?: ActivityInput) {
+export async function registrationInventory(tx: Tx, activity_id: string, content?: ActivityInput, itemIds?: Set<string>) {
   if (!content) return [];
   const counts = await tx.registration.groupBy({
     by: ['item_id', 'status'],
-    where: { activity_id, status: { in: activeRegistrationStatuses } },
+    where: { activity_id, item_id: itemIds && { in: [...itemIds] }, status: { in: activeRegistrationStatuses } },
     _count: true,
   });
+  return inventoryFromCounts(content, counts, itemIds);
+}
+
+type ItemCount = { item_id: string; status: string; _count: number };
+export function inventoryFromCounts(content: ActivityInput | undefined, counts: ItemCount[], itemIds?: Set<string>) {
+  if (!content) return [];
   const byItem = new Map<string, Map<string, number>>();
   for (const row of counts) {
     const values = byItem.get(row.item_id) ?? new Map<string, number>();
     values.set(row.status, row._count);
     byItem.set(row.item_id, values);
   }
-  return pools(content).map((item) => {
+  return pools(content, itemIds).map((item) => {
     const count = byItem.get(item.id);
     const accepted_count = count?.get('accepted') ?? 0;
     const waitlisted_count = count?.get('waitlisted') ?? 0;
@@ -66,7 +75,7 @@ export async function registrationInventory(tx: Tx, activity_id: string, content
 type Change = { item_id: string; status: string; previous?: string; id?: string };
 const active = (status?: string) => activeRegistrationStatuses.some((s) => s === status);
 export async function checkCapacity(tx: Tx, activity_id: string, content: ActivityInput, changes: Change[]) {
-  const inventory = await registrationInventory(tx, activity_id, content);
+  const inventory = await registrationInventory(tx, activity_id, content, new Set(changes.map(change => change.item_id)));
   const byItem = new Map(inventory.map((pool) => [pool.item_id ?? wholeItemId, pool]));
   for (const change of changes) {
     const pool = byItem.get(change.item_id);
@@ -84,7 +93,7 @@ export async function checkCapacity(tx: Tx, activity_id: string, content: Activi
           : pool.active_count > pool.capacity + pool.waitlist_capacity
             ? '报名已满'
             : '';
-    if (!reason || !changes.some((change) => change.item_id === id)) continue;
+    if (!reason) continue;
     const message = pool.item_label + ' · ' + reason;
     throw new BusinessError(
       409,

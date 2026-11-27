@@ -77,22 +77,20 @@ function answerConditions(value?: string): Prisma.RegistrationWhereInput[] {
   const response = { AND: entries };
   return [{ OR: [{ response }, { history: { some: { response } } }] }];
 }
-export function rosterSearchWhere(filters: RosterFilters): Prisma.RegistrationWhereInput {
+export function rosterWhere(filters: RosterFilters): Prisma.RegistrationWhereInput {
   const search = filters.q?.trim();
   if (filters.item_id !== undefined && (typeof filters.item_id !== 'string' || !uuid.test(filters.item_id)))
     invalid('item_id', '报名项编号无效');
   return {
     activity_id: filters.activity_id,
     item_id: filters.item_id,
+    status: filters.status,
     AND: answerConditions(filters.answer_filters),
     ...(filters.registration_ids && { id: { in: filters.registration_ids } }),
     ...(search && {
       student: { OR: [{ student_no: { contains: search } }, { account: { display_name: { contains: search } } }] },
     }),
   };
-}
-export function rosterWhere(filters: RosterFilters): Prisma.RegistrationWhereInput {
-  return { ...rosterSearchWhere(filters), status: filters.status };
 }
 
 export function approvedContent(activity: LoadedActivity) {
@@ -225,10 +223,10 @@ export async function apply(
   if (!(opens < closes)) wrongState();
   if (received.getTime() < opens) throw new BusinessError(409, 'registration_not_open', '尚未到报名开放时间');
   if (received.getTime() >= closes) throw new BusinessError(409, 'registration_closed', '报名已截止');
-  const available = new Map(pools(approved).map((pool) => [pool.id, pool]));
   const ids = input.item_ids?.map((id) => id.toLowerCase()) ?? [];
+  const available = new Map(pools(approved, new Set(ids)).map(pool => [pool.id, pool]));
   if (approved.registration_mode === 'batch') {
-    if (!ids.length || new Set(ids).size !== ids.length || ids.some((id) => !available.has(id)))
+    if (!ids.length || available.size !== ids.length)
       invalid('item_ids', '请选择有效且不同的报名项');
   } else {
     if (ids.length) invalid('item_ids', '整批报名无需选择岗位或时段');
@@ -302,10 +300,6 @@ export function canRecruit(content: ActivityPublicationContent | undefined, exit
   return false;
 }
 
-export async function occupiedSeats(tx: Tx, activity_id: string) {
-  return tx.registration.count({ where: { activity_id, status: 'accepted' } });
-}
-
 export async function enabledStudents(tx: Tx, ids: string[]) {
   const rows = await tx.$queryRaw<{ id: string; active: boolean }[]>`
     SELECT s.id, a.active FROM student s JOIN account a ON a.id = s.account_id
@@ -362,8 +356,6 @@ export async function decideBatch(
     return message ? [{ field: 'items', row: i + 1, resource_id, code, message }] : [];
   });
   if (failures.length) throw new BusinessError(409, failures[0].code, failures[0].message, failures);
-  const occupied = await occupiedSeats(tx, activity.id);
-  const accepting = input.decision === 'accepted';
   if (input.decision !== 'rejected') {
     await checkCapacity(tx,activity.id,approved!,rows.map(r => ({id:r.id,item_id:r.item_id,status:input.decision,previous:r.status})));
     await checkReactivation(tx,activity.id,approved!,rows.filter(row=>row.status==='rejected'));
@@ -391,11 +383,7 @@ export async function decideBatch(
     before: rows.map((r) => ({ id: r.id, version: r.version, status: r.status })),
     after: changed.map((r) => ({ id: r.id, version: r.version, status: r.status })),
   });
-  if (accepting) await queueGathering(tx, activity.id, changed);
+  if (input.decision === 'accepted') await queueGathering(tx, activity.id, changed);
   const result = new Map(changed.map((r) => [r.id, registrationView(r)]));
-  return {
-    items: ids.map((id) => result.get(id)!),
-    affected_count: rows.length,
-    accepted_count: occupied + (accepting ? rows.length : 0),
-  };
+  return ids.map((id) => result.get(id)!);
 }
