@@ -90,7 +90,7 @@ async function load(keepDetail = false) {
   busy.value = true;
   error.value = '';
   if (!keepDetail) { detail.value = undefined; rows.value = []; }
-  search.value = String(route.query.q ?? '');
+  if (!keepDetail) search.value = String(route.query.q ?? '');
   try {
     if (route.params.id) {
       const response = await getActivity({
@@ -150,7 +150,8 @@ watch(
 );
 // Re-read at the next server-evaluated boundary even if the student keeps this tab open.
 watch([detail, rows], ([current, list], _, cleanup) => {
-  let delay = Infinity;
+  // A currently hidden activity can enter a time-based list filter while the page stays open.
+  let delay = !current && (phase.value || route.query.ongoing) ? 60_000 : Infinity;
   for (const activity of current ? [current] : list) {
     if (!activity.state_evaluated_at || activity.status !== 'published') continue;
     const now = Date.parse(activity.state_evaluated_at);
@@ -159,13 +160,22 @@ watch([detail, rows], ([current, list], _, cleanup) => {
     for (const at of boundaries) if (at !== undefined && at > now) delay = Math.min(delay, at - now);
   }
   if (delay === Infinity) return;
-  const timer = window.setTimeout(refreshDetail, Math.min(2147483647, delay));
+  const timer = window.setTimeout(() => {
+    if (document.visibilityState === 'visible') refreshDetail();
+  }, Math.min(2147483647, delay));
   cleanup(() => window.clearTimeout(timer));
 });
-onMounted(() => window.addEventListener('focus', refreshDetail));
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') refreshDetail();
+}
+onMounted(() => {
+  window.addEventListener('focus', refreshDetail);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+});
 onUnmounted(() => {
   serial++;
   window.removeEventListener('focus', refreshDetail);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
 });
 const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
 </script>
@@ -289,7 +299,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
             <UiIcon name="Close" />
           </button>
         </p>
-        <p v-if="busy" class="notice" role="status">正在读取活动…</p>
+        <p v-if="busy && !rows.length" class="notice" role="status">正在读取活动…</p>
         <p v-else-if="error" role="alert">{{ error }} <button @click="load()">重试</button></p>
         <div v-else-if="!rows.length" class="empty-state">
           <UiIcon name="Search" />

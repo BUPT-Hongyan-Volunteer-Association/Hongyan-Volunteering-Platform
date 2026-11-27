@@ -242,7 +242,7 @@ p {
 .service-hours time {
   white-space: nowrap;
 }
-.description { white-space: pre-wrap; }
+.description, .conditions dd { white-space: pre-wrap; }
 dialog {
   width: min(370px, calc(100vw - 32px));
   color: var(--ink);
