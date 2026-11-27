@@ -1578,7 +1578,8 @@ paths:
         schema: {type: string, format: uuid}
       - name: answer_filters
         in: query
-        schema: {type: string}
+        description: JSON 条件数组。每项传 question_id 和 option_id 或 answer_text，可附 questionnaire_version。所有条件须由同一份当前或历史答卷满足。
+        schema: {type: string, maxLength: 32000}
       - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
@@ -1699,7 +1700,7 @@ paths:
     post:
       operationId: decide_registration
       summary: 人工录取候补或不录取
-      description: 与整批决定共用业务服务。仅submitted/waitlisted/rejected可决定，accepted不可降级。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段，校验学生启用、当前版本及名额，事务内写通知事件。候补不自动补位，异常次数在规则off时不影响决定。
+      description: 与整批决定共用业务服务。仅submitted/waitlisted/rejected可决定，accepted不可降级。活动须published，须在已批准的活动总结束前办理，校验学生启用、当前版本及名额，事务内写通知事件。候补不自动补位，异常次数在规则off时不影响决定。
         首次报名截止只关闭学生主动报名。结果通知投递前复核报名版本；已失效的待投递结果跳过，已送达的旧结果及回执可在历史中查看。
       tags:
       - 报名
@@ -5192,7 +5193,7 @@ paths:
     post:
       operationId: decide_registrations_atomically
       summary: 整批录取候补或不录取
-      description: 同一活动1—100个不重复报名ID。事务内核验全部成员授权、学生状态、报名版本及可转换状态，录取检查新增人数和当前余量。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段。任一失败整批回滚，409 details逐行返回resource_id（报名ID）及失败码，不返回部分成功。通知事件与状态同事务写入，按幂等键重试不重复决定。
+      description: 同一活动1—100个不重复报名ID。事务内核验全部成员授权、学生状态、报名版本及可转换状态，录取检查新增人数和当前余量。活动须published，须在已批准的活动总结束前办理。任一失败整批回滚，409 details逐行返回resource_id（报名ID）及失败码，不返回部分成功。通知事件与状态同事务写入，按幂等键重试不重复决定。
         首次报名截止只关闭学生主动报名。结果通知投递前复核报名版本；已失效的待投递结果跳过，已送达的旧结果及回执可在历史中查看。
       tags:
       - FR02
@@ -5318,7 +5319,7 @@ paths:
     post:
       operationId: create_restoration_request
       summary: 退出后申请恢复报名
-      description: 仅本人exited、学生启用且活动published，原报名窗口截止不阻止此恢复申请。每个报名最多一个pending恢复，pending不占名额。按日期发布时可办理至北京时间结束日当天，精确安排须仍有未开始的获批时段。
+      description: 仅本人exited、学生启用且活动published，原报名窗口截止不阻止此恢复申请。每个报名最多一个pending恢复，pending不占名额。分批按原报名项的服务结束核验，整批按日期发布可办理至北京时间结束日当天，整批精确安排须有未开始的获批时段。
       tags:
       - FR02
       x-requirement: FR02
@@ -5506,7 +5507,7 @@ paths:
       operationId: decide_restoration_request
       summary: 审核恢复并重新占用名额
       description: 仅pending。批准时锁定活动与原报名，复核有效授权、学生启用、exited状态、有效安排和余量。同一事务将原registration_id改回accepted、增加名额占用、写历史及通知事件。名额或版本冲突整笔失败，申请保持pending。拒绝保留exited并说明原因，取消或结束自动cancelled。
-        首次报名截止只关闭学生主动报名。按日期发布时可办理至北京时间结束日当天，精确安排须仍有未开始的获批时段。
+        首次报名截止只关闭学生主动报名。分批按原报名项的服务结束核验，整批按日期发布可办理至北京时间结束日当天，整批精确安排须有未开始的获批时段。
       tags:
       - FR02
       x-requirement: FR02
