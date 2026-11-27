@@ -10,6 +10,9 @@ import { withPages, lostTeamMessage, link, button, accountSecurity, visible, ope
 
 test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 }, async t => {
   await withPages(t, async ({ password, web, admin, api, browser, student, owner, joined, helper, teacher, tech, db, first, firstDate }) => {
+    // The cross-page roster below contains 48 active applications before further students apply.
+    await db.$executeRaw`UPDATE activity_revision SET content = jsonb_set(content, '{waitlist_capacity}', '30')
+      WHERE activity_id = ${first.id}::uuid AND revision = ${first.published_revision}`;
     await t.test('三端首次进入自动定位可见活动，手动选择今天保留空窗口', async () => {
       for (const [page, origin, entry] of [[student, web, '活动日程'], [owner, web, '管理日程'], [teacher, admin, '全院日程']]) {
         await page.setViewportSize({ width: 1440, height: 900 });
