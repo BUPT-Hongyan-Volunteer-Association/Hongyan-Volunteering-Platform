@@ -284,7 +284,7 @@ onUnmounted(() => {
         </section>
         <section v-if="review.item_availability?.length" aria-label="报名人数汇总">
           <h3>报名人数汇总 · {{ review.published_registration_revision == null ? '送审版 ' + review.revision : '当前公开版 ' + review.published_registration_revision }}</h3>
-          <div class="table-scroll"><table>
+          <div class="scroll-table inventory-table" tabindex="0" aria-label="各报名项人数"><table>
             <thead><tr><th scope="col">报名项</th><th scope="col">待处理</th><th scope="col">已录取 / 名额</th><th scope="col">候补 / 名额</th></tr></thead>
             <tbody><tr v-for="item in review.item_availability" :key="item.item_id || 'whole'">
               <th scope="row">{{ item.item_label }}</th><td>{{ item.submitted_count }}</td>
@@ -354,6 +354,11 @@ onUnmounted(() => {
 .diff dd strong {
   color: var(--brand);
   font-weight: 550;
+}
+.inventory-table th[scope="row"] {
+  max-width: min(22rem, 45vw);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .decision-form {
   padding-top: 16px;
