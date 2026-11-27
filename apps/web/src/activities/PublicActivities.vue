@@ -137,7 +137,7 @@ function applied(records: Registration[]) {
   if (!detail.value || !records.length || records.some(record => record.activity_id !== detail.value?.id)) return;
   const own = new Map((detail.value.my_registrations ?? []).map(row => [row.id, row]));
   for (const record of records) own.set(record.id, record);
-  detail.value = { ...detail.value, my_registrations: [...own.values()], my_registration_status: records[0].status };
+  detail.value = { ...detail.value, my_registrations: [...own.values()], ...(detail.value.registration_mode !== 'batch' && { my_registration_status: records[0].status }) };
   void load(true);
 }
 function refreshDetail() {

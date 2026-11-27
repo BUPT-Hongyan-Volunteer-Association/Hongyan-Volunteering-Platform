@@ -111,7 +111,7 @@ export function project(
   };
   if (!management) {
     const own = row.registrations?.find(r => r.status === 'accepted') ?? row.registrations?.[0];
-    if (own) item.my_registration_status = own.status as View['my_registration_status'];
+    if (own && input.registration_mode !== 'batch') item.my_registration_status = own.status as View['my_registration_status'];
     if (scope === 'public') {
       delete item.questions;
       delete item.registration_items;

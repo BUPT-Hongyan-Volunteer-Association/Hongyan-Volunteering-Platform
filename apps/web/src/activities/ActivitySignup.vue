@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import { ApiError, applyForActivity, createCommand, type Activity, type Registration, type RegistrationInput, type Student } from '@hongyan/contracts';
 import { localDateTime } from '@hongyan/ui/activityDisplay';
-import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
+import { activeRegistrationStatuses, selectionRestriction } from '@hongyan/contracts/activity';
 import { registrationLabels } from '../registrations/labels';
 
 const props = defineProps<{ activity: Activity; student?: Student; refreshing: boolean }>();
@@ -41,9 +41,7 @@ function blocked(item: Item) {
   if (prior && prior.status !== 'withdrawn') return registrationLabels[prior.status];
   if (remaining(item.id) === 0) return '报名已满';
   const otherItems = items.value.filter(other => other.id !== item.id && (selected.value.includes(other.id) || appliedIds.value.has(other.id)));
-  if (!props.activity.allow_multiple_roles && item.role && otherItems.some(other => other.role && other.role !== item.role)) return '限报一个岗位';
-  if (!props.activity.allow_multiple_slots && item.starts_at && otherItems.some(other => other.starts_at && (Date.parse(other.starts_at) !== Date.parse(item.starts_at!) || Date.parse(other.ends_at!) !== Date.parse(item.ends_at!)))) return '限报一个时段';
-  return '';
+  return selectionRestriction(props.activity, [...otherItems, item]);
 }
 const wholeAvailable = computed(() => (!wholeStatus.value || wholeStatus.value === 'withdrawn') && remaining() !== 0);
 const canApply = computed(() => isOpen.value && (batch.value ? items.value.some(item => !blocked(item)) : wholeAvailable.value));

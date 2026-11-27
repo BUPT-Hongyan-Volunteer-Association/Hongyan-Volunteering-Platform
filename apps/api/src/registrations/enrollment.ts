@@ -6,7 +6,7 @@ import type {
   SurveyAnswer,
   RegistrationInput,
 } from '@hongyan/contracts/types';
-import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
+import { activeRegistrationStatuses, selectionRestriction } from '@hongyan/contracts/activity';
 import { json, stable, type Tx } from '../database.js';
 import type { QuestionnaireAnswer, Registration } from '../generated/prisma/client.js';
 import { BusinessError, invalid } from '../http.js';
@@ -120,14 +120,8 @@ export function checkSelections(content: ActivityInput, ids: string[]) {
   if (content.registration_mode !== 'batch') return;
   const selected = new Set(ids);
   const items = (content.registration_items ?? []).filter((item) => selected.has(item.id.toLowerCase()));
-  const roles = new Set(items.flatMap((item) => (item.role ? [item.role.trim()] : [])));
-  const slots = new Set(
-    items.flatMap((item) =>
-      item.starts_at && item.ends_at ? [Date.parse(item.starts_at) + '/' + Date.parse(item.ends_at)] : [],
-    ),
-  );
-  if (!content.allow_multiple_roles && roles.size > 1) invalid('item_ids', '本活动限报一个岗位');
-  if (!content.allow_multiple_slots && slots.size > 1) invalid('item_ids', '本活动限报一个时段');
+  const error = selectionRestriction(content, items);
+  if (error) invalid('item_ids', error);
 }
 
 export async function checkReactivation(

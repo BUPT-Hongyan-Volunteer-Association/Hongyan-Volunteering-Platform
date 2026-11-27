@@ -370,7 +370,7 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
   });
 
   await t.test('分项报名共用答卷，旧版本可筛选，逐项退出，名单实时通知', async () => {
-    const role = randomUUID(), second = randomUUID(), later = randomUUID();
+    const role = randomUUID(), second = randomUUID(), later = randomUUID(), general = randomUUID();
     const single = randomUUID(), multiple = randomUUID(), fill = randomUUID();
     const opt = { id: randomUUID(), label: '培训已完成' }, other = { id: randomUUID(), label: '需要培训' };
     const questions = [
@@ -384,11 +384,12 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     ];
     const {starts_at,ends_at} = content.schedule;
     const items = [
+      {id:general,role:'引导',capacity:1,waitlist_capacity:0},
       {id:role,role:'引导',starts_at,ends_at,capacity:1,waitlist_capacity:1},
       {id:second,role:'讲解',starts_at,ends_at,capacity:1,waitlist_capacity:0},
       {id:later,role:'引导',starts_at:ends_at,ends_at:new Date(Date.parse(ends_at)+3600000).toISOString(),capacity:1,waitlist_capacity:0},
     ];
-    const config = {...content,capacity:3,waitlist_capacity:1,registration_mode:'batch',questions,registration_items:items};
+    const config = {...content,capacity:4,waitlist_capacity:1,registration_mode:'batch',questions,registration_items:items};
     const created_by = activity.revisions[0].created_by;
     const batch = await db.activity.create({data:{
       activity_code:'RECRUIT-SURVEY',status:'published',working_revision:1,published_revision:1,
@@ -405,6 +406,7 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     };
     assert.equal((await submit(alice,[role],{})).status,422);
     assert.equal((await submit(alice,[role,second],{answers})).status,422);
+    assert.equal((await submit(alice,[role,general],{answers})).status,422);
     assert.equal((await submit(alice,[role,later],{answers})).status,422);
     assert.equal((await submit(alice,[role],{questionnaire_version:'obsolete',answers})).status,409);
     config.allow_multiple_roles = true; config.allow_multiple_slots = true;
@@ -475,6 +477,7 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     success(await finish(owner,'exit',quit,'approved'));
     const afterExit = await detail(alice);
     assert.equal(afterExit.my_registrations.find(r=>r.id===acceptedRows[1].id).status,'accepted');
+    assert.ok(!Object.hasOwn(afterExit, 'my_registration_status'));
     assert.ok(afterExit.group_join_instructions);
   });
 

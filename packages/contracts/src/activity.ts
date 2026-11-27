@@ -1,9 +1,22 @@
-import type { ActivitySchedule, DateRangeSchedule, Registration, RegistrationDecision } from './generated/types.gen.js';
+import type { ActivityInput, RegistrationItem, ActivitySchedule, DateRangeSchedule, Registration, RegistrationDecision } from './generated/types.gen.js';
 
 export const activeRegistrationStatuses: Registration['status'][] = ['submitted', 'waitlisted', 'accepted'];
 
 export function canChangeRegistration(status: string, decision: RegistrationDecision['decision']) {
   return ['submitted', 'waitlisted', 'rejected'].includes(status) && status !== decision;
+}
+
+export function selectionRestriction(
+  config: Pick<ActivityInput, 'allow_multiple_roles' | 'allow_multiple_slots'>,
+  items: readonly RegistrationItem[],
+) {
+  if (items.length < 2) return '';
+  if (!config.allow_multiple_roles && !config.allow_multiple_slots) return '本活动限报一个报名项';
+  const roles = new Set(items.flatMap(item => item.role ? [item.role.trim()] : []));
+  if (!config.allow_multiple_roles && roles.size > 1) return '本活动限报一个岗位';
+  const slots = new Set(items.flatMap(item => item.starts_at && item.ends_at
+    ? [Date.parse(item.starts_at) + '/' + Date.parse(item.ends_at)] : []));
+  return !config.allow_multiple_slots && slots.size > 1 ? '本活动限报一个时段' : '';
 }
 
 export const campuses = ['沙河校区', '西土城校区', '沙河及西土城校区'];
