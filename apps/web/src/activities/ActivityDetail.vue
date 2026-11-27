@@ -14,6 +14,7 @@ const props = defineProps<{
   activity: Activity;
   showRegistrations: boolean;
   refreshing: boolean;
+  preview: boolean;
   student?: Student;
 }>();
 const emit = defineEmits<{ applied: [registrations: Registration[]]; refresh: [] }>();
@@ -129,7 +130,8 @@ const conditions: [keyof Activity, string, IconName][] = [
         </section>
       </div>
     </div>
-    <ActivitySignup :activity="activity" :student="showRegistrations ? student : undefined" :refreshing="refreshing" @applied="emit('applied', $event)" @refresh="emit('refresh')">
+    <p v-if="preview" role="status">正在读取报名信息…</p>
+    <ActivitySignup v-else :activity="activity" :student="showRegistrations ? student : undefined" :refreshing="refreshing" @applied="emit('applied', $event)" @refresh="emit('refresh')">
       <button v-if="activity.contacts?.length" type="button" class="contact-btn" @click="contact?.showModal()"><UiIcon name="Message" />联系负责人</button>
     </ActivitySignup>
     <dialog ref="contact" aria-labelledby="contact-title">

@@ -59,6 +59,8 @@ const queryFilters = computed(() => ({
   answer_filters: answerFilters.value || undefined,
 }));
 const readError = ref('');
+const changingPage = ref(false);
+const rowsUnavailable = computed(() => changingPage.value || !!readError.value);
 const writeError = ref('');
 const saving = ref(false);
 const refreshRequired = ref(false);
@@ -100,8 +102,9 @@ let mounted = true;
 async function load(background = false) {
   const turn = ++serial;
   const reviewing = refreshRequired.value;
+  if (!background || readError.value) changingPage.value = true;
+  if (!background) inspected.value = undefined;
   readError.value = '';
-  if (!background) { result.value = undefined; inspected.value = undefined; }
   try {
     const { data } = await listActivityRegistrations({
       path: { id: String(route.params.id) },
@@ -125,11 +128,13 @@ async function load(background = false) {
     pools.value = data.data.item_availability ?? [];
     questionVersions.value = data.data.question_versions ?? [];
     if (background && inspected.value) inspected.value = data.data.items.find(row => row.id === inspected.value?.id);
-    if (reviewing && !background) refreshRequired.value = false;
+    if (reviewing && changingPage.value) refreshRequired.value = false;
   } catch (e) {
     if (turn !== serial) return;
     readError.value = e instanceof Error ? e.message : '名单读取失败';
     if (noAccess(e)) discardRoster();
+  } finally {
+    if (turn === serial) changingPage.value = false;
   }
 }
 const snapshots = shallowReactive(new Map<string, Registration>());
@@ -139,6 +144,7 @@ function discardRoster() {
   serial++;
   filterVersion++;
   result.value = undefined;
+  changingPage.value = false;
   pools.value = []; questionVersions.value = [];
   inspected.value = undefined;
   selected.value.clear();
@@ -156,7 +162,7 @@ watch(() => [...selected.value], ids => {
 }, { flush: 'sync' });
 type Decision = RegistrationDecision['decision'];
 const actions = { accepted: '录取', waitlisted: '设为候补', rejected: '不录取' } as const;
-const paused = computed(() => saving.value || refreshRequired.value || props.writesPaused || !result.value?.can_decide);
+const paused = computed(() => rowsUnavailable.value || saving.value || refreshRequired.value || props.writesPaused || !result.value?.can_decide);
 function allowed(decision: Decision, rows: Registration[]) {
   if (!result.value || !rows.length || rows.length > 100 || rows.some(r => !canChangeRegistration(r.status, decision))) return false;
   if (decision === 'rejected') return true;
@@ -258,9 +264,7 @@ watch([q, state, itemId, answerFilters, () => route.params.id], clear, { flush: 
 watch([() => route.params.id, q, state, itemId, answerFilters, page], () => load(), { immediate: true });
 watch(() => route.params.id, (id, _, cleanup) => {
   const events = new EventSource('/api/v1/organizer/activities/' + encodeURIComponent(String(id)) + '/registration-events?scope=managed');
-  let connected = false;
   const sync = () => { if (!saving.value) void load(true); };
-  events.onopen = () => { if (connected) sync(); connected = true; };
   events.onmessage = sync;
   events.onerror = sync;
   cleanup(() => events.close());
@@ -308,7 +312,7 @@ onUnmounted(() => {
         :options="[{ value: 'filter', label: '当前筛选全部' }, { value: 'selection', label: '所选人员' }]" />
     </label>
     <ExportButton :input="exportScope === 'selection' ? selectedExportInput : filterExportInput"
-      :disabled="saving || writesPaused || !result" create-label="导出名单" download-label="下载名单文件" @recheck="load()" />
+      :disabled="rowsUnavailable || saving || writesPaused || !result" create-label="导出名单" download-label="下载名单文件" @recheck="load()" />
   </div>
   <div v-if="selected.size" class="page-actions roster-batch" aria-label="批量办理">
     <span class="state-chip attention">已选 {{ selected.size }} {{ hasItems ? '项' : '人' }}</span>
@@ -347,7 +351,7 @@ onUnmounted(() => {
   <p v-if="readError" role="alert">{{ readError }} <button @click="load()">重新读取名单</button></p>
   <p v-else-if="!result" role="status">正在读取名单…</p>
   <template v-if="result">
-    <div class="scroll-table data-grid">
+    <div class="scroll-table data-grid" :aria-busy="changingPage" :inert="rowsUnavailable">
       <table>
         <thead>
           <tr>
@@ -396,7 +400,7 @@ onUnmounted(() => {
         </tbody>
       </table>
     </div>
-    <p v-if="!result.total">暂无匹配的报名</p>
+    <p v-if="!result.total && !rowsUnavailable">暂无匹配的报名</p>
     <div class="roster-pager">
       <div>
         <small v-if="hasItems">本页 {{ result.items.length }} 项，共 {{ result.total }} 人次、{{ result.unique_student_count }} 人</small><small v-else>本页 {{ result.items.length }} 人，共 {{ result.total }} 人</small

@@ -17,7 +17,7 @@ const route = useRoute(), router = useRouter();
 const page = computed(() => pageNumber(route.query.page));
 const sourceQuery = computed(() => ({ page: page.value > 1 ? page.value : undefined }));
 const { data, loading, error, refresh: load } = usePageRead(page, async signal =>
-  (await listManagedActivities({ query: { scope: 'managed', page: page.value, page_size: 20 }, signal, throwOnError: true })).data.data);
+  (await listManagedActivities({ query: { scope: 'managed', page: page.value, page_size: 20 }, signal, throwOnError: true })).data.data, undefined, { keepPrevious: true });
 function openDelete(activity: Activity) {
   selected.value = activity;
   failure.value = feedback.value = '';
@@ -73,13 +73,13 @@ onUnmounted(() => document.removeEventListener('visibilitychange', refreshVisibl
       <h1>我的管理活动</h1>
     </div>
     <p v-if="feedback" role="status" class="notice">{{ feedback }}</p>
-    <p v-if="loading && !data" class="notice" role="status">正在读取活动…</p>
+    <p v-if="loading && !data?.items.length" class="notice" role="status">正在读取活动…</p>
     <p v-else-if="error" role="alert">{{ error }} <button @click="load()">刷新</button></p>
     <div v-else-if="!data?.items.length" class="empty-state">
       <UiIcon name="FolderOpened" />
       <p>暂无可管理的活动</p>
     </div>
-    <ul v-else class="managed-list">
+    <ul v-else class="managed-list" :aria-busy="loading" :inert="data.page !== page">
       <li v-for="a in data.items" :key="a.id">
         <div class="managed-info">
           <div class="meta-line">{{ a.activity_code }}</div>
@@ -132,7 +132,7 @@ onUnmounted(() => document.removeEventListener('visibilitychange', refreshVisibl
       </form>
     </dialog>
     <Pager
-      v-if="!loading && data && data.total > data.page_size"
+      v-if="data && data.total > data.page_size"
       :page="page"
       :size="data.page_size"
       :total="data.total"

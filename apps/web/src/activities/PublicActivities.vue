@@ -29,12 +29,17 @@ const route = useRoute(),
   router = useRouter();
 const rows = ref<Activity[]>([]),
   detail = ref<Activity>(),
+  loadedListPath = ref(''),
   total = ref(0),
   pageSize = ref(20),
   busy = ref(true),
   error = ref('');
 const search = ref('');
 const filtersOpen = ref(false);
+// Public list rows already contain the approved introduction; private signup data only comes from detail.
+const visibleDetail = computed(() => detail.value?.id === route.params.id ? detail.value
+  : !error.value ? rows.value.find(row => row.id === route.params.id) : undefined);
+const listChanging = computed(() => busy.value && loadedListPath.value !== route.fullPath);
 const cards = computed(() => rows.value.map(row => ({ row, firstDay: serviceDates(row.schedule).duration_start_date })));
 const page = computed(() => pageNumber(route.query.page));
 const selectedDay = computed(() => (validDate(route.query.date) ? route.query.date : ''));
@@ -89,8 +94,14 @@ async function load(keepDetail = false) {
   const index = ++serial;
   busy.value = true;
   error.value = '';
-  if (!keepDetail) { detail.value = undefined; rows.value = []; }
-  if (!keepDetail) search.value = String(route.query.q ?? '');
+  if (!keepDetail) {
+    detail.value = undefined;
+    search.value = String(route.query.q ?? '');
+    // Restore against the retained list height before waiting for the network.
+    void nextTick(() => {
+      if (index === serial) window.scrollTo(0, route.params.id ? 0 : scrollPosition);
+    });
+  }
   try {
     if (route.params.id) {
       const response = await getActivity({
@@ -103,7 +114,7 @@ async function load(keepDetail = false) {
         query: {
           scope: 'public',
           page: page.value,
-          q: search.value || undefined,
+          q: String(route.query.q || '') || undefined,
           status: status.value,
           campus: campus.value || undefined,
           registration_phase: phase.value,
@@ -114,6 +125,7 @@ async function load(keepDetail = false) {
         throwOnError: true,
       });
       if (index === serial) {
+        loadedListPath.value = route.fullPath;
         rows.value = response.data.data.items;
         total.value = response.data.data.total;
         pageSize.value = response.data.data.page_size;
@@ -121,16 +133,15 @@ async function load(keepDetail = false) {
     }
   } catch (e) {
     if (index === serial) {
-      if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0))
+      if (e instanceof ApiError && [401, 403, 404].includes(e.status ?? 0)) {
         detail.value = undefined;
+        rows.value = [];
+        loadedListPath.value = '';
+      }
       error.value = e instanceof Error ? e.message : '读取失败';
     }
   } finally {
-    if (index === serial) {
-      busy.value = false;
-      await nextTick();
-      if (index === serial && !keepDetail) window.scrollTo(0, route.params.id ? 0 : scrollPosition);
-    }
+    if (index === serial) busy.value = false;
   }
 }
 function applied(records: Registration[]) {
@@ -145,7 +156,7 @@ function refreshDetail() {
 }
 watch(
   () => route.fullPath,
-  () => load(),
+  () => { if (route.path === '/' || route.path.startsWith('/activities/')) void load(); },
   { immediate: true },
 );
 // Re-read at the next server-evaluated boundary even if the student keeps this tab open.
@@ -185,9 +196,9 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
       {{ error }} <button @click="refreshDetail">重新读取详情</button>
     </p>
     <ActivityDetail
-      v-if="detail"
-      :activity="detail"
-      :key="detail.id"
+      v-if="visibleDetail"
+      :activity="visibleDetail"
+      :key="visibleDetail.id" :preview="!detail"
       :refreshing="busy" :student="profile.student" @refresh="refreshDetail"
       @applied="applied"
       :show-registrations="hasStudentAccess(profile)"
@@ -274,7 +285,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
         </div>
         <div class="result-heading">
           <h2>公开活动</h2>
-          <span v-if="!busy && !error">共 {{ total }} 项</span>
+          <span v-if="loadedListPath && !error">共 {{ total }} 项</span>
           <button
             v-if="filtered"
             class="quiet compact reset"
@@ -299,13 +310,13 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
             <UiIcon name="Close" />
           </button>
         </p>
-        <p v-if="busy && !rows.length" class="notice" role="status">正在读取活动…</p>
+        <p v-if="listChanging && !rows.length" class="notice" role="status">正在读取活动…</p>
         <p v-else-if="error" role="alert">{{ error }} <button @click="load()">重试</button></p>
         <div v-else-if="!rows.length" class="empty-state">
           <UiIcon name="Search" />
           <p>暂无匹配的公开活动</p>
         </div>
-        <ul v-else class="activity-list">
+        <ul v-else class="activity-list" :aria-busy="busy" :inert="listChanging">
           <li v-for="{ row, firstDay } in cards" :key="row.id">
             <time
               class="date-tile"
@@ -347,7 +358,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
           </li>
         </ul>
         <Pager
-          v-if="!busy && !error && total > pageSize"
+          v-if="loadedListPath && !error && total > pageSize"
           :page="page"
           :size="pageSize"
           :total="total"
