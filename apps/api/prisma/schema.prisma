@@ -63,6 +63,7 @@ model Student {
   hour_appeals HourAppeal[]
   attendance    AttendanceRecord[]
   hour_records HourRecord[]
+  questionnaire_responses QuestionnaireResponse[]
   registrations Registration[]
   receipts      NoticeReceipt[]
   id            String         @id @default(uuid()) @db.Uuid
@@ -146,6 +147,7 @@ model Activity {
   hour_files   HourImportFile[]
   hour_records HourRecord[]
   reviews            ActivityReview[]
+  questionnaire_responses QuestionnaireResponse[]
   registrations      Registration[]
   notices            Notice[]
   id                 String             @id @default(uuid()) @db.Uuid
@@ -194,6 +196,10 @@ model Registration {
   status          String
   version         Int                   @default(1)
   statement       String?
+  item_id         String                @default("00000000-0000-0000-0000-000000000000") @db.Uuid
+  item_label      String?
+  response_id     String?               @db.Uuid
+  response        QuestionnaireResponse? @relation(fields: [response_id], references: [id])
   decision_reason String?
   exit_requests   ExitRequest[]
   history         RegistrationHistory[]
@@ -201,9 +207,41 @@ model Registration {
   student         Student               @relation(fields: [student_id], references: [id])
   activity        Activity              @relation(fields: [activity_id], references: [id])
 
-  @@unique([activity_id, student_id])
+  @@unique([activity_id, student_id, item_id])
+  @@index([activity_id, item_id, status])
+  @@index([response_id])
   @@index([student_id])
   @@map("registration")
+}
+
+model QuestionnaireResponse {
+  id                    String @id @default(uuid()) @db.Uuid
+  activity_id           String @db.Uuid
+  student_id            String @db.Uuid
+  questionnaire_version String
+  questions             Json
+  activity              Activity @relation(fields: [activity_id], references: [id])
+  student               Student @relation(fields: [student_id], references: [id])
+  answers               QuestionnaireAnswer[]
+  registrations         Registration[]
+
+  @@unique([activity_id, student_id, questionnaire_version])
+  @@map("questionnaire_response")
+}
+
+model QuestionnaireAnswer {
+  response_id String @db.Uuid
+  question_id String @db.Uuid
+  position    Int
+  title       String
+  type        String
+  text        String?
+  option_ids  String[] @db.Uuid
+  labels      String[]
+  response    QuestionnaireResponse @relation(fields: [response_id], references: [id], onDelete: Cascade)
+
+  @@id([response_id, question_id])
+  @@map("questionnaire_answer")
 }
 
 model ExitRequest {
