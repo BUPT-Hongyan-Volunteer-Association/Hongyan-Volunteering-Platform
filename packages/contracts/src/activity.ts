@@ -49,3 +49,10 @@ export function serviceWindow(schedule?: ActivitySchedule | ServiceDates) {
   if (!first || !last) return undefined;
   return { start: Date.parse(first + 'T00:00:00+08:00'), end: Date.parse(last + 'T00:00:00+08:00') + 86400000 };
 }
+
+/** 整项活动的办理边界，日期范围包括结束日全天。 */
+export function activityBounds(schedule?: ActivitySchedule) {
+  if (schedule?.schedule_type === 'continuous')
+    return { start: Date.parse(schedule.starts_at), end: Date.parse(schedule.ends_at) };
+  return serviceWindow(schedule);
+}

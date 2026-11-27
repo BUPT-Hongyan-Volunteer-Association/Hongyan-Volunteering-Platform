@@ -1,5 +1,5 @@
 import type { ActivityInput, ActivityPublicationContent } from '@hongyan/contracts/types';
-import { campuses, campusName } from '@hongyan/contracts/activity';
+import { activityBounds, campuses, campusName } from '@hongyan/contracts/activity';
 import { BusinessError, invalid } from '../http.js';
 import { issues, validate } from '../validation.js';
 import { validateSchedule } from './schedule.js';
@@ -42,19 +42,17 @@ export function content(value: unknown, publication = false) {
     throw new BusinessError(422, 'validation_error', '请补齐或修正以下字段', problems);
   const complete =
     schedule && (!dateOnly || (schedule.duration_start_date && schedule.duration_end_date));
-  const firstStart = complete ? validateSchedule(schedule) : undefined;
+  if (complete) validateSchedule(schedule);
+  const bounds = activityBounds(schedule);
   if (
     a.registration_opens_at &&
     a.registration_closes_at &&
     Date.parse(a.registration_opens_at) >= Date.parse(a.registration_closes_at)
   )
     invalid('registration_closes_at', '报名截止须晚于开放时间');
-  if (
-    !dateOnly &&
-    firstStart !== undefined &&
-    a.registration_closes_at &&
-    Date.parse(a.registration_closes_at) > firstStart
-  )
-    invalid('registration_closes_at', '截止不能晚于首段开始');
+  if (bounds && a.registration_opens_at && Date.parse(a.registration_opens_at) >= bounds.start)
+    invalid('registration_opens_at', '报名开放必须早于活动开始');
+  if (bounds && a.registration_closes_at && Date.parse(a.registration_closes_at) >= bounds.end)
+    invalid('registration_closes_at', '报名截止必须早于活动结束');
   return a;
 }

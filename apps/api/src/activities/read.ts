@@ -1,4 +1,4 @@
-import { servicePeriods } from './schedule.js';
+import { activityBounds } from '@hongyan/contracts/activity';
 import type { Activity as View, ActivityInput } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Actor } from '../auth/session.guard.js';
@@ -81,6 +81,7 @@ export function project(
   const input = rev.content as unknown as ActivityInput;
   const schedule = (published?.content as unknown as ActivityInput | undefined)?.schedule;
   const t = now.getTime();
+  const bounds = activityBounds(schedule);
   const item: View = {
     ...input,
     id: row.id,
@@ -101,7 +102,7 @@ export function project(
     revision_state: rev.revision_state as View['revision_state'],
     state_evaluated_at: now.toISOString(),
     is_ongoing:
-      row.status === 'published' && !servicePeriods(schedule, t, t + 1).next().done,
+      row.status === 'published' && !!bounds && bounds.start <= t && t < bounds.end,
     ...(management && {
       has_pending_review: row.reviews.some((r) => r.status === 'pending'),
       current_review_id: row.reviews.find((r) => r.status === 'pending')?.id,

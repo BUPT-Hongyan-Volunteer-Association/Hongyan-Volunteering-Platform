@@ -4,7 +4,7 @@ import { computed } from 'vue';
 import { listManagedActivities } from '@hongyan/contracts';
 import { useRoute, useRouter } from 'vue-router';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
-import { statusLabels } from '@hongyan/ui/activityDisplay';
+import { activityPrimaryStatus } from '@hongyan/ui/activityDisplay';
 import { pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 
@@ -35,8 +35,9 @@ const { data, loading, error, refresh: load } = usePageRead(page, async signal =
               {{ a.title }}<UiIcon name="ArrowRight" />
             </RouterLink>
             <span class="state-chip" :class="{ attention: a.has_pending_review }">{{
-              a.has_pending_review ? '待审核' : statusLabels[a.status]
+              activityPrimaryStatus(a)
             }}</span>
+            <span v-if="a.has_pending_review && a.status !== 'pending_review'" class="state-chip attention">待审核</span>
           </div>
           <div class="meta-line">
             <span v-if="a.location"
@@ -44,6 +45,7 @@ const { data, loading, error, refresh: load } = usePageRead(page, async signal =
                 [a.campus, a.location].filter(Boolean).join(' · ')
               }}</span
             ><span><UiIcon name="Calendar" />{{ serviceDateText(a.schedule) }}</span>
+            <span v-if="a.has_pending_review && a.status !== 'pending_review'" class="state-chip attention">待审核</span>
           </div>
         </div>
         <div class="page-actions">

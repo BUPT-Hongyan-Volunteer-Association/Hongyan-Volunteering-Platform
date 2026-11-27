@@ -14,6 +14,7 @@ import UiIcon from '../UiIcon.vue';
 import {
   localDate,
   localDateTime,
+  activityPrimaryStatus,
   phaseLabels,
   phaseOptions,
   statusLabels,
@@ -526,8 +527,7 @@ onUnmounted(() => {
                 <i :style="{ background: timelineColors[r.color_index] }" />{{ r.title }}
               </button>
               <p class="meta-line">
-                {{ statusLabels[r.status] }} · {{ phaseLabels[r.registration_phase]
-                }}{{ r.is_ongoing ? ' · 进行中' : '' }}{{ r.has_pending_review ? ' · 待审核' : ''
+                {{ activityPrimaryStatus(r) }}{{ r.has_pending_review ? ' · 待审核' : ''
                 }}{{ r.has_planned_overlap ? ' · 与本人其他活动时间重叠' : '' }}
               </p>
               <p class="service-period"><UiIcon name="Calendar" />{{ serviceDateText(r) }}</p>
@@ -553,7 +553,7 @@ onUnmounted(() => {
           </div>
           <div class="selected-title">
             <h2 tabindex="-1" ref="detailHeading">{{ selected.title }}</h2>
-            <span class="state-chip">{{ phaseLabels[selected.registration_phase] }}</span>
+            <span class="state-chip">{{ activityPrimaryStatus(selected) }}</span>
             <span v-if="!mobile || fullMobileDetail" class="state-chip neutral">{{
               statusLabels[selected.status]
             }}</span>
