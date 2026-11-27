@@ -137,8 +137,11 @@ async function decide(decision: 'approved' | 'rejected') {
     <RecordWorkspace :selected="!!requestId">
       <template #list>
         <nav class="section-nav" aria-label="申请类型">
-          <RouterLink v-for="(name, k) in requestKinds" :key="k" :class="{ current: kind === k }"
-            :aria-current="kind === k ? 'page' : undefined" :to="{ path: base, query: { ...listQuery, kind: k, request_page: undefined } }">{{ name }}</RouterLink>
+          <RouterLink v-for="(name, k) in requestKinds" :key="k" custom
+            :to="{ path: base, query: { ...listQuery, kind: k, request_page: undefined } }" v-slot="{ href, navigate }">
+            <a :href="href" :class="{ current: resolvedKind === k }" :aria-current="resolvedKind === k ? 'page' : undefined"
+              @click="navigate">{{ name }}</a>
+          </RouterLink>
         </nav>
         <div class="page-actions"><span>申请状态</span><UiSelect label="申请状态" :model-value="status" :options="options" @update:model-value="setStatus($event)" /></div>
         <p v-if="listError" role="alert">{{ listError }} <button @click="reviewAgain">重新读取申请</button></p>

@@ -245,9 +245,6 @@ onUnmounted(() => {
       <strong>{{ result.accepted_count }} / {{ result.capacity }}</strong> 人
     </p>
   </div>
-  <div class="page-actions">
-    <RouterLink class="button" :to="{ path: '/managed/' + route.params.id + '/requests', query: { page: route.query.page } }">退出与恢复</RouterLink>
-  </div>
   <div v-if="result" class="status-filters" aria-label="报名状态">
     <StatusFilter label="报名状态" :model-value="state" :options="filterOptions"
       @update:model-value="state = $event as typeof state" />
@@ -419,7 +416,7 @@ onUnmounted(() => {
   margin-bottom: 10px;
 }
 .roster-heading .capacity {
-  margin: 0 0 0 auto;
+  margin: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -474,6 +471,7 @@ onUnmounted(() => {
   gap: 4px 12px;
 }
 .status-filters {
+  align-items: flex-end;
   border-bottom: 1px solid var(--line);
 }
 

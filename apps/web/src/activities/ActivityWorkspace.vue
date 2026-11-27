@@ -35,6 +35,7 @@ const sections = [
   ['', '活动团队'],
   ['edit', '编辑与送审'],
   ['roster', '报名名单'],
+  ['requests', '退出与恢复'],
   ['notices', '通知与回执'],
   ['attendance', '现场人员记录'],
   ['batches', '时长批次'],

@@ -34,7 +34,7 @@ export const router = createRouter({
           name: 'organizer-section',
           component: () => import('./registrations/RequestWorkspace.vue'),
           props: route => ({ activityId: String(route.params.id), requestId: route.params.item || undefined }),
-          meta: { area: 'roster' },
+          meta: { area: 'requests' },
         },
         { path: 'edit', name: 'activity-edit', component: loadActivityEditor, meta: { area: 'edit' } },
         { path: 'notices/:item?', name: 'activity-notices', component: () => import('./notices/ActivityNotices.vue'), meta: { area: 'notices' } },
