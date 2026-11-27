@@ -222,6 +222,7 @@ model QuestionnaireResponse {
   questions             Json
   activity              Activity @relation(fields: [activity_id], references: [id])
   student               Student @relation(fields: [student_id], references: [id])
+  history               RegistrationHistory[]
   answers               QuestionnaireAnswer[]
   registrations         Registration[]
 
@@ -261,6 +262,8 @@ model ExitRequest {
 }
 
 model RegistrationHistory {
+  response_id     String?      @db.Uuid
+  response        QuestionnaireResponse? @relation(fields: [response_id], references: [id])
   registration_id String       @db.Uuid
   version         Int
   status          String
