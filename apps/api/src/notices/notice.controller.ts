@@ -178,6 +178,7 @@ export class NoticeController {
           ...(named && { student_id: { in: selected } }),
         },
         select: { student_id: true },
+        distinct: ['student_id'],
       });
       if (named && recipients.length !== selected.length) {
         const eligible = new Set(recipients.map(row => row.student_id));

@@ -2,12 +2,12 @@
 
 | 角色 | 常用入口 |
 | --- | --- |
-| 学生 | 在「活动发现」浏览和报名，在「活动日程」查看活动服务日期，在「我的报名」查结果、办理退出与恢复。在「通知」确认回执，在「我的」查时长、提交漏记或错账反馈，或进入「账号管理」改密。 |
-| 活动负责人 | 从「新建活动」创建草稿，进入活动工作区编辑并送审，在报名名单跨页选择最多 100 条记录统一作出决定，审批退出与恢复。按服务日期登记现场异常，向指定名单发布通知并跟进回执，在「时长批次」导入工作簿、核对预览、修正重传或送审。主负责人还可在活动团队维护成员、办理交接。 |
+| 学生 | 从「活动发现」选报岗位或时段、填写活动问卷，在「我的报名」查看本人答卷和各项结果、办理退出与恢复。「活动日程」可查服务日期和本人录取项。在「通知」确认回执，在「我的」查时长、提交漏记或错账反馈，或进入「账号管理」改密。 |
+| 活动负责人 | 在「新建活动 → 参与与录取」设置整批或分批报名、录取和候补名额，按需编辑问卷后送审。在「报名名单」按岗位、时段和答卷筛选，可跨页选择最多 100 条记录统一作出决定。退出与恢复在活动工作区审批。按服务日期登记现场异常，向指定名单发布通知并跟进回执，在「时长批次」导入工作簿、核对预览、修正重传或送审。主负责人还可在活动团队维护成员、办理交接。 |
 | 审核员 | 审批活动、修订和时长批次，处理错账修复及申诉。从「学生档案 → 导入学生名单建档」批量建档，在「学生档案」查人，在「账号与角色」办理普通学生的负责人授权和凭证重置，在「活动团队」维护成员和接管活动。支持按授权范围导出记录、查询审计。 |
 | 技术管理员 | 在「账号与角色」按角色、状态查找账号，创建后台账号、调整高权限角色，办理启停和凭证重置。 |
 
-[活动日程与验收用例](docs/timeline.md) · [三端界面规范](DESIGN.md) · [页面截图](docs/ui-samples/README.md) · [工程协作约定](AGENTS.md) · [OpenAPI 契约](packages/contracts/openapi_v1.2.5.yaml) · [导入模板](packages/contracts/templates/)
+[发布、问卷与录取](DESIGN.md#活动发布与报名) · [活动日程与验收用例](docs/timeline.md) · [三端界面规范](DESIGN.md) · [页面截图](docs/ui-samples/README.md) · [工程协作约定](AGENTS.md) · [OpenAPI 契约](packages/contracts/openapi_v1.2.5.yaml) · [导入模板](packages/contracts/templates/)
 
 ## 账号与活动团队
 
@@ -43,7 +43,7 @@ macOS 完成首次配置后，可在 `.local/demo.env` 写入建种时的 `DEMO_
 
 ## 开发检查
 
-在仓库根目录运行 `pnpm typecheck` 检查类型，运行 `pnpm test:pages` 构建并执行浏览器回归。页面回归和身份选择页均可使用已安装的 Chrome 或 Edge。[页面回归入口](apps/api/test/pages.test.mjs) · [时长办理用例](apps/api/test/hour-ledger-pages.mjs) · [建档页面用例](apps/api/test/student-import-pages-fixture.mjs)
+在仓库根目录运行 `pnpm typecheck` 检查类型，运行 `pnpm test:pages` 构建并执行浏览器回归。页面回归和身份选择页均可使用已安装的 Chrome 或 Edge。[页面回归入口](apps/api/test/pages.test.mjs) · [问卷与分批报名用例](apps/api/test/recruitment-form-pages.test.mjs) · [时长办理用例](apps/api/test/hour-ledger-pages.mjs) · [建档页面用例](apps/api/test/student-import-pages-fixture.mjs)
 
 本地与 CI 共用三组入口。运行 `pnpm build` 后，在 `@hongyan/api` 下用 `test:offline`、`test:database`、`test:pages` 分别运行离线、数据库与浏览器回归。
 

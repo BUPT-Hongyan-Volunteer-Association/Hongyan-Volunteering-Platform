@@ -12,14 +12,16 @@ import {
 } from '@nestjs/common';
 import type { Activity, ActivityReview } from '../generated/prisma/client.js';
 import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
-import type { ReviewDecision } from '@hongyan/contracts/types';
+import type { ActivityPublicationContent, ReviewDecision } from '@hongyan/contracts/types';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database, type Tx } from '../database.js';
 import { BusinessError, denied, envelope, invalid, invisible, checkVersion, wrongState } from '../http.js';
-import { includeView, pagination, staff } from './read.js';
+import { includeView, pagination, publishedRevision, staff } from './read.js';
 import { reviewResponse, reviewView } from './views.js';
 import { Workflow } from '../workflow.js';
 import { content } from './validation.js';
+import { checkRecruitmentRevision } from './recruitment.js';
+import { registrationInventory } from '../registrations/enrollment.js';
 import { validate } from '../validation.js';
 import { notifiedFields } from '../notices/notice.js';
 
@@ -91,7 +93,13 @@ export class ReviewController {
         });
         if (!review) invisible();
         const [item] = await snapshotsForReviews(tx, [review]);
-        return envelope({ ...item, is_current_pending: isCurrentPending(review, review.activity, item.snapshot.revision_state) });
+        const published = review.activity.published_revision === null ? null : await tx.activityRevision.findUnique({
+          where: { activity_id_revision: { activity_id: review.activity_id, revision: review.activity.published_revision } },
+          select: { content: true },
+        });
+        const config = (published?.content ?? item.snapshot.content) as unknown as ActivityPublicationContent;
+        const item_availability = await registrationInventory(tx, review.activity_id, config);
+        return envelope({ ...item, item_availability, published_registration_revision: review.activity.published_revision, is_current_pending: isCurrentPending(review, review.activity, item.snapshot.revision_state) });
       },
       { isolationLevel: 'RepeatableRead' },
     );
@@ -113,12 +121,8 @@ export class ReviewController {
       const approved = action.decision === 'approved',
         clock = new Date();
       if (approved) {
-        const a = content(frozen.content, true),
-          accepted = await tx.registration.count({
-            where: { activity_id: row.id, status: 'accepted' },
-          });
-        if (a.capacity < accepted)
-          throw new BusinessError(409, 'capacity_conflict', '名额不能少于已录取人数');
+        const a = content(frozen.content, true);
+        await checkRecruitmentRevision(tx, row.id, publishedRevision(row)?.content as unknown as ActivityPublicationContent | undefined, a);
       }
       const afterPublic = approved ? r.revision : row.published_revision;
       const decided = await tx.activityReview.update({
@@ -151,6 +155,7 @@ export class ReviewController {
         after: { ...source, status: action.decision, published_revision: afterPublic },
       });
       const result = reviewView(updated, decided);
+      if (approved) await tx.$queryRaw`SELECT pg_notify('registration_changed', ${row.id})::text`;
       if (approved && r.previous_revision !== null) {
         const changed_fields = result.changes
           .map((c) => c.field_path)
@@ -158,7 +163,7 @@ export class ReviewController {
         if (changed_fields.length) {
           const recipients = await tx.registration.findMany({
             where: { activity_id: row.id, status: { in: activeRegistrationStatuses } },
-            select: { student_id: true },
+            distinct: ['student_id'], select: { student_id: true },
           });
           await tx.activityChangeEvent.createMany({
             data: recipients.map((p) => ({

@@ -51,6 +51,7 @@ export class GroupImageController {
             activity_id: true,
             activity: {
               select: {
+                deleted_at: true,
                 published_revision: true,
                 status: true,
                 members: { where: { account_id: actor.account_id }, select: { account_id: true } },
@@ -64,6 +65,7 @@ export class GroupImageController {
         });
         if (!ref) invisible();
         const activity = ref.activity;
+        if (activity.deleted_at && !staff(actor)) invisible();
         const manager =
           staff(actor) || (actor.roles.includes('organizer') && activity.members.length > 0);
         const accepted =
@@ -79,6 +81,7 @@ export class GroupImageController {
         const visible = await tx.activityRevision.count({
           where: {
             activity_id: ref.activity_id,
+            ...(activity.deleted_at && { revision_state: { in: ['withdrawn', 'rejected'] } }),
             ...(!manager && { revision: activity.published_revision!, revision_state: 'approved' }),
             content: { path: ['group_qr_id'], equals: id },
           },

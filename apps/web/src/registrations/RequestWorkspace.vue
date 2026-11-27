@@ -137,8 +137,11 @@ async function decide(decision: 'approved' | 'rejected') {
     <RecordWorkspace :selected="!!requestId">
       <template #list>
         <nav class="section-nav" aria-label="申请类型">
-          <RouterLink v-for="(name, k) in requestKinds" :key="k" :class="{ current: kind === k }"
-            :aria-current="kind === k ? 'page' : undefined" :to="{ path: base, query: { ...listQuery, kind: k, request_page: undefined } }">{{ name }}</RouterLink>
+          <RouterLink v-for="(name, k) in requestKinds" :key="k" custom
+            :to="{ path: base, query: { ...listQuery, kind: k, request_page: undefined } }" v-slot="{ href, navigate }">
+            <a :href="href" :class="{ current: resolvedKind === k }" :aria-current="resolvedKind === k ? 'page' : undefined"
+              @click="navigate">{{ name }}</a>
+          </RouterLink>
         </nav>
         <div class="page-actions"><span>申请状态</span><UiSelect label="申请状态" :model-value="status" :options="options" @update:model-value="setStatus($event)" /></div>
         <p v-if="listError" role="alert">{{ listError }} <button @click="reviewAgain">重新读取申请</button></p>
@@ -148,7 +151,7 @@ async function decide(decision: 'approved' | 'rejected') {
           <RouterLink v-for="row in queue?.items" :key="row.id" :aria-current="row.id === requestId ? 'true' : undefined"
             :aria-label="(row.status === 'pending' ? '处理申请' : '查看申请') + ' · ' + row.student_name + ' ' + row.student_no"
             :to="{ path: base + '/' + row.id, query: listQuery }">
-            <div><strong>{{ row.student_name }}</strong><small>{{ row.student_no }}</small></div>
+            <div><strong>{{ row.student_name }}</strong><small>{{ row.student_no }} {{ row.item_label }}</small></div>
             <span class="state-chip" :class="{ neutral: row.status !== 'pending' }">{{ requestStates[row.status] }}</span>
           </RouterLink>
         </div>
@@ -166,6 +169,7 @@ async function decide(decision: 'approved' | 'rejected') {
           <dl class="detail-fields">
             <dt>学号</dt><dd>{{ detail.row.student_no }}</dd>
             <dt>申请时间</dt><dd>{{ detail.row.created_at && localDateTime(detail.row.created_at) }}</dd>
+            <template v-if="detail.row.item_label"><dt>报名项目</dt><dd>{{ detail.row.item_label }}</dd></template>
             <dt>申请原因</dt><dd>{{ detail.row.reason }}</dd>
             <template v-if="detail.row.decision_reason"><dt>处理说明</dt><dd>{{ detail.row.decision_reason }}</dd></template>
           </dl>

@@ -22,14 +22,19 @@ const fieldLabels = {
   meeting_point: '集合地点',
   transport_notes: '交通说明',
   capacity: '名额',
-  eligibility_text: '报名条件',
-  selection_text: '录取说明',
+  precautions: '注意事项',
+  related_notes: '相关说明',
+  safety_notes: '安全或培训说明',
+  registration_items: '岗位与时段',
+  questions: '报名问卷',
+  registration_mode: '报名方式',
+  allow_multiple_roles: '允许多岗',
+  allow_multiple_slots: '允许多时段',
+  waitlist_capacity: '候补人数',
   group_qr_id: '入群方式',
   hours_import_date: '预计时长导入日期',
   group_join_instructions: '入群方式',
   hours_rule_text: '时长规则',
-  expected_hours: '预计时长',
-  expected_hours_basis: '时长计算依据',
 } satisfies Partial<Record<keyof ActivityInput, string>>;
 type Field = keyof typeof fieldLabels;
 export const notifiedFields = new Set<string>(Object.keys(fieldLabels));
@@ -48,6 +53,8 @@ function display(field: Field, version: ActivityInput) {
   const value = version[field];
   if (value == null || value === '') return '未设置';
   if (field === 'schedule') return serviceDateText(version.schedule);
+  if (field === 'registration_mode') return value === 'batch' ? '分批报名' : '整批报名';
+  if (typeof value === 'boolean') return value ? '允许' : '关闭';
   if (field === 'contacts') return version.contacts?.join('、') || '未设置';
   if (field.endsWith('_at') && typeof value === 'string') return moment(value);
   return String(value);
@@ -66,6 +73,8 @@ export function changeNoticeBody(versions: ActivityInput[]) {
     const label = fieldLabels[field];
     if (field === 'group_join_instructions' || field === 'group_qr_id') {
       lines.push(`· ${label}：已更新，录取后可进入活动详情查看`);
+    } else if (field === 'registration_items' || field === 'questions') {
+      lines.push(label + '已更新，请查看活动详情');
     } else {
       const from = display(field, before),
         to = display(field, latest);

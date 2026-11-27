@@ -8,6 +8,29 @@ import { withPages, shiftDay, link, button, visible, publicSchedulePage, holdRes
 test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
   await withPages(t, async ({ web, admin, api, student, owner, helper, teacher, db, first }) => {
     const demo = await createScheduleDemo(db);
+    await t.test('打开和关闭日程详情时保留当前列表和键盘焦点', async t => {
+      const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+      const prefix = 'TL-DETAIL-';
+      await createScheduleDataset(db, { codePrefix:prefix, titlePrefix:'日程打开详情', date:today, count:1 });
+      t.after(() => db.activity.deleteMany({where:{activity_code:{startsWith:prefix}}}));
+      await helper.setViewportSize({width:1440,height:900});
+      await helper.goto(web + '/schedule?view=list');
+      const row = helper.locator('.schedule-list li').filter({hasText:'日程打开详情'});
+      await visible(row);
+      assert.equal(new URL(helper.url()).searchParams.has('date'), false);
+      const requests = [];
+      const record = req => { if (new URL(req.url()).pathname === '/api/v1/timeline') requests.push(req.url()); };
+      helper.on('request', record);
+      t.after(() => helper.off('request', record));
+      const initial = await row.elementHandle();
+      await row.getByRole('button').first().click();
+      await visible(helper.getByRole('complementary',{name:'日程详情'}));
+      await button(helper,'返回日程').click();
+      await settleRender(helper);
+      assert.ok(await initial.evaluate(el => el.isConnected && el.contains(document.activeElement)));
+      assert.deepEqual(requests, []);
+    });
+
     await t.test('日程 1-1 审核改期后返回原日程保留条件并重读', async (t) => {
       const date = demo.anchor;
       const title = '改期审核';
@@ -438,8 +461,11 @@ test('日程范围、一致性与权限', { timeout: 10 * 60_000 }, async t => {
       await search.press('Enter');
       await teacher.waitForURL((url) => url.searchParams.get('q') === '没有这一类活动');
       await settleRender(teacher);
-      release();
-      await switched;
+      try {
+        await switched;
+      } finally {
+        release();
+      }
       assert.deepEqual([...held].sort((a, b) => a - b), [1, 2, 3], '旧查询不再补页');
 
       // 条件切回后仍从第 1 页读起，后续加载可用。

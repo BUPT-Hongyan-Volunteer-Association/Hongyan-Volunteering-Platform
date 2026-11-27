@@ -10,7 +10,7 @@ interface RegistrationState {
 }
 export interface HourSnapshot {
   activity_id: string; activity_code: string; published_revision: number | null;
-  students: readonly { id: string; student_no: string; name: string; registration: readonly RegistrationState[] }[];
+  students: readonly { id: string; student_no: string; name: string; registrations: readonly { starts_at?: string; ends_at?: string; history: readonly RegistrationState[] }[] }[];
   approved_schedules: readonly { revision: number; schedule: ActivitySchedule }[];
   history: readonly HourHistory[];
   fact_reviews: ReadonlyMap<string, HourMisconductReview>;
@@ -24,9 +24,11 @@ const fail = (row: PreviewRow, field: string, message: string) => {
   row.errors.push({ row: row.row_number, field, code: 'validation_error', message });
 };
 
-function registeredOnDay(history: readonly RegistrationState[], day: string) {
+function registeredOnDay(registration: HourSnapshot['students'][number]['registrations'][number], day: string) {
   const start = Date.parse(day + 'T00:00:00+08:00');
   const end = start + 86_400_000;
+  const { history, starts_at, ends_at } = registration;
+  if ((starts_at && Date.parse(starts_at) >= end) || (ends_at && Date.parse(ends_at) <= start)) return false;
   const effectiveTime = (state: RegistrationState) => (state.changed_at ?? state.submitted_at).getTime();
   // 工作簿只记录日期。有效报名与该北京时间自然日须有正交集。
   return history.some((state, index) => {
@@ -69,7 +71,7 @@ function inspect({ row_number, errors = [], ...input }: HourInputRow, system: '1
   }
   const fact = normalizeFact(row.remark ?? '');
   if (!fact && (row.misconduct_reported === 'reported' ||
-    (student && (day ? !registeredOnDay(student.registration, day) : !student.registration.length)))) {
+    (student && (day ? !student.registrations.some(item => registeredOnDay(item, day)) : !student.registrations.length)))) {
     fail(row, 'remark', '违纪上报或未报名补录须说明事实');
   }
   const key = student && day && row.activity_code === activity ? student.id + '/' + day : undefined;

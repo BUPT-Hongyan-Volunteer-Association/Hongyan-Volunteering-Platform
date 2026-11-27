@@ -141,7 +141,7 @@ test('独立 PostgreSQL 时长账务、警告、并发与更正结案', { timeou
         { expected_version: duplicate.version, source_hash: duplicate.source_hash })).status, 422);
 
       const recruit = await db.activity.findUniqueOrThrow({ where: { activity_code: 'P2026-0001' } });
-      const application = result(await alice.write('POST', '/activities/' + recruit.id + '/registrations', {}), 201);
+      const application = result(await alice.write('POST', '/activities/' + recruit.id + '/registrations', {}), 201).items[0];
       const recruitDecision = { expected_version: application.version, decision: 'accepted' }, recruitKey = randomUUID();
       const recruitPath = '/organizer/registrations/' + application.id + '/decision';
       const accepted = result(await owner.write('POST', recruitPath, recruitDecision, recruitKey), 200);

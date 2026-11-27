@@ -23,7 +23,7 @@ const existing = (overrides = {}) => ({
 const snapshot = {
   activity_id: 'a', activity_code: activity, published_revision: 1,
   approved_schedules: [{ revision: 1, schedule: schedule(day+'T08:00:00+08:00', day+'T16:00:00+08:00') }],
-  students: [{ id: studentId, student_no: '0000000001', name: '合成学生', registration: [{ status: 'accepted', submitted_at: new Date(day + 'T07:00:00+08:00') }] }],
+  students: [{ id: studentId, student_no: '0000000001', name: '合成学生', registrations: [{history: [{ status: 'accepted', submitted_at: new Date(day + 'T07:00:00+08:00') }]}] }],
   fact_reviews: new Map(),
   history: [],
 };
@@ -229,7 +229,7 @@ test('补录按服务日核对历次报名，撤回重报之间须说明', () =>
   const dates = ['15', '16', '17', '18', '19', '20', '21'];
   const rows = dates.map((d, i) => input(i + 2, { service_date: text('2026-11-'+d), remark: null }));
   const result = preview(rows, {
-    students: [{ ...snapshot.students[0], registration }],
+    students: [{ ...snapshot.students[0], registrations: [{history: registration}] }],
     approved_schedules: [{ revision: 1, schedule: schedule(at(15).toISOString(), at(22).toISOString()) }],
   }, { now: at(22) });
   assert.deepEqual(result.rows.map(row => row.errors.map(error => error.field)),

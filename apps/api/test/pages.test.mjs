@@ -10,6 +10,9 @@ import { withPages, lostTeamMessage, link, button, accountSecurity, visible, ope
 
 test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 }, async t => {
   await withPages(t, async ({ password, web, admin, api, browser, student, owner, joined, helper, teacher, tech, db, first, firstDate }) => {
+    // The cross-page roster below contains 48 active applications before further students apply.
+    await db.$executeRaw`UPDATE activity_revision SET content = jsonb_set(content, '{waitlist_capacity}', '30')
+      WHERE activity_id = ${first.id}::uuid AND revision = ${first.published_revision}`;
     await t.test('三端首次进入自动定位可见活动，手动选择今天保留空窗口', async () => {
       for (const [page, origin, entry] of [[student, web, '活动日程'], [owner, web, '管理日程'], [teacher, admin, '全院日程']]) {
         await page.setViewportSize({ width: 1440, height: 900 });
@@ -26,6 +29,64 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         await button(page, '查看 ' + firstDate + ' 的活动').click();
         await page.waitForURL(url => url.searchParams.get('date') === firstDate);
       }
+    });
+    await t.test('慢响应下保留报名名单和活动摘要，过期查询不覆盖最新筛选', async () => {
+      await owner.goto(web + '/managed/' + first.id + '/roster');
+      await visible(owner.locator('.status-filters'));
+      await student.goto(web);
+      const title = demoActivities.open.title;
+      await visible(link(student, title));
+      const query = student.getByRole('searchbox', { name: '查找活动' });
+      const publicList = url => url.pathname === '/api/v1/activities';
+      await query.fill('等待响应的筛选');
+      const slow = await holdResponse(student, url => publicList(url) && url.searchParams.get('q') === '等待响应的筛选');
+      await button(student, '搜索').click();
+      try {
+        await slow.received;
+        await visible(student.locator('.activity-list[inert]'));
+        await query.fill(title);
+        await button(student, '搜索').click();
+        await visible(link(student, title));
+      } finally { await slow.release(); }
+      await settleRender(student);
+      await visible(link(student, title));
+      await query.fill('尚未提交的搜索词');
+      const refresh = student.waitForRequest(req => publicList(new URL(req.url())));
+      await student.evaluate(() => window.dispatchEvent(new Event('focus')));
+      assert.equal(new URL((await refresh).url()).searchParams.get('q'), title);
+      assert.equal(await query.inputValue(), '尚未提交的搜索词');
+
+      const details = await holdResponse(student, url => url.pathname === '/api/v1/activities/' + first.id);
+      await link(student, title).click();
+      try {
+        await details.received;
+        await visible(student.getByRole('heading', { name: title }));
+        await visible(student.getByText('正在读取报名信息…'));
+        assert.equal(await student.locator('form.signup').count(), 0);
+      } finally { await details.release(); }
+      await student.getByText('正在读取报名信息…').waitFor({ state: 'detached' });
+      const back = await holdResponse(student, publicList);
+      await link(student, '返回活动列表').click();
+      try {
+        await back.received;
+        await visible(link(student, title));
+        assert.equal(await student.locator('.activity-list li').count(), 1);
+      } finally { await back.release(); }
+
+      const roster = owner.getByRole('searchbox', { name: '姓名或学号' });
+      const pending = await holdResponse(owner, url => url.pathname.endsWith('/registrations') && url.searchParams.get('q') === '暂缓的名单查询');
+      await roster.fill('暂缓的名单查询');
+      try {
+        await pending.received;
+        await visible(owner.locator('.status-filters'));
+        await visible(owner.locator('.data-grid[inert]'));
+        assert.ok(await button(owner, '导出名单').isDisabled());
+        await roster.fill('');
+        await visible(owner.locator('.data-grid:not([inert])'));
+      } finally { await pending.release(); }
+      await settleRender(owner);
+      assert.ok(await button(owner, '导出名单').isEnabled());
+      assert.equal(await roster.inputValue(), '');
     });
     const demo = await createScheduleDemo(db);
     await t.test('宽屏正文铺满侧栏以外的空间，收起侧栏后随之扩展', async () => {
@@ -131,7 +192,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
           '异常记录',
         ]) {
           const nav = owner.getByRole('navigation', { name: '活动工作区' });
-          const parent = { '退出与恢复': '报名名单', '漏记反馈': '时长台账', '错帐修复': '时长台账', '异常记录': '现场人员记录' }[tab];
+          const parent = { '漏记反馈': '时长台账', '错帐修复': '时长台账', '异常记录': '现场人员记录' }[tab];
           if (parent) await link(nav, parent).click();
           await link(parent ? owner.getByRole('main') : nav, tab).click();
           await visible(nav.locator('a.current').filter({ hasText: parent ?? tab }));
@@ -663,6 +724,44 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       assert.equal(await title.inputValue(), '尚未保存的标题');
     });
 
+    await t.test('新草稿只进入编辑送审，取消保留草稿、确认后从列表移除', async () => {
+      await owner.goto(web + '/managed/new');
+      await owner.getByLabel('活动标题', {exact:true}).fill('草稿删除演示');
+      const save = await holdResponse(owner, url => url.pathname === '/api/v1/organizer/activities');
+      await button(owner,'保存草稿').click();
+      try {
+        await save.received;
+        await link(owner, '返回活动管理').click();
+        await visible(link(owner, '草稿删除演示'));
+      } finally { await save.release(); }
+      await settleRender(owner);
+      assert.equal(new URL(owner.url()).pathname, '/managed', '离开的编辑器不会在保存返回后抢占导航');
+      await link(owner, '草稿删除演示').click();
+      await owner.waitForURL(/\/managed\/[^/]+\/edit$/);
+      await visible(owner.getByRole('heading',{name:'活动编辑与送审'}));
+      assert.equal(await owner.getByRole('navigation',{name:'活动工作区'}).count(),0);
+      const editUrl = owner.url();
+      await owner.goto(editUrl.replace(/edit$/, 'roster'));
+      await owner.waitForURL(editUrl);
+      await link(owner,'返回我的管理活动').click();
+      const row = owner.getByRole('listitem').filter({has:link(owner,'草稿删除演示')});
+      await visible(row);
+      assert.equal(new URL(await link(row,'编辑送审').getAttribute('href'),web).href,editUrl);
+      assert.equal(new URL(await link(row,'草稿删除演示').getAttribute('href'),web).href,editUrl);
+      assert.equal(await link(row,'现场人员记录').count(),0);
+      assert.equal(await link(row,'报名名单').count(),0);
+      await button(row,'删除').click();
+      const dialog=owner.getByRole('dialog',{name:'删除草稿'});
+      await visible(dialog.getByText(/确定删除「草稿删除演示」/));
+      await button(dialog,'取消').click();
+      await visible(row);
+      await button(row,'删除').click();
+      await button(dialog,'确认删除').click();
+      await visible(owner.getByText('已删除草稿「草稿删除演示」',{exact:true}));
+      await row.waitFor({state:'detached'});
+      await owner.goto(editUrl);
+      await visible(owner.getByText('当前账号无法访问此活动',{exact:true}));
+    });
     await t.test('管理活动的第二页及三种子页面保留来源', async () => {
       const account = await db.account.findUniqueOrThrow({ where: { username: '0000000002' } });
       const revision = await db.activityRevision.findFirstOrThrow({
@@ -675,13 +774,14 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         await db.activity.create({
           data: {
             activity_code: 'TEST-' + String(i).padStart(2, '0'),
-            status: 'draft',
+            status: i === 20 ? 'published' : 'draft',
+            published_revision: i === 20 ? 1 : null,
             working_revision: 1,
             members: { create: { account_id: account.id, member_role: 'owner' } },
             revisions: {
               create: {
                 revision: 1,
-                revision_state: 'draft',
+                revision_state: i === 20 ? 'approved' : 'draft',
                 created_by: account.id,
                 content: { ...revision.content, title: '分页样例' + i },
               },
@@ -703,6 +803,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await button(owner, '上一页').click();
       try {
         await slow.received;
+        await visible(owner.locator('.managed-list[inert]'));
         await owner.goBack();
         await visible(link(owner, '分页样例20'));
       } finally {
@@ -1325,11 +1426,18 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       );
       await teacher.evaluate(() => window.dispatchEvent(new Event('focus')));
       await inflight.received;
+      const published = await holdResponse(teacher, url =>
+        url.pathname === '/api/v1/timeline' && url.searchParams.get('revision_scope') === 'published');
       await pickOption(teacher, '展示版本', '获批版本');
-      await visible(teacher.getByText('正在读取活动日程…'));
-      assert.equal(await teacher.locator('.schedule-list li').count(), 0, '切换那一刻旧工作稿的行即不可见');
-      assert.equal(await teacher.locator('.schedule-detail').count(), 0);
-      await inflight.release();
+      try {
+        await published.received;
+        await visible(teacher.getByText('正在读取活动日程…'));
+        assert.equal(await teacher.locator('.schedule-list li').count(), 0, '切换那一刻旧工作稿的行即不可见');
+        assert.equal(await teacher.locator('.schedule-detail').count(), 0);
+      } finally {
+        await inflight.release();
+        await published.release();
+      }
       await visible(teacher.getByText('该窗口和筛选条件下没有活动'));
       assert.equal(
         await teacher.locator('.schedule-list li').count(),
@@ -1501,7 +1609,13 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await visible(button(student, '已提交，待审核'));
 
       await link(student.locator('.activity-detail'), '我的报名').click();
+      const record = await holdResponse(student, url => url.pathname.endsWith('/me/registrations') && url.searchParams.has('id'));
       await link(student, '办理与进度').click();
+      try {
+        await record.received;
+        await visible(student.locator('.summary-list[inert]').getByText(demoActivities.open.title));
+        assert.equal(await button(student, '撤回报名').count(), 0);
+      } finally { await record.release(); }
       await visible(button(student, '撤回报名'));
       const original = new URL(student.url()).pathname.split('/').at(-1);
       await button(student, '撤回报名').click();
@@ -1718,12 +1832,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         beneficiaries: '在校师生',
         meeting_point: '图书馆一层服务台',
         transport_notes: '校内步行到达',
-        eligibility_text: '本学院学生，按要求参加培训',
-        selection_text: '负责人审核',
+        precautions: '请携带工作手套',
+        related_notes: '书架按馆藏区分组',
         hours_rule_text: '以实际服务记录为准',
         capacity: 30,
-        expected_hours: '2.0',
-        expected_hours_basis: 'per_occurrence',
         registration_opens_at: dateAt(-1) + 'T09:00:00+08:00',
         registration_closes_at: dateAt(firstSaturday - 1) + 'T18:00:00+08:00',
         schedule: {
@@ -1767,7 +1879,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       const label = student.locator('.facts dt').filter({hasText:'报名截止'});
       assert.equal(await label.evaluate(el => { const r = document.createRange(); r.selectNodeContents(el.lastChild); return r.getClientRects().length; }), 1);
       await visible(student.getByText('报名中', { exact: true }));
-      await visible(student.getByText(/每次 2.0 小时/));
+      await visible(student.getByText('请携带工作手套', {exact:true}));
+      await visible(student.getByText('书架按馆藏区分组', {exact:true}));
       await fits(student);
       const cutoff = await student.locator('.facts mark').boundingBox();
       const action = await button(student, '申请报名').boundingBox();
@@ -1793,7 +1906,9 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
     });
     await t.test('新建按日活动：标题草稿、补全送审、分钟滚轮和管理日程', async () => {
       await owner.setViewportSize({ width: 1440, height: 900 });
-      await owner.goto(web + '/managed/new');
+      const date = offset => new Date(Date.now() + 8 * 3600000 + offset * 86400000).toISOString().slice(0,10);
+      await owner.goto(web);
+      await link(owner, '新建活动').click();
       await owner.getByLabel('活动标题', { exact: true }).fill('跨校区图书整理');
       await button(owner, '保存草稿').click();
       await owner.waitForURL(/managed\/[\w-]+\/edit/);
@@ -1816,6 +1931,35 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         时长认定说明: '以实际服务为准',
       }))
         await owner.getByLabel(label, { exact: true }).fill(value);
+      assert.equal(await button(owner,'展开选填项').count(),0);
+      await owner.getByLabel('注意事项',{exact:true}).fill('进馆前签到');
+      await owner.getByLabel('相关说明',{exact:true}).fill('资料由馆方提供');
+      await pickOption(owner,'报名方式','分批报名');
+      await button(owner,'添加报名项').click();
+      const batch = owner.getByRole('group',{name:'报名项 1',exact:true});
+      await batch.getByLabel('第 1 项岗位').fill('图书整理');
+      await batch.getByLabel('录取人数').fill('9');
+      await batch.getByLabel('候补人数').fill('6');
+      await batch.getByLabel('全天').check();
+      await batch.getByLabel('服务日期').fill(date(2));
+      await batch.getByRole('button',{name:'复制报名项'}).click();
+      const dayTwo = owner.getByRole('group',{name:'报名项 2',exact:true});
+      await dayTwo.getByLabel('服务日期').fill(date(3));
+      await dayTwo.getByLabel('第 2 项岗位').fill('引导读者');
+      await owner.getByLabel('允许多岗').check();
+      await owner.getByLabel('允许多时段').check();
+      await button(owner,'添加题目').click();
+      await owner.getByLabel('第 1 题题目').fill('是否参加过培训');
+      await owner.getByLabel('第 1 题选项 1').fill('参加过');
+      await owner.getByLabel('第 1 题选项 2').fill('首次参加');
+      await button(owner,'添加题目').click();
+      await pickOption(owner,'第 2 题题型','填空题');
+      await owner.getByLabel('第 2 题题目').fill('可协助的工作');
+      await button(owner,'添加题目').click();
+      await pickOption(owner,'第 3 题题型','多选题');
+      await owner.getByLabel('第 3 题题目').fill('熟悉的区域');
+      await owner.getByLabel('第 3 题选项 1').fill('阅览室');
+      await owner.getByLabel('第 3 题选项 2').fill('服务台');
       await button(owner, '新增联系方式').click();
       await owner.getByLabel('联系方式 2', {exact:true}).fill('Library_old');
       await button(owner, '新增联系方式').click();
@@ -1836,11 +1980,11 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await visible(owner.getByAltText('入群二维码预览'));
       await owner.waitForFunction(() => document.querySelector('.group-qr')?.naturalWidth > 0);
       for (const [label, day] of [
-        ['活动开始日期', '2027-05-01'],
-        ['活动结束日期', '2027-05-02'],
-        ['预计时长导入日期', '2027-05-06'],
-        ['报名开放日期', '2027-04-30'],
-        ['报名截止日期', '2027-05-01'],
+        ['活动开始日期', date(2)],
+        ['活动结束日期', date(3)],
+        ['预计时长导入日期', date(5)],
+        ['报名开放日期', date(-1)],
+        ['报名截止日期', date(2)],
       ])
         await chooseDate(owner, label, day);
       assert.equal(await owner.locator('.field.invalid').count(), 0);
@@ -1880,14 +2024,18 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await visible(owner.getByText('草稿已保存', { exact: true }));
       await owner.reload();
       assert.equal(await owner.getByLabel('联系方式 3',{exact:true}).inputValue(),'13900000000');
-      assert.match(await button(owner,'预计时长导入日期').innerText(),/2027-05-06/);
+      assert.ok((await button(owner,'预计时长导入日期').innerText()).includes(date(5)));
       assert.equal(await time.inputValue(), chosen);
       await owner.waitForFunction(() => document.querySelector('.group-qr')?.naturalWidth > 0);
+      assert.equal(await owner.getByLabel('第 2 项岗位').inputValue(),'引导读者');
+      assert.equal(await owner.getByLabel('第 3 题选项 2').inputValue(),'服务台');
       await button(owner, '提交审核').click();
       await visible(owner.getByText('已送审，内容已冻结', { exact: true }));
       const activityId = new URL(editUrl).pathname.split('/')[2];
       const review = await db.activityReview.findFirstOrThrow({where:{activity_id:activityId,status:'pending'}});
       await teacher.goto(admin + '/reviews/' + review.id);
+      await visible(teacher.getByRole('heading',{name:'报名人数汇总'}));
+      await visible(teacher.getByText(/是否参加过培训[\s\S]*首次参加/).last());
       await button(teacher,'批准发布').click();
       await visible(teacher.getByText('已批准发布',{exact:true}));
       await student.goto(web + '/activities/' + activityId);
@@ -1895,12 +2043,12 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       await visible(detail.getByRole('heading', {name:'服务时长'}));
       assert.equal(await detail.getByText(/结果公布|录取说明|报名说明/).count(), 0);
       const opens = detail.locator('dt').filter({hasText:'报名开放'});
-      assert.match(await opens.locator('+ dd').innerText(), /2027.04.30/);
+      assert.ok((await opens.locator('+ dd').innerText()).replaceAll('/','-').includes(date(-1)));
       assert.equal(await opens.locator('+ dd + dt').innerText(), '报名截止');
       const importDate = detail.getByText('预计时长导入日期', {exact:true});
       for (const width of [390, 1440]) {
         await student.setViewportSize({width, height:900});
-        assert.equal(await importDate.locator('+ dd').innerText(), '2027-05-06');
+        assert.equal(await importDate.locator('+ dd').innerText(), date(5));
         for (const field of [importDate, importDate.locator('+ dd time')]) {
           assert.equal(await field.evaluate(el => {
             const range = document.createRange();
@@ -1916,7 +2064,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         await visible(contactDialog.getByText(text,{exact:true}));
       await button(contactDialog,'关闭').click();
       for (const unit of ['week', 'month']) {
-        await owner.goto(web + '/managed-schedule?date=2027-05-01&view=chart&unit=' + unit);
+        await owner.goto(web + '/managed-schedule?date=' + date(2) + '&view=chart&unit=' + unit);
         const row = owner.locator('.chart tbody tr').filter({ hasText: '跨校区图书整理' });
         await visible(row);
         assert.equal(
@@ -1926,6 +2074,72 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         await row.getByRole('button').first().click();
         await visible(owner.getByRole('complementary', { name: '日程详情' }));
       }
+      const signup = student.locator('form.signup');
+      await signup.getByRole('checkbox',{name:/图书整理/}).check();
+      await signup.getByRole('checkbox',{name:/引导读者/}).check();
+      await signup.getByRole('radio',{name:'首次参加'}).check();
+      await signup.getByRole('textbox',{name:'可协助的工作'}).fill('核对书号');
+      await signup.getByRole('checkbox',{name:'阅览室'}).check();
+      await button(student,'申请报名').click();
+      await visible(student.getByText('已提交 2 项报名',{exact:true}));
+      await owner.setViewportSize({width:1440,height:900});
+      await owner.goto(web + '/managed/' + activityId + '/roster');
+      await owner.locator('tbody tr').filter({hasText:'引导读者'}).getByRole('button',{name:/查看/}).click();
+      await button(owner,'设为候补此人').click();
+      await visible(owner.getByText('已将体验学生设为候补',{exact:true}));
+      await link(owner.getByRole('navigation',{name:'活动工作区'}),'编辑与送审').click();
+      const parallel = await owner.context().newPage();
+      try {
+        await parallel.goto(editUrl);
+        await owner.getByLabel('第 1 题题目').fill('是否完成岗前培训');
+        const firstPool = parallel.getByRole('group',{name:'报名项 1',exact:true});
+        await firstPool.getByLabel('录取人数').fill('10');
+        await button(parallel,'保存草稿').click();
+        await visible(parallel.getByText('草稿已保存',{exact:true}));
+        await owner.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await visible(button(owner, '刷新版本并复核'));
+        const rebase = await holdResponse(owner, url => url.pathname === '/api/v1/organizer/activities/' + editUrl.split('/').at(-2));
+        await button(owner,'刷新版本并复核').click();
+        try {
+          await rebase.received;
+          await visible(owner.locator('#activity-form[aria-busy="true"]'));
+          assert.ok(await owner.getByLabel('第 1 题题目').isDisabled());
+        } finally { await rebase.release(); }
+        await visible(owner.locator('#activity-form[aria-busy="false"]'));
+        assert.equal(await owner.getByLabel('第 1 题题目').inputValue(),'是否完成岗前培训');
+        assert.equal(await owner.getByRole('group',{name:'报名项 1',exact:true}).getByLabel('录取人数').inputValue(),'10');
+        await button(owner,'保存草稿').click();
+        await visible(owner.getByText('草稿已保存',{exact:true}));
+
+        await parallel.reload();
+        await parallel.getByLabel('第 1 题题目').fill('已参加培训的时间');
+        await owner.getByLabel('第 1 题题目').fill('本地培训确认');
+        await button(parallel,'保存草稿').click();
+        await visible(parallel.getByText('草稿已保存',{exact:true}));
+        await owner.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await button(owner,'刷新版本并复核').click();
+        const conflict = owner.getByRole('region',{name:'报名问卷版本冲突'});
+        await visible(conflict);
+        assert.equal(await button(owner,'保存草稿').isDisabled(),true);
+        await conflict.getByText('对照本地与最新内容').click();
+        assert.match(await conflict.innerText(),/已参加培训的时间/);
+        assert.match(await conflict.innerText(),/本地培训确认/);
+        await button(conflict,'采用最新内容').click();
+        assert.equal(await owner.getByLabel('第 1 题题目').inputValue(),'已参加培训的时间');
+      } finally { await parallel.close(); }
+      await owner.getByLabel('相关说明',{exact:true}).fill('核对服务台领取资料');
+      await button(owner,'保存草稿').click();
+      await visible(owner.getByText('草稿已保存',{exact:true}));
+      await button(owner,'提交审核').click();
+      await visible(owner.getByText('已送审，内容已冻结',{exact:true}));
+      const amendment = await db.activityReview.findFirstOrThrow({where:{activity_id:activityId,status:'pending'}});
+      await teacher.goto(admin + '/reviews/' + amendment.id);
+      await visible(teacher.locator('.diff').getByText('核对服务台领取资料',{exact:true}));
+      const overview = teacher.getByRole('region',{name:'报名人数汇总'});
+      const pending = overview.getByRole('row').filter({hasText:'图书整理'});
+      const waitlisted = overview.getByRole('row').filter({hasText:'引导读者'});
+      assert.deepEqual(await pending.locator('td').allTextContents(),['1','0 / 9','0 / 6']);
+      assert.deepEqual(await waitlisted.locator('td').allTextContents(),['0','0 / 9','1 / 6']);
     });
 
     await t.test('负责人跨页批量登记现场异常并可按日期查回和撤销', async () => {

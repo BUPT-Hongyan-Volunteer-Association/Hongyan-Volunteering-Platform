@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { listMyRegistrations, type Registration } from '@hongyan/contracts';
 import RecordSummaryList from '@hongyan/ui/RecordSummaryList.vue';
+import RegistrationAnswers from './RegistrationAnswers.vue';
 import RequestQueue from './RequestQueue.vue';
 import { pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
@@ -31,8 +32,19 @@ const { data: result, error, loading: refreshing, refresh } = usePageRead(
   },
 );
 const load = () => refresh(false);
+// Retain the last authorized list across list/detail navigation. A detail preview must match the URL.
+const lastList = shallowRef<typeof result.value>();
+watch(result, value => { if (value && !item.value) lastList.value = value; }, { flush: 'sync' });
+watch(error, value => { if (value) lastList.value = undefined; }, { flush: 'sync' });
+const displayed = computed(() => {
+  if (result.value) return result.value.items;
+  if (!lastList.value) return;
+  if (!item.value) return lastList.value.items;
+  const row = lastList.value.items.find(r => r.id === item.value);
+  return row ? [row] : undefined;
+});
 const rows = computed(() =>
-  (result.value?.items || []).map((row) => ({
+  (displayed.value ?? []).map((row) => ({
     id: row.id,
     activityId: row.activity_id,
     title: row.activity_title || '活动报名',
@@ -42,7 +54,7 @@ const rows = computed(() =>
     summary: [
       row.pending_exit_request_id && '退出申请待处理',
       row.pending_restoration_request_id && '恢复申请待处理',
-      row.statement && '申请说明 · ' + row.statement,
+      row.item_label,
       row.decision_reason && '处理说明 · ' + row.decision_reason,
     ]
       .filter(Boolean)
@@ -77,9 +89,9 @@ onUnmounted(() => {
     </header>
     <p v-if="feedback" role="status">{{ feedback }}</p>
     <p v-if="error" role="alert">{{ error }} <button @click="load">重新读取</button></p>
-    <p v-else-if="!result" role="status">正在读取报名记录…</p>
+    <p v-else-if="!displayed || (!result && !displayed.length)" role="status">正在读取报名记录…</p>
     <template v-else>
-      <RecordSummaryList v-if="rows.length" :records="rows">
+      <RecordSummaryList v-if="rows.length" :records="rows" :aria-busy="refreshing" :inert="!result">
         <template #action="{ row }">
           <RouterLink class="button primary compact" v-if="!item" :to="{ path: '/registrations/' + row.id, query: route.query }">办理与进度</RouterLink>
           <RouterLink class="button compact"
@@ -92,13 +104,14 @@ onUnmounted(() => {
         </template>
       </RecordSummaryList>
       <p v-else>{{ item ? '未找到该报名记录' : '暂无符合条件的报名记录' }}</p>
-      <RequestQueue v-if="item && result.items[0]" :registration="result.items[0]" :writes-paused="refreshing"
+      <RegistrationAnswers v-if="item && displayed[0]" :registration="displayed[0]" />
+      <RequestQueue :key="item" v-if="item && result?.items[0]" :registration="result.items[0]" :writes-paused="refreshing"
         @changed="msg => { feedback = msg; load(); }" />
       <Pager
-        v-if="!item"
+        v-if="!item && lastList"
         :page="page"
-        :size="result.page_size"
-        :total="result.total"
+        :size="lastList.page_size"
+        :total="lastList.total"
         @change="(n) => router.push({ query: { ...route.query, page: n } })"
       />
     </template>

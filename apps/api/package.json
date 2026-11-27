@@ -18,7 +18,7 @@
     "test:students": "tsc && node --env-file=.env --test test/student-import.test.mjs",
     "test:exports": "tsc && node --env-file=.env --test test/exports-and-audit.test.mjs",
     "db:seed": "node --env-file=.env scripts/seed.mjs",
-    "test:pages": "node --env-file-if-exists=.env --test --test-concurrency=1 test/accounts-pages.test.mjs test/import-pages.test.mjs test/pages.test.mjs test/timeline-pages.test.mjs",
+    "test:pages": "node --env-file-if-exists=.env --test --test-concurrency=1 test/accounts-pages.test.mjs test/import-pages.test.mjs test/pages.test.mjs test/recruitment-form-pages.test.mjs test/timeline-pages.test.mjs",
     "test:offline": "node --test test/demo-accounts.test.mjs test/hour-workbook.test.mjs test/hour-preview.test.mjs",
     "test:database": "node --env-file-if-exists=.env --test --test-concurrency=2 test/demo-data.test.mjs test/account-lifecycle.test.mjs test/account-teams.test.mjs test/activity-flow.test.mjs test/attendance-flow.test.mjs test/recruitment.test.mjs test/student-import.test.mjs test/notice-flow.test.mjs test/hour-ledger.test.mjs test/exports-and-audit.test.mjs test/timeline.test.mjs"
   },
@@ -34,6 +34,7 @@
     "cookie": "1.1.1",
     "dotenv": "17.2.3",
     "fflate": "0.8.3",
+    "pg": "8.23.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "saxes": "6.0.0",
@@ -42,6 +43,7 @@
   },
   "devDependencies": {
     "@types/express": "5.0.6",
+    "@types/pg": "8.23.1",
     "@types/yauzl": "3.4.0",
     "prisma": "7.10.1"
   }

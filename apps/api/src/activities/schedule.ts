@@ -98,5 +98,4 @@ export function validateSchedule(schedule: ActivitySchedule) {
   segments.sort((a, b) => a.start - b.start);
   for (let i = 1; i < segments.length; i++)
     if (segments[i].start < segments[i - 1].end) invalid(segments[i].field, '服务时段不能重叠');
-  return segments[0].start;
 }

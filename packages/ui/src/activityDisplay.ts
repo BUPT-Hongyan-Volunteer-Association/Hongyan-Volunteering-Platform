@@ -14,6 +14,16 @@ export const phaseLabels = {
   closed: '已截止',
   unavailable: '不适用',
 };
+export function activityPrimaryStatus(activity: {
+  status: keyof typeof statusLabels;
+  is_ongoing?: boolean;
+  registration_phase?: keyof typeof phaseLabels;
+}) {
+  if (activity.status !== 'published') return statusLabels[activity.status];
+  if (activity.is_ongoing) return '进行中';
+  return activity.registration_phase ? phaseLabels[activity.registration_phase] : statusLabels.published;
+}
+
 export const phaseOptions = [
   { value: '', label: '所有阶段' },
   ...Object.entries(phaseLabels).map(([value, label]) => ({ value, label })),

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { activeRegistrationStatuses } from '@hongyan/contracts/activity';
-import { listActivityRegistrations, type Registration } from '@hongyan/contracts';
+import { listActivityParticipants } from '@hongyan/contracts';
 import { usePageRead } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
 
@@ -13,14 +12,14 @@ const search = ref('');
 const query = ref({ q: '', page: 1 });
 const selectionNotice = ref('');
 const { data: result, error, refresh } = usePageRead(query, async (signal) =>
-  (await listActivityRegistrations({
+  (await listActivityParticipants({
     path: { id: props.activityId },
-    query: { scope: 'managed', page: query.value.page, page_size: 8, q: query.value.q || undefined },
+    query: { page: query.value.page, page_size: 8, q: query.value.q || undefined },
     signal, cache: 'no-store', throwOnError: true,
   })).data.data, () => emit('denied'));
 defineExpose({ refresh });
 const items = computed(() => result.value?.items ?? []);
-const canSelect = (row: Registration) => !props.forNotice || activeRegistrationStatuses.includes(row.status);
+const canSelect = (row: { has_active_registration: boolean }) => !props.forNotice || row.has_active_registration;
 const eligible = computed(() => items.value.filter(canSelect));
 const allSelected = computed(() => eligible.value.length > 0 && eligible.value.every((r) => selected.value.has(r.student_id)));
 

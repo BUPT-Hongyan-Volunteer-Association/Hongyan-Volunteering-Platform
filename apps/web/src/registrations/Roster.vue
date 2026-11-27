@@ -3,9 +3,11 @@
 let selectionClearedOnLeave = false;
 </script>
 <script setup lang="ts">
+import RegistrationAnswers from './RegistrationAnswers.vue';
+import AnswerFilters from './AnswerFilters.vue';
 import StatusFilter from '@hongyan/ui/StatusFilter.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
-import { computed, nextTick, onUnmounted, ref, shallowReactive, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, shallowReactive, shallowRef, watch } from 'vue';
 import { onBeforeRouteLeave, useRoute } from 'vue-router';
 import {
   ApiError,
@@ -44,11 +46,22 @@ const time = new Intl.DateTimeFormat('zh-CN', {
 const filters = ['submitted', 'accepted', 'waitlisted', ''] as const;
 const lessCommon = ['rejected', 'withdrawn', 'exited'] as const;
 const labels = { ...registrationLabels, submitted: '待处理', waitlisted: '候补' };
-const result = ref<ActivityRosterPage>();
+const result = shallowRef<ActivityRosterPage>();
 const { selected, pageChecked, pageIndeterminate, togglePage } = useIdSelection(
   () => (result.value?.items ?? []).map((row) => row.id),
 );
+const itemId = ref(''), answerFilters = ref('');
+const pools = computed(() => result.value?.item_availability ?? []);
+const poolsById = computed(() => new Map(pools.value.map(pool => [pool.item_id, pool])));
+const hasItems = computed(() => pools.value.some(pool => pool.item_id));
+const chosenPool = computed(() => poolsById.value.get(itemId.value));
+const queryFilters = computed(() => ({
+  item_id: itemId.value || undefined,
+  answer_filters: answerFilters.value || undefined,
+}));
 const readError = ref('');
+const changingPage = ref(false);
+const rowsUnavailable = computed(() => changingPage.value || !!readError.value);
 const writeError = ref('');
 const saving = ref(false);
 const refreshRequired = ref(false);
@@ -56,6 +69,7 @@ const command = createCommand();
 const filterExportInput = computed(() => ({
   type: 'activity_roster' as const,
   activity_id: String(route.params.id),
+  ...queryFilters.value,
   ...(q.value.trim() && { q: q.value.trim() }),
   ...(state.value && { registration_status: state.value }),
 }));
@@ -86,17 +100,18 @@ async function closeDetail() {
 let serial = 0;
 let filterVersion = 0;
 let mounted = true;
-async function load() {
+async function load(background = false) {
   const turn = ++serial;
   const reviewing = refreshRequired.value;
+  if (!background || readError.value) changingPage.value = true;
+  if (!background) inspected.value = undefined;
   readError.value = '';
-  result.value = undefined;
-  inspected.value = undefined;
   try {
     const { data } = await listActivityRegistrations({
       path: { id: String(route.params.id) },
       query: {
         scope: 'managed',
+        ...queryFilters.value,
         q: q.value.trim() || undefined,
         status: state.value || undefined,
         page: page.value,
@@ -111,11 +126,14 @@ async function load() {
       return;
     }
     result.value = data.data;
-    if (reviewing) refreshRequired.value = false;
+    if (background && inspected.value) inspected.value = data.data.items.find(row => row.id === inspected.value?.id);
+    if (reviewing && changingPage.value) refreshRequired.value = false;
   } catch (e) {
     if (turn !== serial) return;
     readError.value = e instanceof Error ? e.message : '名单读取失败';
     if (noAccess(e)) discardRoster();
+  } finally {
+    if (turn === serial) changingPage.value = false;
   }
 }
 const snapshots = shallowReactive(new Map<string, Registration>());
@@ -125,6 +143,7 @@ function discardRoster() {
   serial++;
   filterVersion++;
   result.value = undefined;
+  changingPage.value = false;
   inspected.value = undefined;
   selected.value.clear();
   conflicts.value = [];
@@ -132,7 +151,7 @@ function discardRoster() {
   writeError.value = '';
   emit('denied');
 }
-watch(inspected, () => { singleReason.value = ''; }, { flush: 'sync' });
+watch(() => inspected.value?.id, () => { singleReason.value = ''; }, { flush: 'sync' });
 watch(() => [...selected.value], ids => {
   if (!ids.length || ids.some(id => !snapshots.has(id))) batchReason.value = '';
   for (const id of snapshots.keys()) if (!selected.value.has(id)) snapshots.delete(id);
@@ -141,11 +160,23 @@ watch(() => [...selected.value], ids => {
 }, { flush: 'sync' });
 type Decision = RegistrationDecision['decision'];
 const actions = { accepted: '录取', waitlisted: '设为候补', rejected: '不录取' } as const;
-const paused = computed(() => saving.value || refreshRequired.value || props.writesPaused || !result.value?.can_decide);
+const paused = computed(() => rowsUnavailable.value || saving.value || refreshRequired.value || props.writesPaused || !result.value?.can_decide);
 function allowed(decision: Decision, rows: Registration[]) {
-  return !!result.value && rows.length > 0 && rows.length <= 100 &&
-    rows.every(r => canChangeRegistration(r.status, decision)) &&
-    (decision !== 'accepted' || rows.length <= result.value.capacity - result.value.accepted_count);
+  if (!result.value || !rows.length || rows.length > 100 || rows.some(r => !canChangeRegistration(r.status, decision))) return false;
+  if (decision === 'rejected') return true;
+  const counts = new Map<string | undefined, { seats: number; newActive: number }>();
+  for (const row of rows) {
+    const count = counts.get(row.item_id) ?? { seats:0, newActive:0 };
+    count.seats++;
+    if (row.status === 'rejected') count.newActive++;
+    counts.set(row.item_id, count);
+  }
+  return [...counts].every(([id, count]) => {
+    const pool = poolsById.value.get(id);
+    if (!pool) return false;
+    const seats = decision === 'accepted' ? pool.capacity - pool.accepted_count : pool.waitlist_capacity - pool.waitlisted_count;
+    return seats >= count.seats && pool.remaining >= count.newActive;
+  });
 }
 const batch = computed(() => [...snapshots.values()]);
 const batchActions = computed(() => result.value?.can_decide
@@ -227,8 +258,15 @@ function clear() {
   selected.value.clear();
   page.value = 1;
 }
-watch([q, state, () => route.params.id], clear, { flush: 'sync' });
-watch([() => route.params.id, q, state, page], load, { immediate: true });
+watch([q, state, itemId, answerFilters, () => route.params.id], clear, { flush: 'sync' });
+watch([() => route.params.id, q, state, itemId, answerFilters, page], () => load(), { immediate: true });
+watch(() => route.params.id, (id, _, cleanup) => {
+  const events = new EventSource('/api/v1/organizer/activities/' + encodeURIComponent(String(id)) + '/registration-events?scope=managed');
+  const sync = () => { if (!saving.value) void load(true); };
+  events.onmessage = sync;
+  events.onerror = sync;
+  cleanup(() => events.close());
+}, {immediate:true});
 onBeforeRouteLeave(() => { selectionClearedOnLeave = selected.value.size > 0; });
 onUnmounted(() => {
   mounted = false;
@@ -242,11 +280,8 @@ onUnmounted(() => {
     </div>
     <p v-if="result" class="capacity">
       <UiIcon name="User" /> 已占
-      <strong>{{ result.accepted_count }} / {{ result.capacity }}</strong> 人
+      <strong>{{ chosenPool?.accepted_count ?? result.accepted_count }} / {{ chosenPool?.capacity ?? result.capacity }}</strong> 人
     </p>
-  </div>
-  <div class="page-actions">
-    <RouterLink class="button" :to="{ path: '/managed/' + route.params.id + '/requests', query: { page: route.query.page } }">退出与恢复</RouterLink>
   </div>
   <div v-if="result" class="status-filters" aria-label="报名状态">
     <StatusFilter label="报名状态" :model-value="state" :options="filterOptions"
@@ -258,6 +293,10 @@ onUnmounted(() => {
       @update:model-value="state = $event as Registration['status']"
     />
   </div>
+  <label v-if="hasItems" class="item-filter">报名项目
+    <UiSelect label="报名项目" v-model="itemId" :options="[{ value:'', label:'全部岗位和时段' }, ...pools.map(p => ({value:p.item_id!,label:p.item_label}))]" />
+  </label>
+  <AnswerFilters :versions="result?.question_versions ?? []" @change="answerFilters = $event" />
   <div class="page-actions roster-tools">
     <label class="search-field"
       ><UiIcon name="Search" /><input
@@ -271,18 +310,18 @@ onUnmounted(() => {
         :options="[{ value: 'filter', label: '当前筛选全部' }, { value: 'selection', label: '所选人员' }]" />
     </label>
     <ExportButton :input="exportScope === 'selection' ? selectedExportInput : filterExportInput"
-      :disabled="saving || writesPaused || !result" create-label="导出名单" download-label="下载名单文件" @recheck="load" />
+      :disabled="rowsUnavailable || saving || writesPaused || !result" create-label="导出名单" download-label="下载名单文件" @recheck="load()" />
   </div>
   <div v-if="selected.size" class="page-actions roster-batch" aria-label="批量办理">
-    <span class="state-chip attention">已选 {{ selected.size }} 人</span>
+    <span class="state-chip attention">已选 {{ selected.size }} {{ hasItems ? '项' : '人' }}</span>
     <label v-if="batchActions.length">所选人员的处理说明（选填）<input v-model="batchReason" maxlength="1000" /></label>
     <button v-for="key in batchActions" :key="key" :disabled="paused || !allowed(key, batch)"
       @click="decide(key)">{{ key === 'waitlisted' ? '所选设为候补' : actions[key] + '所选' }}</button>
   </div>
   <p v-if="result && selected.size && selected.size <= 100">
     <template v-if="!result.can_decide">本活动的报名决定已关闭</template>
-    <template v-else-if="batch.every(r => canChangeRegistration(r.status, 'accepted')) && selected.size > result.capacity - result.accepted_count">
-      当前余量不足以录取全部所选人员<button @click="load">刷新余量</button>
+    <template v-else-if="batch.every(r => canChangeRegistration(r.status, 'accepted')) && !allowed('accepted', batch)">
+      当前余量不足以录取全部所选人员<button @click="load()">刷新余量</button>
     </template>
     <template v-else-if="!batchActions.length">所选状态无法统一办理，请调整选择或导出名单</template>
   </p>
@@ -307,10 +346,10 @@ onUnmounted(() => {
       <button v-if="selected.has(c.id)" @click="selected.delete(c.id)">移出选择</button>
     </li>
   </ul>
-  <p v-if="readError" role="alert">{{ readError }} <button @click="load">重新读取名单</button></p>
+  <p v-if="readError" role="alert">{{ readError }} <button @click="load()">重新读取名单</button></p>
   <p v-else-if="!result" role="status">正在读取名单…</p>
   <template v-if="result">
-    <div class="scroll-table data-grid">
+    <div class="scroll-table data-grid" :aria-busy="changingPage" :inert="rowsUnavailable">
       <table>
         <thead>
           <tr>
@@ -326,6 +365,7 @@ onUnmounted(() => {
             </th>
             <th>姓名</th>
             <th>学号</th>
+            <th v-if="hasItems">报名项目</th>
             <th>申请时间</th>
             <th>状态</th>
             <th>操作</th>
@@ -344,6 +384,7 @@ onUnmounted(() => {
             </td>
             <td>{{ r.student_name }}</td>
             <td>{{ r.student_no }}</td>
+            <td v-if="hasItems">{{ r.item_label }}</td>
             <td>{{ time.format(new Date(r.submitted_at)) }}</td>
             <td>
               <span class="icon-label"><UiIcon name="Document" />{{ labels[r.status] }}</span>
@@ -357,10 +398,10 @@ onUnmounted(() => {
         </tbody>
       </table>
     </div>
-    <p v-if="!result.total">暂无匹配的报名</p>
+    <p v-if="!result.total && !rowsUnavailable">暂无匹配的报名</p>
     <div class="roster-pager">
       <div>
-        <small>本页 {{ result.items.length }} 人，共 {{ result.total }} 人</small
+        <small v-if="hasItems">本页 {{ result.items.length }} 项，共 {{ result.total }} 人次、{{ result.unique_student_count }} 人</small><small v-else>本页 {{ result.items.length }} 人，共 {{ result.total }} 人</small
         ><small v-if="selected.size > 100">每批最多办理 100 人</small>
       </div>
       <Pager
@@ -388,15 +429,13 @@ onUnmounted(() => {
       <dd>{{ time.format(new Date(inspected.submitted_at)) }}</dd>
       <dt>状态</dt>
       <dd>{{ labels[inspected.status] }}</dd>
-      <template v-if="inspected.statement"
-        ><dt>申请说明</dt>
-        <dd>{{ inspected.statement }}</dd></template
-      >
+      <template v-if="inspected.item_label"><dt>报名项目</dt><dd>{{ inspected.item_label }}</dd></template>
       <template v-if="inspected.decision_reason"
         ><dt>处理说明</dt>
         <dd>{{ inspected.decision_reason }}</dd></template
       >
     </dl>
+    <RegistrationAnswers :registration="inspected" />
     <template v-if="['submitted', 'waitlisted', 'rejected'].includes(inspected.status)">
       <label class="single-note">给{{ inspected.student_name }}的处理说明（选填）<textarea v-model="singleReason" maxlength="1000" rows="2" /></label>
       <button v-for="(label,key) in actions" :key="key"
@@ -404,12 +443,14 @@ onUnmounted(() => {
         @click="decide(key, inspected)">{{ key === 'accepted' && inspected.status === 'waitlisted' ? '手动补录' : label + '此人' }}</button>
     </template>
     <small
-      v-if="result && result.accepted_count >= result.capacity && inspected.status !== 'accepted'"
+      v-if="inspected.status !== 'accepted' && pools.some(p => p.item_id === inspected?.item_id && p.accepted_count >= p.capacity)"
       >名额已满</small
     >
   </section>
 </template>
 <style scoped>
+.item-filter { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:12px; --select-width: min(30rem, 100%); }
+.record dd { white-space: pre-wrap; }
 .single-note { display: grid; gap: 6px; max-width: 36rem; margin-block: 12px; }
 .roster-heading {
   display: flex;
@@ -419,7 +460,7 @@ onUnmounted(() => {
   margin-bottom: 10px;
 }
 .roster-heading .capacity {
-  margin: 0 0 0 auto;
+  margin: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -474,6 +515,7 @@ onUnmounted(() => {
   gap: 4px 12px;
 }
 .status-filters {
+  align-items: flex-end;
   border-bottom: 1px solid var(--line);
 }
 

@@ -1,9 +1,43 @@
-import type { ActivitySchedule, DateRangeSchedule, Registration, RegistrationDecision } from './generated/types.gen.js';
+import type { Activity, ActivityInput, RegistrationItem, ActivitySchedule, DateRangeSchedule, Registration, RegistrationDecision } from './generated/types.gen.js';
+
+export function isUnpublishedDraft(activity: Pick<Activity, 'status' | 'published_revision'>) {
+  return activity.published_revision == null && activity.status === 'draft';
+}
 
 export const activeRegistrationStatuses: Registration['status'][] = ['submitted', 'waitlisted', 'accepted'];
 
 export function canChangeRegistration(status: string, decision: RegistrationDecision['decision']) {
   return ['submitted', 'waitlisted', 'rejected'].includes(status) && status !== decision;
+}
+
+export function sameRegistrationItem(before: RegistrationItem, after: RegistrationItem) {
+  const instant = (value?: string) => value ? Date.parse(value) : null;
+  return before.id === after.id && before.role === after.role
+    && instant(before.starts_at) === instant(after.starts_at) && instant(before.ends_at) === instant(after.ends_at);
+}
+
+type SelectionRules = Pick<ActivityInput, 'allow_multiple_roles' | 'allow_multiple_slots'>;
+
+// Check the selected batch on its own, or with one more candidate from the form.
+export function createSelectionCheck(config: SelectionRules, selected: readonly RegistrationItem[]) {
+  if (!config.allow_multiple_roles && !config.allow_multiple_slots)
+    return (extra?: RegistrationItem) => selected.length + (extra ? 1 : 0) > 1 ? '本活动限报一个报名项' : '';
+  if (config.allow_multiple_roles && config.allow_multiple_slots) return () => '';
+  const key = !config.allow_multiple_roles
+    ? (item: RegistrationItem) => item.role ? item.role.trim() : undefined
+    : (item: RegistrationItem) => item.starts_at && item.ends_at
+      ? Date.parse(item.starts_at) + '/' + Date.parse(item.ends_at) : undefined;
+  const selectedKeys = new Set(selected.map(key));
+  selectedKeys.delete(undefined);
+  const reason = !config.allow_multiple_roles ? '本活动限报一个岗位' : '本活动限报一个时段';
+  return (extra?: RegistrationItem) => {
+    const candidate = extra && key(extra);
+    return selectedKeys.size > 1 || (selectedKeys.size === 1 && candidate !== undefined && !selectedKeys.has(candidate)) ? reason : '';
+  };
+}
+
+export function selectionRestriction(config: SelectionRules, items: readonly RegistrationItem[]) {
+  return createSelectionCheck(config, items)();
 }
 
 export const campuses = ['沙河校区', '西土城校区', '沙河及西土城校区'];
@@ -24,6 +58,23 @@ export function matchesCampus(value: string | undefined, filter: string) {
 
 export const localDate = (value: string | number | Date) =>
   new Date(new Date(value).getTime() + 8 * 3600000).toISOString().slice(0, 10);
+
+function registrationSlotText(start: string, end: string) {
+  const beijing = (value: string) => new Date(Date.parse(value) + 8 * 3600000).toISOString();
+  const first = beijing(start), last = beijing(end);
+  const date = first.slice(0, 10);
+  if (first.endsWith('T00:00:00.000Z') && Date.parse(end) - Date.parse(start) === 86400000)
+    return date + ' 全天';
+  const from = date + ' ' + first.slice(11, 16);
+  return date === last.slice(0, 10)
+    ? from + '–' + last.slice(11, 16)
+    : from + ' 至 ' + last.slice(0, 16).replace('T', ' ');
+}
+
+export function registrationItemLabel(item: Pick<RegistrationItem, 'role' | 'starts_at' | 'ends_at'>) {
+  const slot = item.starts_at && item.ends_at && registrationSlotText(item.starts_at, item.ends_at);
+  return [item.role, slot].filter(Boolean).join(' · ');
+}
 
 type ServiceDates = Pick<DateRangeSchedule, 'duration_start_date' | 'duration_end_date'>;
 
@@ -48,4 +99,11 @@ export function serviceWindow(schedule?: ActivitySchedule | ServiceDates) {
   const { duration_start_date: first, duration_end_date: last } = serviceDates(schedule);
   if (!first || !last) return undefined;
   return { start: Date.parse(first + 'T00:00:00+08:00'), end: Date.parse(last + 'T00:00:00+08:00') + 86400000 };
+}
+
+/** 整项活动的办理边界，日期范围包括结束日全天。 */
+export function activityBounds(schedule?: ActivitySchedule) {
+  if (schedule?.schedule_type === 'continuous')
+    return { start: Date.parse(schedule.starts_at), end: Date.parse(schedule.ends_at) };
+  return serviceWindow(schedule);
 }

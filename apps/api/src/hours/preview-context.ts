@@ -25,7 +25,7 @@ export async function previewActivityHours(
     where: { student_no: { in: [...numbers] } },
     select: { id: true, student_no: true, account: { select: { display_name: true } },
       registrations: { where: { activity_id: activityId }, select: {
-        history: { orderBy: { version: 'asc' }, select: { submitted_at: true, changed_at: true, status: true } },
+        item_id: true, history: { orderBy: { version: 'asc' }, select: { submitted_at: true, changed_at: true, status: true } },
       } } },
   });
   const ids = new Map(students.map((student) => [student.student_no, student.id]));
@@ -35,6 +35,8 @@ export async function previewActivityHours(
     const service_date = serviceDate(input.service_date, book.date_system);
     if (student_id && service_date) keys.set(student_id + '/' + service_date, { student_id, service_date });
   }
+  const published = activity.revisions.find(r => r.revision === activity.published_revision)?.content as ActivityPublicationContent | undefined;
+  const items = new Map(published?.registration_items?.map(item => [item.id, item]));
   const days = [...keys.values()];
   const preview = previewHourRows(book, {
     activity_id: activityId, activity_code: activity.activity_code, published_revision: activity.published_revision,
@@ -42,7 +44,10 @@ export async function previewActivityHours(
       ({ revision, schedule: (content as unknown as ActivityPublicationContent).schedule })),
     students: students.map(({ id, student_no, account, registrations }) => ({
       id, student_no, name: account.display_name,
-      registration: registrations[0]?.history ?? [],
+      registrations: registrations.map(({ item_id, history }) => {
+        const item = items.get(item_id);
+        return { history, starts_at: item?.starts_at, ends_at: item?.ends_at };
+      }),
     })),
     history: await readHistory(tx, days),
     fact_reviews: await readFactReviews(tx, days),

@@ -1,4 +1,4 @@
-import { servicePeriods } from './schedule.js';
+import { activityBounds } from '@hongyan/contracts/activity';
 import type { Activity as View, ActivityInput } from '@hongyan/contracts/types';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { Actor } from '../auth/session.guard.js';
@@ -9,9 +9,9 @@ export const eligibleOrganizer = (now: Date): Prisma.AccountWhereInput => ({
   active: true, password_hash: { not: null }, roles: { some: { role: 'organizer', OR: [{ expires_at: null }, { expires_at: { gt: now } }] } },
 });
 export function teamManagerScope(actor: Actor): Prisma.ActivityWhereInput {
-  if (staff(actor)) return {};
+  if (staff(actor)) return { deleted_at: null };
   if (!actor.roles.includes('organizer')) denied();
-  return { members: { some: { account_id: actor.account_id, member_role: 'owner' } } };
+  return { deleted_at: null, members: { some: { account_id: actor.account_id, member_role: 'owner' } } };
 }
 export function managedScope(
   actor: Actor,
@@ -19,11 +19,11 @@ export function managedScope(
 ): Prisma.ActivityWhereInput {
   if (scope === 'all') {
     if (!staff(actor)) denied();
-    return {};
+    return { deleted_at: null };
   }
   if (scope !== 'managed') invalid('scope', '管理范围无效');
   if (!actor.roles.includes('organizer')) denied();
-  return { members: { some: { account_id: actor.account_id } } };
+  return { deleted_at: null, members: { some: { account_id: actor.account_id } } };
 }
 export function workspaceScope(actor: Actor, scope?: string) {
   return managedScope(actor, scope ?? (actor.roles.includes('organizer') ? 'managed' : undefined));
@@ -50,7 +50,7 @@ export type PageRow = {
   members: LoadedActivity['members'];
   revisions: LoadedActivity['revisions'];
   reviews: { id: string; status: string }[];
-  registrations?: { status: string }[];
+  registrations?: { status: string; item_id: string }[];
 };
 
 export function publishedRevision(row: Pick<PageRow, 'published_revision' | 'revisions'>) {
@@ -81,6 +81,7 @@ export function project(
   const input = rev.content as unknown as ActivityInput;
   const schedule = (published?.content as unknown as ActivityInput | undefined)?.schedule;
   const t = now.getTime();
+  const bounds = activityBounds(schedule);
   const item: View = {
     ...input,
     id: row.id,
@@ -101,7 +102,7 @@ export function project(
     revision_state: rev.revision_state as View['revision_state'],
     state_evaluated_at: now.toISOString(),
     is_ongoing:
-      row.status === 'published' && !servicePeriods(schedule, t, t + 1).next().done,
+      row.status === 'published' && !!bounds && bounds.start <= t && t < bounds.end,
     ...(management && {
       has_pending_review: row.reviews.some((r) => r.status === 'pending'),
       current_review_id: row.reviews.find((r) => r.status === 'pending')?.id,
@@ -109,8 +110,12 @@ export function project(
     ...(row.published_revision !== null && { published_revision: row.published_revision }),
   };
   if (!management) {
-    const own = row.registrations?.[0];
-    if (own) item.my_registration_status = own.status as View['my_registration_status'];
+    const own = row.registrations?.find(r => r.status === 'accepted') ?? row.registrations?.[0];
+    if (own && input.registration_mode !== 'batch') item.my_registration_status = own.status as View['my_registration_status'];
+    if (scope === 'public') {
+      delete item.questions;
+      delete item.registration_items;
+    }
     if (scope !== 'public-detail' || own?.status !== 'accepted') {
       delete item.group_join_instructions;
       delete item.group_qr_id;

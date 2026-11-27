@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import ActivityDateField from '@hongyan/ui/ActivityDateField.vue';
-import { formValues, buildPatch } from './activityForm';
+import RecruitmentEditor from './RecruitmentEditor.vue';
+import { formValues, buildPatch, recruitmentValues, recruitmentPatch, changedRecruitmentFields, rebaseRecruitment, copyRecruitmentField, type RecruitmentField } from './activityForm';
 import { campuses } from '@hongyan/contracts/activity';
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onScopeDispose } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   ApiError,
@@ -22,7 +23,7 @@ import {
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import { noAccess } from '@hongyan/ui/usePageRead';
 import ActivityHistory from './ActivityHistory.vue';
-import { fieldGroups, activityFields as fields } from '@hongyan/ui/activityFields';
+import { fieldGroups, fieldLabel, fieldValue, activityFields as fields } from '@hongyan/ui/activityFields';
 import {
   revisionLabels,
 } from '@hongyan/ui/activityDisplay';
@@ -55,7 +56,26 @@ async function changeContactRows(remove?: number) {
   const index = Math.min(remove ?? contactRows.value.length - 1, contactRows.value.length - 1);
   document.getElementById('activity-contact-' + index)?.focus();
 }
-const optionalOpen = ref<Record<string, boolean>>({});
+const recruitment = ref(recruitmentValues());
+const savedRecruitment = computed(() => recruitmentValues(detail.value?.working_snapshot.content));
+const recruitmentEdits = computed(() => changedRecruitmentFields(savedRecruitment.value, recruitment.value));
+const unresolved = ref<RecruitmentField[]>([]);
+const batchFields = ['registration_mode','allow_multiple_roles','allow_multiple_slots','registration_items'] as const;
+function conflictSummary(key: RecruitmentField, data: ReturnType<typeof recruitmentValues>) {
+  const config = recruitmentPatch(data);
+  return key === 'registration_mode'
+    ? batchFields.map(field => fieldLabel(field) + '　' + fieldValue(field,config[field])).join('\n')
+    : fieldValue(key,config[key]);
+}
+function resolveRecruitment(key: RecruitmentField, useLatest: boolean) {
+  if (useLatest) {
+    const latest = recruitmentValues(detail.value?.working_snapshot.content);
+    const keys = key === 'registration_mode' ? batchFields : [key];
+    for (const field of keys) copyRecruitmentField(recruitment.value, latest, field);
+  }
+  unresolved.value = unresolved.value.filter(field => field !== key);
+}
+const quotaField = (key: string) => key === 'capacity' || key === 'waitlist_capacity';
 const reason = ref(''),
   message = ref(''),
   confirmation = ref<{ id: string; text: string }>(),
@@ -90,6 +110,8 @@ const readonly = computed(
     !!pending.value ||
     ['cancelled', 'completed', 'archived'].includes(detail.value?.activity.status ?? ''),
 );
+const versionUnavailable = computed(() => loading.value || !!readError.value);
+const formDisabled = computed(() => readonly.value || busy.value || versionUnavailable.value);
 const restore = ref<ActivityRevision['content']>();
 const imageLoading = ref(false);
 let imageRequest = 0;
@@ -99,18 +121,9 @@ const options = [
 ];
 function requirement(key: string) {
   if (['group_join_instructions', 'group_qr_id'].includes(key)) return '至少一项';
-  if (['expected_hours', 'eligibility_text', 'safety_notes'].includes(key)) return '选填';
-  if (key === 'expected_hours_basis') return form.value.expected_hours ? '必填' : '选填';
+  if (['precautions', 'related_notes', 'safety_notes'].includes(key)) return '选填';
   return '';
 }
-function optionalField(key: string) {
-  return ['eligibility_text', 'safety_notes', 'expected_hours', 'expected_hours_basis'].includes(key);
-}
-watch(fieldErrors, errors => {
-  for (const group of fieldGroups) {
-    if (group.fields.some(([key]) => optionalField(key) && errors[key])) optionalOpen.value[group.title] = true;
-  }
-}, { flush: 'sync' });
 function selectImage(event: Event) {
   const input = event.target as HTMLInputElement,
     file = input.files?.[0];
@@ -139,11 +152,19 @@ function selectImage(event: Event) {
 function restoreVersion(item: ActivityRevision['content']) {
   restore.value = item;
   resetContacts(item);
+  recruitment.value = recruitmentValues(item);
   form.value = formValues(item);
 }
 let serial = 0;
+let mounted = true;
+onScopeDispose(() => {
+  mounted = false;
+  serial++;
+  imageRequest++;
+});
 async function load(preserve = false, snapshot?: ManagedActivityDetail) {
   const keepContacts = preserve && contactsChanged.value;
+  const previousRecruitment = savedRecruitment.value;
   const n = ++serial,
     local = Object.entries(form.value).filter(([k, v]) => v !== base.value[k]);
   loading.value = true;
@@ -162,11 +183,21 @@ async function load(preserve = false, snapshot?: ManagedActivityDetail) {
     if (!preserve) restore.value = undefined;
     if (data && !snapshot) emit('loaded', data);
     if (!keepContacts) resetContacts(data?.working_snapshot.content);
+    const latest = recruitmentValues(data?.working_snapshot.content);
+    if (preserve) {
+      const { merged, conflicts } = rebaseRecruitment(previousRecruitment, recruitment.value, latest);
+      recruitment.value = merged;
+      unresolved.value = [...new Set([...unresolved.value, ...conflicts])];
+    } else {
+      recruitment.value = latest;
+      unresolved.value = [];
+    }
     base.value = formValues(data?.working_snapshot.content);
     form.value = { ...base.value, ...(preserve ? Object.fromEntries(local) : {}) };
   } catch (e) {
     if (n === serial) {
-      detail.value = undefined;
+      if (preserve && detail.value && !noAccess(e)) conflict.value = true;
+      else detail.value = undefined;
       readError.value = e instanceof Error ? e.message : '读取失败';
       if (noAccess(e)) emit('denied');
     }
@@ -196,14 +227,22 @@ function report(e: unknown) {
   }
 }
 function payload(partial: boolean) {
-  return buildPatch(form.value, base.value, detail.value?.working_snapshot.content, restore.value,
+  const patch = buildPatch(form.value, base.value, detail.value?.working_snapshot.content, restore.value,
     contactsChanged.value ? contacts.value : undefined, partial);
+  const config = recruitmentPatch(recruitment.value);
+  if (!partial || recruitmentEdits.value.includes('registration_mode')) Object.assign(patch, config);
+  else for (const field of recruitmentEdits.value) patch[field] = config[field];
+  if (recruitment.value.registration_mode === 'batch') {
+    delete patch.capacity;
+    delete patch.waitlist_capacity;
+  }
+  return patch;
 }
 const command = createCommand();
 async function run(action: 'save' | 'submit' | 'withdraw') {
   if (
-    imageLoading.value ||
-    busy.value ||
+    unresolved.value.length || imageLoading.value ||
+    busy.value || versionUnavailable.value ||
     props.writesPaused ||
     (action === 'save' && id.value && !dirty.value)
   )
@@ -257,19 +296,20 @@ async function run(action: 'save' | 'submit' | 'withdraw') {
       }
     }
   } catch (e) {
-    if (id.value === target) {
+    if (mounted && id.value === target) {
       report(e);
       if (target && noAccess(e)) emit('denied');
       if (Object.keys(fieldErrors.value).length) {
         await nextTick();
         // The fieldset becomes interactive when the request finishes.
-        requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (!mounted || id.value !== target) return;
           document
             .querySelector<HTMLElement>(
               '.field-grid .invalid :is(input,textarea,button):not([disabled])',
             )
-            ?.focus(),
-        );
+            ?.focus();
+        });
       }
       if (e instanceof ApiError && !e.body) message.value = '写入结果尚未确认，可用相同内容重试';
     }
@@ -278,7 +318,7 @@ async function run(action: 'save' | 'submit' | 'withdraw') {
     busy.value = false;
   }
   command.confirmed();
-  if (id.value !== target) return;
+  if (!mounted || id.value !== target) return;
   confirmation.value = {
     id: nextId,
     text: { save: '草稿已保存', submit: '已送审，内容已冻结', withdraw: '已撤回' }[action],
@@ -297,6 +337,7 @@ watch(
     }
     imageRequest++;
     imageLoading.value = false;
+    detail.value = undefined;
     base.value = {};
     form.value = {};
     reason.value = '';
@@ -307,7 +348,7 @@ watch(
 const dirty = computed(
   () =>
     !!restore.value ||
-    contactsChanged.value ||
+    contactsChanged.value || recruitmentEdits.value.length > 0 ||
     fields.some(([k]) => form.value[k] !== base.value[k]),
 );
 watch([() => props.snapshot, busy, loading], ([snapshot]) => {
@@ -335,14 +376,14 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
   <div class="page-heading">
     <component :is="id ? 'h2' : 'h1'">{{ id ? '活动编辑与送审' : '新建活动' }}</component>
   </div>
-  <p v-if="loading" role="status">正在读取…</p>
+  <p v-if="loading && !detail" role="status">正在读取…</p>
   <p v-if="confirmation?.id === id" role="status" class="notice">{{ confirmation.text }}</p>
   <p v-if="readError" role="alert">最新版本读取失败：{{ readError }}</p>
   <p v-if="message" role="status" class="notice">{{ message }}</p>
-  <button v-if="conflict || (id && !detail && !loading)" @click="load(confirmation?.id !== id)">
+  <button v-if="conflict || (id && !detail && !loading)" @click="load(conflict)">
     <UiIcon name="Refresh" />刷新版本并复核
   </button>
-  <template v-if="!loading && (!id || detail)">
+  <template v-if="!id || detail">
     <div v-if="detail" class="version-strip">
       <p>
         <span class="state-chip">工作版本 {{ detail.working_snapshot.revision }}</span>
@@ -363,33 +404,51 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
           detail.current_review.revision !== detail.working_snapshot.revision &&
           !readonly
         "
-        :disabled="dirty || busy || writesPaused || conflict"
+        :disabled="dirty || busy || versionUnavailable || writesPaused || conflict"
         @click="restoreVersion(detail.current_review.snapshot.content)"
       >
         使用版本 {{ detail.current_review.revision }} 的内容重新编辑
       </button>
     </div>
     <p v-if="!readonly" class="editor-hint">填写标题即可保存草稿。送审时请补齐各组字段，选填项和二选一项已标注</p>
+    <section v-for="key in unresolved" :key="key" class="notice recruitment-conflict" :aria-label="fieldLabel(key) + '版本冲突'">
+      <strong>两人都修改了{{ fieldLabel(key) }}，请核对后选择</strong>
+      <details><summary>对照本地与最新内容</summary>
+        <dl><dt>本地修改</dt><dd>{{ conflictSummary(key, recruitment) }}</dd>
+          <dt>最新版本</dt><dd>{{ conflictSummary(key, savedRecruitment) }}</dd></dl>
+      </details>
+      <div class="page-actions">
+        <button :disabled="versionUnavailable" @click="resolveRecruitment(key, true)">采用最新内容</button>
+        <button :disabled="versionUnavailable" @click="resolveRecruitment(key, false)">保留本地修改</button>
+      </div>
+    </section>
     <ul v-if="Object.keys(fieldErrors).length" class="error-summary" aria-label="待修正字段">
-      <li v-for="[key, title] in fields.filter(([k]) => fieldErrors[k])" :key="key">
-        {{ title }} · {{ fieldErrors[key] }}
+      <li v-for="(error, key) in fieldErrors" :key="key">
+        {{ fieldLabel(key) }} · {{ error }}
       </li>
     </ul>
-    <form id="activity-form" class="activity-form" @submit.prevent="run('save')">
-      <fieldset class="form-section" v-for="group in fieldGroups" :key="group.title" :disabled="!!readonly || busy">
+    <form id="activity-form" class="activity-form" :aria-busy="loading" @submit.prevent="run('save')">
+      <fieldset class="form-section" v-for="group in fieldGroups" :key="group.title" :disabled="formDisabled">
         <legend>
           <UiIcon :name="group.icon" />{{ group.title }}
           <small v-if="group.icon === 'Calendar'">北京时间</small>
         </legend>
-        <button v-if="group.fields.some(([key]) => optionalField(key))" class="quiet optional-toggle" type="button"
-          :aria-expanded="!!optionalOpen[group.title]" @click="optionalOpen[group.title] = !optionalOpen[group.title]">
-          {{ optionalOpen[group.title] ? '收起选填项' : '展开选填项' }}
-        </button>
+        <RecruitmentEditor v-if="group.icon === 'User'" v-model="recruitment" :disabled="formDisabled">
+          <template #whole>
+            <div class="field-grid quota-fields">
+              <div v-for="[key,title] in group.fields.filter(([k]) => quotaField(k))" :key="key" class="field" :class="{invalid:fieldErrors[key]}">
+                <label :for="'activity-' + key">{{ title }}</label>
+                <input :id="'activity-' + key" v-model="form[key]" type="number" :min="key === 'capacity' ? 1 : 0"
+                  step="1" :aria-invalid="!!fieldErrors[key]">
+                <small v-if="fieldErrors[key]" role="alert">{{ fieldErrors[key] }}</small>
+              </div>
+            </div>
+          </template>
+        </RecruitmentEditor>
         <div class="field-grid">
           <div
-            v-for="[key, title, type] in group.fields"
+            v-for="[key, title, type] in group.fields.filter(([k]) => !quotaField(k))"
             :key="key"
-            v-show="!optionalField(key) || optionalOpen[group.title] || !!fieldErrors[key]"
             class="field"
             :class="{ wide: type === 'textarea' || type === 'contacts', invalid: fieldErrors[key] }"
           >
@@ -398,27 +457,19 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
               ><small v-if="requirement(key)" class="requirement">{{ requirement(key) }}</small></label
             >
             <UiSelect
-              v-if="type === 'campus' || type === 'select'"
+              v-if="type === 'campus'"
               :id="'activity-' + key"
               :label="title"
               v-model="form[key]"
-              :disabled="!!readonly || busy"
-              :options="
-                type === 'campus'
-                  ? options
-                  : [
-                      { value: '', label: '请选择口径' },
-                      { value: 'per_occurrence', label: '单次' },
-                      { value: 'whole_activity', label: '整期' },
-                    ]
-              "
+              :disabled="formDisabled"
+              :options="options"
             />
             <ActivityDateField
               v-else-if="type === 'date' || type === 'datetime-local'"
               :label="title"
               v-model="form[key]"
               :with-time="type === 'datetime-local'"
-              :disabled="!!readonly || busy"
+              :disabled="formDisabled"
             />
             <template v-else-if="type === 'contacts'">
               <div v-for="(_, index) in contactRows" :key="index" class="contact-row">
@@ -507,14 +558,6 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
             }}</small>
           </div>
         </div>
-        <p
-          v-if="
-            group.icon === 'User' && (restore || detail?.working_snapshot.content)?.selection_text
-          "
-          class="editor-hint"
-        >
-          原录取说明　{{ (restore || detail?.working_snapshot.content)?.selection_text }}
-        </p>
       </fieldset>
     </form>
     <div class="editor-actions">
@@ -525,7 +568,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
           form="activity-form"
           :class="{ primary: !detail || dirty }"
           :disabled="
-            !!readonly || imageLoading || busy || writesPaused || conflict || (!!id && !dirty)
+            formDisabled || imageLoading || writesPaused || conflict || unresolved.length > 0 || (!!id && !dirty)
           "
         >
           <UiIcon name="Document" />保存草稿
@@ -533,7 +576,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
         <button
           v-if="detail && !readonly && detail.working_snapshot.revision_state === 'draft'"
           class="primary"
-          :disabled="writesPaused || busy || dirty || conflict"
+          :disabled="writesPaused || busy || versionUnavailable || dirty || conflict || unresolved.length > 0"
           @click="run('submit')"
         >
           <UiIcon name="Position" />提交审核
@@ -543,13 +586,13 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
     <div v-if="pending" class="withdraw">
       <label>撤回原因 <input v-model="reason" /></label
       ><button
-        :disabled="writesPaused || busy || conflict || !reason.trim()"
+        :disabled="writesPaused || busy || versionUnavailable || conflict || !reason.trim()"
         @click="run('withdraw')"
       >
         撤回送审
       </button>
     </div>
-    <ActivityHistory v-if="detail" :id="detail.activity.id" :key="detail.activity.id" @denied="emit('denied')" />
+    <ActivityHistory v-if="detail" :id="detail.activity.id" :key="detail.activity.id + detail.activity.version" @denied="emit('denied')" />
   </template>
 </template>
 <style scoped>
@@ -567,7 +610,8 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
   justify-self: start;
 }
 
-.optional-toggle { justify-self: start; }
+.recruitment-conflict dd { white-space: pre-line; }
+.quota-fields { width: 100%; }
 .version-strip {
   display: flex;
   align-items: center;

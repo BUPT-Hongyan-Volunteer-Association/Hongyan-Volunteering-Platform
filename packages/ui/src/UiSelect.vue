@@ -10,6 +10,7 @@ const props = defineProps<{
   options: readonly Choice[];
   modelValue: T;
   disabled?: boolean;
+  wrapLabel?: boolean;
 }>();
 const emit = defineEmits<{ 'update:modelValue': [value: T]; open: [] }>();
 const choices = computed(() =>
@@ -21,6 +22,7 @@ const choices = computed(() =>
 <template>
   <ElSelect
     class="platform-select"
+    :class="{ 'platform-select--wrap': wrapLabel }"
     :aria-label="label"
     :disabled="disabled"
     :model-value="modelValue"
@@ -34,7 +36,7 @@ const choices = computed(() =>
     :show-arrow="false"
     :offset="4"
     :popper-options="dropdownPosition"
-    popper-class="platform-options"
+    :popper-class="wrapLabel ? 'platform-options platform-options--wrap' : 'platform-options'"
   />
 </template>
 <style>
@@ -85,5 +87,21 @@ const choices = computed(() =>
     height: 44px;
     line-height: 44px;
   }
+}
+.platform-select--wrap .el-select__placeholder {
+  position: static;
+  transform: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  z-index: auto;
+}
+.platform-options--wrap .el-select-dropdown__item {
+  height: auto;
+  min-height: var(--control-height);
+  padding-block: var(--space-8);
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 </style>

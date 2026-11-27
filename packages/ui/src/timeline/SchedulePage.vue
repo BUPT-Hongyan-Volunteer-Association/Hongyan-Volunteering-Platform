@@ -14,7 +14,7 @@ import UiIcon from '../UiIcon.vue';
 import {
   localDate,
   localDateTime,
-  phaseLabels,
+  activityPrimaryStatus,
   phaseOptions,
   statusLabels,
   timelineColors,
@@ -85,9 +85,10 @@ const query = computed<Query>(() => ({
 }));
 
 const pageSize = 20;
-const readPage = async (page: number) => {
+const readPage = async (page: number, signal: AbortSignal) => {
   const { data, response } = await getTimeline({
     query: { ...query.value, page, page_size: pageSize },
+    signal,
     throwOnError: true,
   });
   const rangeKey = response.headers.get('X-Timeline-Range');
@@ -268,7 +269,10 @@ watch(
 );
 watch(
   [() => JSON.stringify(query.value), () => props.scope, revision, locateOnEntry],
-  ([, scope, version], [, previousScope, previousVersion]) => {
+  ([key, scope, version, autoLocate], [previousKey, previousScope, previousVersion]) => {
+    // Opening or closing an item changes the URL, but not the dates or the data scope.
+    if (key === previousKey && scope === previousScope && version === previousVersion &&
+        !(autoLocate && lastPage.value?.suggested_date)) return;
     selectionMessage.value = '';
     if (previousScope && (scope !== previousScope || version !== previousVersion) && route.query.item)
       clearSelection();
@@ -467,7 +471,7 @@ onUnmounted(() => {
         </div>
       </div>
     </template>
-    <p v-if="loading && !pages.length" class="notice" role="status">正在读取活动日程…</p>
+    <p v-if="(loading || switching) && (!pages.length || (locateOnEntry && lastPage?.suggested_date))" class="notice" role="status">正在读取活动日程…</p>
     <p v-else-if="error && !pages.length" role="alert">
       {{ error }} <button @click="load('initial')">重新读取</button>
     </p>
@@ -526,8 +530,7 @@ onUnmounted(() => {
                 <i :style="{ background: timelineColors[r.color_index] }" />{{ r.title }}
               </button>
               <p class="meta-line">
-                {{ statusLabels[r.status] }} · {{ phaseLabels[r.registration_phase]
-                }}{{ r.is_ongoing ? ' · 进行中' : '' }}{{ r.has_pending_review ? ' · 待审核' : ''
+                {{ activityPrimaryStatus(r) }}{{ r.has_pending_review ? ' · 待审核' : ''
                 }}{{ r.has_planned_overlap ? ' · 与本人其他活动时间重叠' : '' }}
               </p>
               <p class="service-period"><UiIcon name="Calendar" />{{ serviceDateText(r) }}</p>
@@ -553,8 +556,8 @@ onUnmounted(() => {
           </div>
           <div class="selected-title">
             <h2 tabindex="-1" ref="detailHeading">{{ selected.title }}</h2>
-            <span class="state-chip">{{ phaseLabels[selected.registration_phase] }}</span>
-            <span v-if="!mobile || fullMobileDetail" class="state-chip neutral">{{
+            <span class="state-chip">{{ activityPrimaryStatus(selected) }}</span>
+            <span v-if="(!mobile || fullMobileDetail) && activityPrimaryStatus(selected) !== statusLabels[selected.status]" class="state-chip neutral">{{
               statusLabels[selected.status]
             }}</span>
           </div>
@@ -585,7 +588,9 @@ onUnmounted(() => {
               ><dt><UiIcon name="Timer" />报名截止</dt>
               <dd>{{ localDateTime(selected.registration_closes_at) }}</dd></template
             >
-            <template v-if="selected.is_ongoing"><dt>服务状态</dt><dd>进行中</dd></template>
+            <template v-if="selected.my_item_labels?.length"><dt>本人录取项</dt>
+              <dd><div v-for="label in selected.my_item_labels" :key="label">{{ label }}</div></dd>
+            </template>
             <template v-if="selected.has_planned_overlap"
               ><dt>计划提示</dt>
               <dd>与本人其他已录取活动的服务时间重叠</dd></template

@@ -24,7 +24,7 @@ watch(kind, () => { page.value = 1; reason.value = ''; error.value = ''; }, { fl
 const { data: queue, loading, error: readError, refresh: reload, clear } = usePageRead(
   () => [kind.value, page.value, props.registration],
   async signal => (await (exit.value ? listMyExitRequests : listMyRestorationRequests)({
-    query: { activity_id: props.registration.activity_id, page: page.value, page_size: 10 },
+    query: { activity_id: props.registration.activity_id, registration_id: props.registration.id, page: page.value, page_size: 10 },
     signal, throwOnError: true,
   })).data.data,
 );
@@ -78,7 +78,7 @@ async function act(action: 'create' | 'withdraw' | 'withdrawRegistration', row?:
       <form v-if="canApply" @submit.prevent="act('create')">
         <p>{{ exit ? '退出申请待处理时仍保留名额，批准后释放' : '恢复申请待处理时不占名额，批准后恢复原报名' }}</p>
         <label>申请原因<textarea v-model="reason" rows="3" required maxlength="2000" /></label>
-        <button class="primary" :disabled="paused || !reason.trim()">申请{{ exit ? '退出整项活动' : '恢复报名' }}</button>
+        <button class="primary" :disabled="paused || !reason.trim()">申请{{ exit ? (registration.item_id ? '退出该报名项' : '退出整项活动') : '恢复报名' }}</button>
       </form>
       <p v-if="!queue.items.length" class="empty">暂无符合条件的{{ requestKinds[kind] }}</p>
       <article v-for="row in queue.items" :key="row.id">

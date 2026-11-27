@@ -21,7 +21,7 @@ export const router = createRouter({
   routes: [
     { path: '/', component: PublicActivities, meta: {title: '活动发现', nav: '/',  profile: true } },
     { path: '/activities/:id', component: PublicActivities, meta: {title: '活动详情', nav: '/',  profile: true } },
-    { path: '/managed', component: () => import('./activities/ManagedActivities.vue'), meta: {title: '我的管理活动', nav: '/managed',  organizer: true } },
+    { path: '/managed', component: () => import('./activities/ManagedActivities.vue'), meta: {title: '我的管理活动', nav: '/managed',  organizer: true, profile: true } },
     { path: '/managed/new', component: loadActivityEditor, meta: {title: '新建活动', nav: '/managed/new',  organizer: true } },
     {
       path: '/managed/:id',
@@ -34,7 +34,7 @@ export const router = createRouter({
           name: 'organizer-section',
           component: () => import('./registrations/RequestWorkspace.vue'),
           props: route => ({ activityId: String(route.params.id), requestId: route.params.item || undefined }),
-          meta: { area: 'roster' },
+          meta: { area: 'requests' },
         },
         { path: 'edit', name: 'activity-edit', component: loadActivityEditor, meta: { area: 'edit' } },
         { path: 'notices/:item?', name: 'activity-notices', component: () => import('./notices/ActivityNotices.vue'), meta: { area: 'notices' } },

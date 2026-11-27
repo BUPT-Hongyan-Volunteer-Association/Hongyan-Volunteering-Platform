@@ -176,6 +176,48 @@ async function checkExports(t, db, app, { staffPassword, adminPassword, password
     misconduct_reported: 'none', misconduct_version: 0,
   }, ownerAccount.id);
 
+  await t.test('多岗按人选取，导出与名单使用相同的岗位和答卷筛选', async () => {
+    const activity = await ledgerActivity(db, ownerAccount.id, '双岗答卷');
+    const student = synthetic[0].student;
+    const question = { id: randomUUID(), type: 'text', title: '服务经验', required: true };
+    const first = randomUUID(), second = randomUUID();
+    const response = await db.questionnaireResponse.create({ data: {
+      activity_id: activity.id, student_id: student.id, questions: [question], questionnaire_version: 'test',
+      answers: { create: { position: 0, question_id: question.id, title: question.title, type: 'text',
+        text: '天文讲解', option_ids: [], labels: [] } },
+    } });
+    await db.registration.createMany({ data: [first, second].map((item_id, index) => ({
+      activity_id: activity.id, student_id: student.id, item_id, item_label: index ? '问询' : '讲解',
+      status: 'submitted', response_id: response.id,
+    })) });
+    const old = await db.questionnaireResponse.create({ data: {
+      activity_id: activity.id, student_id: student.id, questions: [question], questionnaire_version: 'old',
+      answers: { create: { position: 0, question_id: question.id, title: question.title, type: 'text',
+        text: '天文观测', option_ids: [], labels: [] } },
+    } });
+    const reapplied = await db.registration.findFirstOrThrow({ where: { activity_id: activity.id, item_id: second } });
+    await db.registrationHistory.create({ data: { registration_id: reapplied.id, version: 1,
+      response_id: old.id, status: 'submitted', submitted_at: new Date('2025-11-02T03:00:00Z') } });
+    const path = '/organizer/activities/' + activity.id;
+    const people = result(await owner.request(path + '/attendance/participants'), 200);
+    assert.equal(people.total, 1);
+    assert.equal(people.items[0].has_active_registration, true);
+    const filter = { item_id: second, answer_filters: JSON.stringify([{ question_id: question.id, answer_text: '天文' }]) };
+    const list = result(await owner.request(path + '/registrations?' + new URLSearchParams(filter)), 200);
+    assert.equal(list.total, 1);
+    assert.equal(list.items[0].item_id, second);
+    const job = await createExport(owner, { type: 'activity_roster', activity_id: activity.id, ...filter });
+    assert.equal((await waitExport(owner, job.id)).status, 'ready');
+    const file = await download(owner, job.id);
+    const [headers, row, ...others] = await sheetRows(file.body, '报名名单');
+    assert.equal(others.length, 0);
+    assert.equal(row[headers.indexOf('服务经验')], '天文讲解');
+    assert.equal(row[headers.indexOf('报名项')], '问询');
+    assert.equal(row[headers.indexOf('历史答卷 1 · 服务经验')], '天文观测');
+    const staff = await teacher.write('POST', '/exports', { type: 'activity_roster', activity_id: activity.id });
+    assert.equal(staff.status, 403);
+  });
+
   let rosterExportId;
   await t.test('跨页名单按筛选导出、逐行核对并限制发起人', async () => {
     const job = await createExport(owner, { type: 'activity_roster', activity_id: rosterActivity.id, registration_status: 'accepted' });

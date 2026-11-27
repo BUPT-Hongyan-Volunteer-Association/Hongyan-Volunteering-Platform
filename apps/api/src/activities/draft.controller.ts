@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -15,17 +16,20 @@ import type {
   ActivityDraftPatchWritable,
   ActivityInputWritable,
   ActivityInput,
+  ActivityPublicationContent,
   ReasonAction,
   VersionAction,
 } from '@hongyan/contracts/types';
 import type { SessionRequest } from '../auth/session.guard.js';
 import { Database, json } from '../database.js';
 import { envelope, invisible, checkVersion, wrongState, invalid } from '../http.js';
-import { managedScope, includeView, project, pagination, workingRevision } from './read.js';
+import { managedScope, includeView, project, pagination, publishedRevision, workingRevision } from './read.js';
+import { audit } from '../audit.js';
 import { Workflow } from '../workflow.js';
 import { reviewView, detail, snapshot } from './views.js';
 import { parseGroupImage } from './group-image.js';
 import { content } from './validation.js';
+import { checkRecruitmentRevision } from './recruitment.js';
 import { validate } from '../validation.js';
 
 @Controller('organizer')
@@ -119,6 +123,23 @@ export class DraftController {
       return project(row, 'working', new Date());
     });
   }
+  @Delete('activities/:id')
+  remove(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.workflow.run(req, { activityId: id }, 'deleteDraft', async (tx, loaded, actor) => {
+      const row = loaded!;
+      if (row.deleted_at) invisible();
+      checkVersion(row.version, validate<VersionAction>('version_action', body).expected_version);
+      if (row.status !== 'draft' || row.published_revision !== null || row.reviews.some(review => review.status === 'pending'))
+        wrongState();
+      const removed = await tx.activity.update({
+        where: { id }, data: { deleted_at: new Date(), version: { increment: 1 } },
+        select: { version: true, deleted_at: true },
+      });
+      await audit(tx, { actor_id: actor.account_id, action: 'delete_activity_draft', resource_type: 'activity',
+        resource_id: id, before: { activity_code: row.activity_code, version: row.version }, after: { version: removed.version, deleted_at: removed.deleted_at?.toISOString() } });
+      return { completed: true, resource_id: id, version: removed.version };
+    });
+  }
   @Patch('activities/:id') patch(
     @Req() req: SessionRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -207,7 +228,8 @@ export class DraftController {
         row.reviews.some((r) => r.status === 'pending')
       )
         wrongState();
-      content(old.content, true);
+      const proposed = content(old.content, true);
+      await checkRecruitmentRevision(tx, id, publishedRevision(row)?.content as unknown as ActivityPublicationContent | undefined, proposed);
       await tx.activityRevision.update({
         where: { activity_id_revision: { activity_id: id, revision } },
         data: { revision_state: 'pending_review' },

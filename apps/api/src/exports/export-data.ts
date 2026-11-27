@@ -1,8 +1,8 @@
-import type { ExportInput } from '@hongyan/contracts/types';
+import type { ExportInput, SurveyAnswer } from '@hongyan/contracts/types';
 import { type Actor, studentId } from '../auth/session.guard.js';
 import type { ExportJob } from '../generated/prisma/client.js';
-import { managedScope, staff, workspaceScope } from '../activities/read.js';
-import { rosterOrderBy, rosterWhere } from '../registrations/registration.js';
+import { managedScope, staff } from '../activities/read.js';
+import { includeResponse, registrationView, rosterOrderBy, rosterWhere } from '../registrations/registration.js';
 import { studentWhere } from '../students/query.js';
 import type { Tx } from '../database.js';
 import { denied, invalid, invisible } from '../http.js';
@@ -67,11 +67,12 @@ export async function resolveExportScope(tx: Tx, actor: Actor, input: ExportInpu
   if (input.type === 'activity_roster') {
     const activity_id = input.activity_id ?? invalid('activity_id', '请选择活动');
     const activity = await tx.activity.findFirst({
-      where: { id: activity_id, ...workspaceScope(actor) },
+      where: { id: activity_id, ...managedScope(actor, 'managed') },
       select: { id: true },
     });
     if (!activity) return invisible();
     const registration_ids = input.registration_ids;
+    rosterWhere({ activity_id, item_id: input.item_id, answer_filters: input.answer_filters });
     if (registration_ids) {
       const count = await tx.registration.count({
         where: { activity_id, id: { in: registration_ids } },
@@ -83,6 +84,8 @@ export async function resolveExportScope(tx: Tx, actor: Actor, input: ExportInpu
       type: input.type,
       activity_id,
       registration_status: input.registration_status,
+      item_id: input.item_id,
+      answer_filters: input.answer_filters,
       q: input.q?.trim() || undefined,
       registration_ids,
     });
@@ -164,7 +167,7 @@ export async function resolveExportScope(tx: Tx, actor: Actor, input: ExportInpu
 export async function authorizeStoredScope(tx: Tx, actor: Actor, scope: StoredScope) {
   if (scope.type === 'activity_roster') {
     if (!await tx.activity.findFirst({
-      where: { id: scope.activity_id!, ...workspaceScope(actor) }, select: { id: true },
+      where: { id: scope.activity_id!, ...managedScope(actor, 'managed') }, select: { id: true },
     })) invisible();
     return;
   }
@@ -210,22 +213,46 @@ async function rosterContent(tx: Tx, scope: StoredScope): Promise<ExportContent>
       activity_id,
       q: scope.q,
       status: scope.registration_status,
+      item_id: scope.item_id,
+      answer_filters: scope.answer_filters,
       registration_ids: scope.registration_ids,
     }),
-    include: { student: { select: { student_no: true, account: { select: { display_name: true } } } } },
+    include: { ...includeResponse, student: { select: { student_no: true, account: { select: { display_name: true } } } } },
     orderBy: rosterOrderBy,
   });
+  const columns = new Map<string, string>();
+  const values = rows.map(row => {
+    const applied = registrationView(row);
+    const cells = new Map<string, string>();
+    function addAnswers(answers: SurveyAnswer[], previous = 0) {
+      for (const answer of answers) {
+        const key = JSON.stringify([previous, answer.question_id, answer.type, answer.title]);
+        const title = previous ? `历史答卷 ${previous} · ${answer.title}` : answer.title;
+        columns.set(key, title);
+        cells.set(key, answer.text ?? answer.labels?.join('、') ?? '');
+      }
+    }
+    addAnswers(applied.answers ?? []);
+    for (const [index, version] of (applied.answer_history ?? []).entries()) {
+      const previous = index + 1;
+      const key = 'submitted_at_' + previous;
+      columns.set(key, `历史答卷 ${previous} · 提交时间`);
+      cells.set(key, dateTimeText(new Date(version.submitted_at)));
+      addAnswers(version.answers, previous);
+    }
+    return cells;
+  });
+  const keys = [...columns.keys()];
   return {
     fileName: '报名名单_' + fileNamePart(activity.activity_code) + '_' + workbookDate() + '.xlsx',
     sheet: {
       name: '报名名单',
-      headers: ['姓名', '学号', '申请时间', '当前报名状态'],
-      widths: [18, 18, 22, 20],
-      rows: rows.map((row) => [
-        row.student.account.display_name,
-        row.student.student_no,
-        dateTimeText(row.submitted_at),
-        registrationLabels[row.status] ?? row.status,
+      headers: ['姓名', '学号', '申请时间', '当前报名状态', '报名项', ...columns.values()],
+      widths: [18, 18, 22, 20, 32, ...keys.map(() => 28)],
+      rows: rows.map((row, index) => [
+        row.student.account.display_name, row.student.student_no, dateTimeText(row.submitted_at),
+        registrationLabels[row.status] ?? row.status, row.item_label ?? '整批报名',
+        ...keys.map(key => values[index].get(key) ?? ''),
       ]),
     },
   };

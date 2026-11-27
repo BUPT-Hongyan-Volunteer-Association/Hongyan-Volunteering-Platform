@@ -98,7 +98,7 @@ export async function presetRegistration(db, { activityCode, studentNo, status }
   const student = await db.student.findUniqueOrThrow({ where: { student_no: studentNo } });
   const activity = await db.activity.findUniqueOrThrow({ where: { activity_code: activityCode } });
   return db.registration.upsert({
-    where: { activity_id_student_id: { activity_id: activity.id, student_id: student.id } },
+    where: { activity_id_student_id_item_id: { activity_id: activity.id, student_id: student.id, item_id: '00000000-0000-0000-0000-000000000000' } },
     update: { status },
     create: { activity_id: activity.id, student_id: student.id, status },
   });

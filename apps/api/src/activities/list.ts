@@ -45,7 +45,7 @@ export async function activityViews(
   scope: Scope,
   q: Query,
   { studentId, showOwnerAvailability = false, range, outsideWindow }: ListOptions,
-  onView?: (view: View, matches: boolean) => void,
+  onView?: (view: View, matches: boolean, row: PageRow) => void,
 ) {
   const { page, page_size, skip } = pagination(q);
   const matches = contentFilter(q, range, outsideWindow);
@@ -85,7 +85,7 @@ export async function activityViews(
           select: { id: true, status: true },
         },
         registrations: studentId
-          ? { where: { student_id: studentId }, select: { status: true } }
+          ? { where: { student_id: studentId }, select: { status: true, item_id: true } }
           : false,
       },
     });
@@ -108,23 +108,16 @@ export async function activityViews(
     }
     for (const row of rows) {
       const data: PageRow = {
-        id: row.id,
-        activity_code: row.activity_code,
-        status: row.status,
-        version: row.version,
-        working_revision: row.working_revision,
-        published_revision: row.published_revision,
-        members: row.members,
+        ...row,
         revisions: byActivity.get(row.id) ?? [],
         reviews: row.reviews ?? [],
-        ...(row.registrations && { registrations: row.registrations }),
       };
       if (q.review_status && workingRevision(data)?.revision_state !== q.review_status)
         continue;
       const view = project(data, scope, now);
       if (!view) continue;
       const matched = matches(view);
-      onView?.(view, matched);
+      onView?.(view, matched, data);
       if (!matched) continue;
       if (derived) {
         total++;

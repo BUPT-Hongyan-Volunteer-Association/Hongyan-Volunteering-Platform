@@ -4,7 +4,7 @@ info:
   version: 1.2.5
   description: 鸿雁志愿服务平台现行接口契约。沿用/api/v1，本次校订后按本文件重新生成客户端。确认学生初始密码为学号后六位，首次登录强制改密。学号和班级均为十位数字，建档不含在校状态。时长以录入单为准，整数部分最多三位、最多一位小数。本轮聚焦平台搭建与功能实现，暂不考虑部署维护。业务字段、枚举及错误码使用snake_case，自动限制固定off。
     沿用：时长模板末列是否有违纪情况，时长与违规核实合并审批。规则未确定时正常审核时长，处罚固定未启用。按表头识别七列与兼容六列，不仅依赖文件名或版本号。
-  x-document-revision: 2026-11-24-r8
+  x-document-revision: 2026-11-27-r9
 servers:
 - url: /api/v1
   description: 同源相对路径，不指向已部署服务
@@ -331,8 +331,7 @@ paths:
         required: false
         schema:
           type: boolean
-          description: 省略不筛选，true只返回当前进行中，false只返回当前未进行。按服务端state_evaluated_at与获批安排的实际时段判断，按Asia/Shanghai解释。仅status=published且存在获批时段满足starts_at
-            <= now < ends_at时为true。周期活动间隔、草稿、未获批安排、cancelled、completed、archived均为false。即使当前显示working版本也按published版本判断，表示计划正在进行，不表示已经到场。进行中由完整获批安排判断。
+          description: 省略不筛选，true只返回当前进行中，false只返回当前未进行。按服务端时刻与获批活动总起止判断，开始时刻包含、结束时刻不包含。已发布活动在场次间隔仍为进行中。按北京时间解释日期。
       - name: scope
         in: query
         required: false
@@ -483,8 +482,7 @@ paths:
         required: false
         schema:
           type: boolean
-          description: 省略不筛选，true只返回当前进行中，false只返回当前未进行。按服务端state_evaluated_at与获批安排的实际时段判断，按Asia/Shanghai解释。仅status=published且存在获批时段满足starts_at
-            <= now < ends_at时为true。周期活动间隔、草稿、未获批安排、cancelled、completed、archived均为false。即使当前显示working版本也按published版本判断，表示计划正在进行，不表示已经到场。进行中由完整获批安排判断。
+          description: 省略不筛选，true只返回当前进行中，false只返回当前未进行。按服务端时刻与获批活动总起止判断，开始时刻包含、结束时刻不包含。已发布活动在场次间隔仍为进行中。按北京时间解释日期。
       - name: from
         in: query
         required: false
@@ -591,6 +589,28 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
   /organizer/activities/{id}:
+    delete:
+      operationId: delete_activity_draft
+      summary: 主负责人删除尚未发布的草稿
+      description: 按活动版本删除，保留审核与操作历史。待审核及已发布活动不能删除。
+      tags: [活动]
+      x-roles: [organizer]
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      - $ref: '#/components/parameters/csrf'
+      - $ref: '#/components/parameters/idempotency'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/version_action'}
+      responses:
+        '200': {$ref: '#/components/responses/ActionResultResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/ValidationError'}
     patch:
       operationId: update_activity_draft
       summary: 修改活动草稿版本
@@ -1229,8 +1249,7 @@ paths:
         required: false
         schema:
           type: boolean
-          description: 省略不筛选，true只返回当前进行中，false只返回当前未进行。按服务端state_evaluated_at与获批安排的实际时段判断，按Asia/Shanghai解释。仅status=published且存在获批时段满足starts_at
-            <= now < ends_at时为true。周期活动间隔、草稿、未获批安排、cancelled、completed、archived均为false。即使当前显示working版本也按published版本判断，表示计划正在进行，不表示已经到场。进行中由完整获批安排判断。
+          description: 省略不筛选，true只返回当前进行中，false只返回当前未进行。按服务端时刻与获批活动总起止判断，开始时刻包含、结束时刻不包含。已发布活动在场次间隔仍为进行中。按北京时间解释日期。
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -1333,8 +1352,8 @@ paths:
     post:
       operationId: apply_for_activity
       summary: 提交活动报名
-      description: 从会话取本人学生ID。要求学生启用、活动published，服务器判定registration_opens_at <= now < registration_closes_at。学生与活动唯一，重复请求返回原记录，withdrawn可在窗口内重提，rejected不可自助重提，exited使用恢复申请。off模式不使用异常次数限制资格。
-        withdrawn在窗口内重提时更新原registration_id、递增版本并保留历次提交及撤回时间。
+      description: 从会话取本人学生ID。要求学生启用、活动published，服务器判定registration_opens_at <= now < registration_closes_at。学生与活动报名项唯一，多项报名同事务提交，重复请求返回原记录，withdrawn可在窗口内重提，rejected不可自助重提，exited使用恢复申请。off模式不使用异常次数限制资格。
+        withdrawn在窗口内重提时更新原registration_id、递增版本并保留历次提交及撤回时间。分批报名附当前 published_revision，旧版本返回 409 后须核对最新项目再提交。同一学生在同一活动和问卷版本下补报时共用答卷。
       tags:
       - 报名
       x-requirement: FR02
@@ -1376,7 +1395,10 @@ paths:
                 type: object
                 properties:
                   data:
-                    $ref: '#/components/schemas/registration'
+                    type: object
+                    required: [items]
+                    properties:
+                      items: {type: array, items: {$ref: '#/components/schemas/registration'}}
                   request_id:
                     type: string
                     format: uuid
@@ -1390,8 +1412,7 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/registration_input'
-            example:
-              statement: 可按活动时间到场。
+            example: {}
   /me/registrations:
     get:
       operationId: list_my_registrations
@@ -1407,7 +1428,7 @@ paths:
       parameters:
       - name: id
         in: query
-        description: 从本人记录中定位一条报名详情。
+        description: 从本人记录中定位一条报名详情，含本次答卷及历史答卷。列表仅返回报名摘要。
         schema:
           type: string
           format: uuid
@@ -1501,11 +1522,70 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/version_action'
+  /organizer/activities/{id}/attendance/participants:
+    get:
+      operationId: list_activity_participants
+      summary: 按学生查询活动人员，用于现场异常和通知选人
+      tags: [名单]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: q
+        in: query
+        schema: {type: string}
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/page_size'
+      responses:
+        '200':
+          description: 学生去重后分页，每人一行
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, request_id]
+                properties:
+                  request_id: {type: string, format: uuid}
+                  data:
+                    type: object
+                    required: [items, total, page, page_size]
+                    properties:
+                      total: {type: integer}
+                      page: {type: integer}
+                      page_size: {type: integer}
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [student_id, student_no, student_name, has_active_registration]
+                          properties:
+                            student_id: {type: string, format: uuid}
+                            student_no: {type: string}
+                            student_name: {type: string}
+                            has_active_registration: {type: boolean}
+  /organizer/activities/{id}/registration-events:
+    get:
+      operationId: watch_activity_registrations
+      summary: 订阅活动报名名单变更
+      tags: [报名]
+      parameters:
+      - $ref: '#/components/parameters/workspace_scope'
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: 连接就绪发出 connected，名单变更发出 changed。事件仅提示重新读取，名单及答卷由名单接口按权限返回。
+          content:
+            text/event-stream:
+              schema: {type: string}
   /organizer/activities/{id}/registrations:
     get:
       operationId: list_activity_registrations
       summary: 查询活动报名名单
-      description: 当前活动成员和获授权后台可读。q按姓名或学号检索，status筛选及分页前计算status_counts。total是当前标签在全部页面的命中数。accepted_count和capacity始终取整项活动。按submitted_at、id稳定排序。
+      description: 当前活动成员和获授权后台可读。仅本人管理范围内的负责人可读取答卷并使用 answer_filters。后台全院范围只读名单和统计。q按姓名或学号检索，status筛选及分页前计算status_counts。total是当前标签在全部页面的命中数。选定报名项时按项统计余量。按submitted_at、id稳定排序。
       tags:
       - 报名
       x-requirement: FR02
@@ -1516,6 +1596,13 @@ paths:
       - reviewer
       - tech_admin
       parameters:
+      - name: item_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: answer_filters
+        in: query
+        description: JSON 条件数组。每项传 question_id 和 option_id 或 answer_text，可附 questionnaire_version。所有条件须由同一份当前或历史答卷满足。
+        schema: {type: string, maxLength: 32000}
       - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
@@ -1636,7 +1723,7 @@ paths:
     post:
       operationId: decide_registration
       summary: 人工录取候补或不录取
-      description: 与整批决定共用业务服务。仅submitted/waitlisted/rejected可决定，accepted不可降级。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段，校验学生启用、当前版本及名额，事务内写通知事件。候补不自动补位，异常次数在规则off时不影响决定。
+      description: 与整批决定共用业务服务。仅submitted/waitlisted/rejected可决定，accepted不可降级。活动须published，须在已批准的活动总结束前办理，校验学生启用、当前版本及名额，事务内写通知事件。候补不自动补位，异常次数在规则off时不影响决定。
         首次报名截止只关闭学生主动报名。结果通知投递前复核报名版本；已失效的待投递结果跳过，已送达的旧结果及回执可在历史中查看。
       tags:
       - 报名
@@ -1692,8 +1779,8 @@ paths:
   /me/exit-requests:
     post:
       operationId: create_exit_request
-      summary: 录取后申请退出整项活动
-      description: 本人accepted且活动published、尚有未开始时段时申请退出整项活动。日期活动在北京时间开始日零点关闭新退出申请。每个报名最多一个pending退出。pending保留录取及名额，批准后exited释放名额。单次请假在群内处理，本接口不提供整期请假类型。
+      summary: 录取后申请退出对应报名项
+      description: 本人accepted且活动published、尚可办理时申请退出该报名项。日期活动在北京时间开始日零点关闭新退出申请。每个报名最多一个pending退出。pending保留录取及名额，批准后exited释放名额。单次请假在群内处理，本接口不提供整期请假类型。
       tags:
       - 报名
       x-requirement: FR02
@@ -1754,6 +1841,9 @@ paths:
       - student
       - organizer
       parameters:
+      - name: registration_id
+        in: query
+        schema: {type: string, format: uuid}
       - name: activity_id
         in: query
         required: false
@@ -1828,7 +1918,7 @@ paths:
   /organizer/exit-requests/{id}/decision:
     post:
       operationId: decide_exit_request
-      summary: 处理退出整项活动申请
+      summary: 处理报名项退出申请
       description: 批准时原报名改为exited并释放名额。驳回仍为accepted。与名额更新同一事务，结果生成通知。
       tags:
       - 报名
@@ -5126,7 +5216,7 @@ paths:
     post:
       operationId: decide_registrations_atomically
       summary: 整批录取候补或不录取
-      description: 同一活动1—100个不重复报名ID。事务内核验全部成员授权、学生状态、报名版本及可转换状态，录取检查新增人数和当前余量。活动须published，按日期发布时须在结束日当天或之前办理，精确时段活动须尚有未开始时段。任一失败整批回滚，409 details逐行返回resource_id（报名ID）及失败码，不返回部分成功。通知事件与状态同事务写入，按幂等键重试不重复决定。
+      description: 同一活动1—100个不重复报名ID。事务内核验全部成员授权、学生状态、报名版本及可转换状态，录取检查新增人数和当前余量。活动须published，须在已批准的活动总结束前办理。任一失败整批回滚，409 details逐行返回resource_id（报名ID）及失败码，不返回部分成功。通知事件与状态同事务写入，按幂等键重试不重复决定。
         首次报名截止只关闭学生主动报名。结果通知投递前复核报名版本；已失效的待投递结果跳过，已送达的旧结果及回执可在历史中查看。
       tags:
       - FR02
@@ -5252,7 +5342,7 @@ paths:
     post:
       operationId: create_restoration_request
       summary: 退出后申请恢复报名
-      description: 仅本人exited、学生启用且活动published，原报名窗口截止不阻止此恢复申请。每个报名最多一个pending恢复，pending不占名额。按日期发布时可办理至北京时间结束日当天，精确安排须仍有未开始的获批时段。
+      description: 仅本人exited、学生启用且活动published，原报名窗口截止不阻止此恢复申请。每个报名最多一个pending恢复，pending不占名额。分批按原报名项的服务结束核验，整批按日期发布可办理至北京时间结束日当天，整批精确安排须有未开始的获批时段。
       tags:
       - FR02
       x-requirement: FR02
@@ -5313,6 +5403,9 @@ paths:
       - AC04
       x-roles: *id002
       parameters:
+      - name: registration_id
+        in: query
+        schema: {type: string, format: uuid}
       - $ref: '#/components/parameters/page'
       - $ref: '#/components/parameters/page_size'
       - name: activity_id
@@ -5437,7 +5530,7 @@ paths:
       operationId: decide_restoration_request
       summary: 审核恢复并重新占用名额
       description: 仅pending。批准时锁定活动与原报名，复核有效授权、学生启用、exited状态、有效安排和余量。同一事务将原registration_id改回accepted、增加名额占用、写历史及通知事件。名额或版本冲突整笔失败，申请保持pending。拒绝保留exited并说明原因，取消或结束自动cancelled。
-        首次报名截止只关闭学生主动报名。按日期发布时可办理至北京时间结束日当天，精确安排须仍有未开始的获批时段。
+        首次报名截止只关闭学生主动报名。分批按原报名项的服务结束核验，整批按日期发布可办理至北京时间结束日当天，整批精确安排须有未开始的获批时段。
       tags:
       - FR02
       x-requirement: FR02
@@ -7042,6 +7135,74 @@ components:
       required:
       - expected_version
       - reason
+    question_option:
+      type: object
+      additionalProperties: false
+      required: [id, label]
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string, maxLength: 500}
+    survey_question:
+      type: object
+      additionalProperties: false
+      required: [id, type, title, required]
+      properties:
+        id: {type: string, format: uuid}
+        type: {type: string, enum: [single, multiple, text]}
+        title: {type: string, maxLength: 500}
+        description: {type: string, maxLength: 2000}
+        required: {type: boolean}
+        options: {type: array, items: {$ref: '#/components/schemas/question_option'}}
+    registration_item:
+      type: object
+      additionalProperties: false
+      required: [id, capacity, waitlist_capacity]
+      properties:
+        id: {type: string, format: uuid}
+        role: {type: string, maxLength: 200}
+        starts_at: {type: string, format: date-time}
+        ends_at: {type: string, format: date-time}
+        capacity: {type: integer, minimum: 1, maximum: 10000}
+        waitlist_capacity: {type: integer, minimum: 0, maximum: 10000}
+    item_inventory:
+      type: object
+      required: [item_label, capacity, waitlist_capacity, submitted_count, accepted_count, waitlisted_count, active_count, remaining]
+      properties:
+        item_id: {type: string, format: uuid}
+        item_label: {type: string}
+        capacity: {type: integer}
+        waitlist_capacity: {type: integer}
+        submitted_count: {type: integer}
+        accepted_count: {type: integer}
+        waitlisted_count: {type: integer}
+        active_count: {type: integer}
+        remaining: {type: integer}
+    question_version:
+      type: object
+      required: [questionnaire_version, questions]
+      properties:
+        is_current: {type: boolean}
+        submitted_at: {type: string, format: date-time, description: 该版本最近一次答卷提交时间}
+        questionnaire_version: {type: string}
+        questions: {type: array, items: {$ref: '#/components/schemas/survey_question'}}
+    answer_input:
+      type: object
+      additionalProperties: false
+      required: [question_id]
+      properties:
+        question_id: {type: string, format: uuid}
+        option_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+        text: {type: string, maxLength: 6000}
+    survey_answer:
+      type: object
+      required: [question_id, title, type]
+      properties:
+        question_id: {type: string, format: uuid}
+        title: {type: string}
+        type: {type: string, enum: [single, multiple, text]}
+        option_ids: {type: array, items: {type: string, format: uuid}}
+        labels: {type: array, items: {type: string}}
+        text: {type: string}
     activity_contacts:
       type: array
       description: 按填写顺序保存联系方式，每项为非空文本。
@@ -7051,6 +7212,14 @@ components:
     activity_input:
       type: object
       properties:
+        precautions: {type: string, maxLength: 6000}
+        related_notes: {type: string, maxLength: 6000}
+        registration_mode: {type: string, enum: [whole, batch]}
+        allow_multiple_roles: {type: boolean}
+        allow_multiple_slots: {type: boolean}
+        waitlist_capacity: {type: integer, minimum: 0}
+        registration_items: {type: array, items: {$ref: '#/components/schemas/registration_item'}}
+        questions: {type: array, items: {$ref: '#/components/schemas/survey_question'}}
         title:
           type: string
           minLength: 1
@@ -7084,19 +7253,6 @@ components:
         capacity:
           type: integer
           minimum: 1
-          maximum: 10000
-        eligibility_text:
-          type: string
-          minLength: 1
-          maxLength: 2000
-        selection_text:
-          type: string
-          minLength: 1
-          maxLength: 2000
-        expected_hours:
-          type: string
-          description: 预计认证小时，可超过单日。仅用于活动说明，不进入累计。
-          pattern: ^\d+(?:\.\d)?$
         hours_rule_text:
           type: string
           minLength: 1
@@ -7124,18 +7280,20 @@ components:
           description: 入群链接或联系入群说明。仅本活动已录取学生、授权负责人和后台可见，公开列表及未录取详情必须省略。
           minLength: 1
           maxLength: 2000
-        expected_hours_basis:
-          type: string
-          description: 预计时长的单次或整期口径。与expected_hours成对填写。单次指一段服务安排，不以整期录取推定每周参加。
-          enum:
-          - per_occurrence
-          - whole_activity
       additionalProperties: false
       required: [title]
       description: 草稿必填标题。日期安排允许分步填写，送审时复核完整性。
     activity_draft_patch:
       type: object
       properties:
+        precautions: {type: string, maxLength: 6000, nullable: true}
+        related_notes: {type: string, maxLength: 6000, nullable: true}
+        registration_mode: {type: string, enum: [whole, batch]}
+        allow_multiple_roles: {type: boolean}
+        allow_multiple_slots: {type: boolean}
+        waitlist_capacity: {type: integer, minimum: 0}
+        registration_items: {type: array, items: {$ref: '#/components/schemas/registration_item'}}
+        questions: {type: array, items: {$ref: '#/components/schemas/survey_question'}}
         expected_version:
           type: integer
           minimum: 1
@@ -7181,22 +7339,6 @@ components:
           type: integer
           nullable: true
           minimum: 1
-          maximum: 10000
-        eligibility_text:
-          type: string
-          nullable: true
-          minLength: 1
-          maxLength: 2000
-        selection_text:
-          type: string
-          nullable: true
-          minLength: 1
-          maxLength: 2000
-        expected_hours:
-          type: string
-          description: 预计认证小时，可超过单日。仅用于活动说明，不进入累计。
-          pattern: ^\d+(?:\.\d)?$
-          nullable: true
         hours_rule_text:
           type: string
           nullable: true
@@ -7229,20 +7371,23 @@ components:
           description: 入群链接或联系入群说明。仅本活动已录取学生、授权负责人和后台可见，公开列表及未录取详情必须省略。
           minLength: 1
           maxLength: 2000
-        expected_hours_basis:
-          type: string
-          description: 预计时长的单次或整期口径。与expected_hours成对填写。单次指一段服务安排，不以整期录取推定每周参加。
-          enum:
-          - per_occurrence
-          - whole_activity
-          - null
-          nullable: true
       additionalProperties: false
       required: [expected_version]
       description: 仅更新传入字段。可选字段传 null 清除，schedule 整体替换。
     activity:
       type: object
       properties:
+        my_registrations: {type: array, items: {$ref: '#/components/schemas/registration'}}
+        item_availability: {type: array, items: {$ref: '#/components/schemas/item_inventory'}}
+        questionnaire_version: {type: string}
+        precautions: {type: string, maxLength: 6000}
+        related_notes: {type: string, maxLength: 6000}
+        registration_mode: {type: string, enum: [whole, batch]}
+        allow_multiple_roles: {type: boolean}
+        allow_multiple_slots: {type: boolean}
+        waitlist_capacity: {type: integer, minimum: 0}
+        registration_items: {type: array, items: {$ref: '#/components/schemas/registration_item'}}
+        questions: {type: array, items: {$ref: '#/components/schemas/survey_question'}}
         id:
           type: string
           format: uuid
@@ -7288,19 +7433,6 @@ components:
         capacity:
           type: integer
           minimum: 0
-          maximum: 10000
-        eligibility_text:
-          type: string
-          minLength: 1
-          maxLength: 2000
-        selection_text:
-          type: string
-          minLength: 1
-          maxLength: 2000
-        expected_hours:
-          type: string
-          description: 预计认证小时，可超过单日。仅用于活动说明，不进入累计。
-          pattern: ^\d+(?:\.\d)?$
         hours_rule_text:
           type: string
           minLength: 1
@@ -7371,16 +7503,10 @@ components:
           description: 入群链接或联系入群说明。仅本活动已录取学生、授权负责人和后台可见，公开列表及未录取详情必须省略。
           minLength: 1
           maxLength: 2000
-        expected_hours_basis:
-          type: string
-          description: 预计时长的单次或整期口径。与expected_hours成对填写。单次指一段服务安排，不以整期录取推定每周参加。
-          enum:
-          - per_occurrence
-          - whole_activity
         is_ongoing:
           type: boolean
           readOnly: true
-          description: 按服务端state_evaluated_at与获批安排的实际时段判断，按Asia/Shanghai解释。仅status=published且存在获批时段满足starts_at <= now < ends_at时为true。周期活动间隔、草稿、未获批安排、cancelled、completed、archived均为false。即使当前显示working版本也按published版本判断，表示计划正在进行，不表示已经到场。进行中由完整获批安排判断。
+          description: 按服务端时刻与获批活动总起止判断，开始时刻包含、结束时刻不包含。已发布活动在场次间隔仍为进行中。按北京时间解释日期。
         state_evaluated_at:
           type: string
           format: date-time
@@ -7430,6 +7556,13 @@ components:
     activity_review:
       type: object
       properties:
+        item_availability: {type: array, items: {$ref: '#/components/schemas/item_inventory'}}
+        published_registration_revision:
+          type: integer
+          nullable: true
+          minimum: 1
+          readOnly: true
+          description: 单条审核详情中的人数汇总采用的公开版本号。尚未发布时为 null，此时按送审版本的名额展示。
         id:
           type: string
           format: uuid
@@ -7652,13 +7785,31 @@ components:
     registration_input:
       type: object
       properties:
-        statement:
-          type: string
-          maxLength: 1000
+        published_revision:
+          type: integer
+          minimum: 1
+          description: 学生确认的活动公开版本。分批报名必传，版本不一致返回 409 供重新核对岗位和时间。
+        item_ids: {type: array, minItems: 1, uniqueItems: true, items: {type: string, format: uuid}}
+        questionnaire_version: {type: string}
+        answers: {type: array, items: {$ref: '#/components/schemas/answer_input'}}
       additionalProperties: false
     registration:
       type: object
       properties:
+        answer_history:
+          type: array
+          description: 撤回后以新版问卷重报时保留的以往答卷，限本人及负责人查看
+          items:
+            type: object
+            required: [submitted_at, questionnaire_version, answers]
+            properties:
+              submitted_at: {type: string, format: date-time}
+              questionnaire_version: {type: string}
+              answers: {type: array, items: {$ref: '#/components/schemas/survey_answer'}}
+        item_label: {type: string}
+        item_id: {type: string, format: uuid}
+        questionnaire_version: {type: string}
+        answers: {type: array, items: {$ref: '#/components/schemas/survey_answer'}}
         id:
           type: string
           format: uuid
@@ -7700,8 +7851,6 @@ components:
         submitted_at:
           type: string
           format: date-time
-        statement:
-          type: string
         decision_reason:
           type: string
         can_withdraw: {type: boolean, description: 本人报名当前可撤回。}
@@ -7761,6 +7910,7 @@ components:
     exit_request:
       type: object
       properties:
+        item_label: {type: string}
         id:
           type: string
           format: uuid
@@ -9186,6 +9336,8 @@ components:
     export_input:
       type: object
       properties:
+        item_id: {type: string, format: uuid}
+        answer_filters: {type: string, description: 按题目和问卷版本匹配选项或填空关键词的条件数组（JSON）}
         type:
           type: string
           enum:
@@ -9325,6 +9477,8 @@ components:
             - account_status
           - required:
             - registration_ids
+          - required: [answer_filters]
+          - required: [item_id]
         required:
         - notice_id
       - properties:
@@ -9352,6 +9506,8 @@ components:
             - account_status
           - required:
             - registration_ids
+          - required: [answer_filters]
+          - required: [item_id]
         required:
         - activity_id
       - properties:
@@ -9383,6 +9539,8 @@ components:
             - account_status
           - required:
             - registration_ids
+          - required: [answer_filters]
+          - required: [item_id]
       - properties:
           type:
             type: string
@@ -9410,6 +9568,8 @@ components:
             - account_status
           - required:
             - registration_ids
+          - required: [answer_filters]
+          - required: [item_id]
         required:
         - student_id
       - properties:
@@ -9427,6 +9587,8 @@ components:
             - student_id
           - required:
             - registration_ids
+          - required: [answer_filters]
+          - required: [item_id]
           - required:
             - registration_status
           - required:
@@ -10141,6 +10303,14 @@ components:
     activity_snapshot_content:
       type: object
       properties:
+        precautions: {type: string, maxLength: 6000}
+        related_notes: {type: string, maxLength: 6000}
+        registration_mode: {type: string, enum: [whole, batch]}
+        allow_multiple_roles: {type: boolean}
+        allow_multiple_slots: {type: boolean}
+        waitlist_capacity: {type: integer, minimum: 0}
+        registration_items: {type: array, items: {$ref: '#/components/schemas/registration_item'}}
+        questions: {type: array, items: {$ref: '#/components/schemas/survey_question'}}
         title:
           type: string
           minLength: 1
@@ -10174,19 +10344,6 @@ components:
         capacity:
           type: integer
           minimum: 0
-          maximum: 10000
-        eligibility_text:
-          type: string
-          minLength: 1
-          maxLength: 2000
-        selection_text:
-          type: string
-          minLength: 1
-          maxLength: 2000
-        expected_hours:
-          type: string
-          description: 预计认证小时，可超过单日。仅用于活动说明，不进入累计。
-          pattern: ^\d+(?:\.\d)?$
         hours_rule_text:
           type: string
           minLength: 1
@@ -10209,12 +10366,6 @@ components:
           description: 入群链接或联系入群说明。仅本活动已录取学生、授权负责人和后台可见，公开列表及未录取详情必须省略。
           minLength: 1
           maxLength: 2000
-        expected_hours_basis:
-          type: string
-          description: 预计时长的单次或整期口径。与expected_hours成对填写。单次指一段服务安排，不以整期录取推定每周参加。
-          enum:
-          - per_occurrence
-          - whole_activity
       additionalProperties: false
       required: [title]
     activity_revision:
@@ -10367,6 +10518,7 @@ components:
     restoration_request:
       type: object
       properties:
+        item_label: {type: string}
         id:
           type: string
           format: uuid
@@ -10437,6 +10589,7 @@ components:
     timeline_activity:
       type: object
       properties:
+        my_item_labels: {type: array, items: {type: string}, description: 本人日程中已录取的岗位和时段}
         activity_id:
           type: string
           format: uuid
@@ -10497,7 +10650,7 @@ components:
         is_ongoing:
           type: boolean
           readOnly: true
-          description: 按服务端state_evaluated_at与获批安排的实际时段判断，按Asia/Shanghai解释。仅status=published且存在获批时段满足starts_at <= now < ends_at时为true。周期活动间隔、草稿、未获批安排、cancelled、completed、archived均为false。即使当前显示working版本也按published版本判断，表示计划正在进行，不表示已经到场。进行中由完整获批安排判断。
+          description: 按服务端时刻与获批活动总起止判断，开始时刻包含、结束时刻不包含。已发布活动在场次间隔仍为进行中。按北京时间解释日期。
         has_pending_review:
           type: boolean
           readOnly: true
@@ -11209,6 +11362,9 @@ components:
     activity_roster_page:
       type: object
       properties:
+        item_availability: {type: array, items: {$ref: '#/components/schemas/item_inventory'}}
+        question_versions: {type: array, items: {$ref: '#/components/schemas/question_version'}}
+        unique_student_count: {type: integer}
         items:
           type: array
           items:
@@ -11233,7 +11389,7 @@ components:
         accepted_count:
           type: integer
           minimum: 0
-          description: 整项活动已占用名额，独立于检索词、所选状态和分页。
+          description: 当前报名项范围的已录取人数，独立于人员与答卷筛选、所选状态和分页。
         capacity:
           type: integer
           minimum: 0
@@ -11247,7 +11403,7 @@ components:
       - accepted_count
       - capacity
     activity_publication_content:
-      description: 送审和批准要求完整内容。入群文字或二维码至少一项，联系方式至少一项。日期活动的起止日须齐全，校区限沙河校区、西土城校区或沙河及西土城校区，报名时刻按整分钟填写，预计导入日使用 hours_import_date。预计小时数与口径必须成对填写。
+      description: 送审和批准要求完整内容。入群文字或二维码至少一项，联系方式至少一项。日期活动的起止日须齐全，校区限沙河校区、西土城校区或沙河及西土城校区，报名时刻按整分钟填写，预计导入日使用 hours_import_date。报名开放早于活动总开始，报名截止早于活动总结束。
       allOf:
       - $ref: '#/components/schemas/activity_input'
       - required: [title, description, beneficiaries, campus, location, meeting_point, transport_notes, registration_opens_at, registration_closes_at, capacity, hours_rule_text, schedule]
@@ -11263,7 +11419,7 @@ components:
           schedule: {$ref: '#/components/schemas/activity_schedule'}
           registration_opens_at: {type: string, format: date-time}
           registration_closes_at: {type: string, format: date-time}
-          capacity: {type: integer, minimum: 1, maximum: 10000}
+          capacity: {type: integer, minimum: 1}
   parameters:
     appeal_id:
       name: appeal_id
