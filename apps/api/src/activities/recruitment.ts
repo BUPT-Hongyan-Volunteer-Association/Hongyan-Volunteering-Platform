@@ -81,8 +81,8 @@ export async function checkRecruitmentRevision(
   tx: Tx, activityId: string, old: ActivityPublicationContent | undefined, next: ActivityPublicationContent,
 ) {
   if (!old) return;
-  const used = await tx.registration.findMany({
-    where: { activity_id: activityId }, distinct: ['item_id'], select: { item_id: true },
+  const used = await tx.registration.groupBy({
+    by: ['item_id'], where: { activity_id: activityId },
   });
   if (!used.length) return;
   const conflict = (message: string): never => { throw new BusinessError(409, 'capacity_conflict', message); };

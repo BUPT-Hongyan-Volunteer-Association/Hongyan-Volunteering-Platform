@@ -108,16 +108,9 @@ export async function activityViews(
     }
     for (const row of rows) {
       const data: PageRow = {
-        id: row.id,
-        activity_code: row.activity_code,
-        status: row.status,
-        version: row.version,
-        working_revision: row.working_revision,
-        published_revision: row.published_revision,
-        members: row.members,
+        ...row,
         revisions: byActivity.get(row.id) ?? [],
         reviews: row.reviews ?? [],
-        ...(row.registrations && { registrations: row.registrations }),
       };
       if (q.review_status && workingRevision(data)?.revision_state !== q.review_status)
         continue;

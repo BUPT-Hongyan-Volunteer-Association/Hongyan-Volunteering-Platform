@@ -1353,7 +1353,7 @@ paths:
       operationId: apply_for_activity
       summary: 提交活动报名
       description: 从会话取本人学生ID。要求学生启用、活动published，服务器判定registration_opens_at <= now < registration_closes_at。学生与活动报名项唯一，多项报名同事务提交，重复请求返回原记录，withdrawn可在窗口内重提，rejected不可自助重提，exited使用恢复申请。off模式不使用异常次数限制资格。
-        withdrawn在窗口内重提时更新原registration_id、递增版本并保留历次提交及撤回时间。
+        withdrawn在窗口内重提时更新原registration_id、递增版本并保留历次提交及撤回时间。分批报名附当前 published_revision，旧版本返回 409 后须核对最新项目再提交。同一学生在同一活动和问卷版本下补报时共用答卷。
       tags:
       - 报名
       x-requirement: FR02
@@ -1570,13 +1570,14 @@ paths:
       summary: 订阅活动报名名单变更
       tags: [报名]
       parameters:
+      - $ref: '#/components/parameters/workspace_scope'
       - name: id
         in: path
         required: true
         schema: {type: string, format: uuid}
       responses:
         '200':
-          description: 名单更新后通知客户端重新读取当前筛选
+          description: 连接就绪发出 connected，名单变更发出 changed。事件仅提示重新读取，名单及答卷由名单接口按权限返回。
           content:
             text/event-stream:
               schema: {type: string}
@@ -1584,7 +1585,7 @@ paths:
     get:
       operationId: list_activity_registrations
       summary: 查询活动报名名单
-      description: 当前活动成员和获授权后台可读。q按姓名或学号检索，status筛选及分页前计算status_counts。total是当前标签在全部页面的命中数。选定报名项时按项统计余量。按submitted_at、id稳定排序。
+      description: 当前活动成员和获授权后台可读。仅本人管理范围内的负责人可读取答卷并使用 answer_filters。后台全院范围只读名单和统计。q按姓名或学号检索，status筛选及分页前计算status_counts。total是当前标签在全部页面的命中数。选定报名项时按项统计余量。按submitted_at、id稳定排序。
       tags:
       - 报名
       x-requirement: FR02
