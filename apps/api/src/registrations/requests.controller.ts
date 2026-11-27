@@ -3,6 +3,7 @@ import type { ExitRequestInput, ReviewDecision, VersionAction } from '@hongyan/c
 import { pagination, workspaceScope } from '../activities/read.js';
 import { validate } from '../validation.js';
 import { Workflow } from '../workflow.js';
+import { checkCapacity, checkReactivation } from './enrollment.js';
 import { checkVersion, wrongState, BusinessError, envelope, invalid, invisible } from '../http.js';
 import { studentId, type SessionRequest } from '../auth/session.guard.js';
 import { audit } from '../audit.js';
@@ -14,7 +15,7 @@ import {
   canWithdraw,
   canRequest,
   enabledStudents,
-  occupiedSeats,
+
   queueGathering,
   recordChanges,
   registrationView,
@@ -22,7 +23,7 @@ import {
 
 type Kind = 'exit' | 'restoration';
 type Filters = Record<string, string>;
-function view(q: ExitRequest, r: Pick<Registration, 'activity_id' | 'student_id'> & {
+function view(q: ExitRequest, r: Pick<Registration, 'activity_id' | 'student_id' | 'item_label'> & {
   student?: { student_no: string; account: { display_name: string } };
 }) {
   return {
@@ -31,6 +32,7 @@ function view(q: ExitRequest, r: Pick<Registration, 'activity_id' | 'student_id'
     registration_id: q.registration_id,
     activity_id: r.activity_id,
     student_id: r.student_id,
+    ...(r.item_label && {item_label:r.item_label}),
     ...(r.student && { student_no: r.student.student_no, student_name: r.student.account.display_name }),
     reason: q.reason,
     status: q.status,
@@ -81,7 +83,7 @@ export class RecruitmentRequests {
         });
         if (!r) invisible();
         checkVersion(r.version, input.expected_registration_version);
-        if (!canRequest(kind, activity!.status, r.status, approvedContent(activity!))) wrongState();
+        if (!canRequest(kind, activity!.status, r.status, approvedContent(activity!), r.item_id)) wrongState();
         if (await tx.exitRequest.findFirst({ where: { registration_id: r.id, status: 'pending' } }))
           throw new BusinessError(409, 'invalid_state', '已有申请待处理');
         const q = await tx.exitRequest.create({
@@ -102,7 +104,7 @@ export class RecruitmentRequests {
 
   private list(req: SessionRequest, kind: Kind, q: Filters, activityId?: string) {
     const scope = activityId ? workspaceScope(req.actor, q.scope) : undefined;
-    for (const id of [q.activity_id, q.request_id]) {
+    for (const id of [q.activity_id, q.request_id, q.registration_id]) {
       if (id !== undefined && !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id))
         invalid('id', '编号格式错误');
     }
@@ -110,7 +112,7 @@ export class RecruitmentRequests {
       invalid('status', '申请状态无效');
     const where = {
       kind,
-      id: q.request_id,
+      id: q.request_id, registration_id:q.registration_id,
       status: q.status,
       registration: {
         activity_id: activityId ?? q.activity_id,
@@ -126,7 +128,7 @@ export class RecruitmentRequests {
         )
           invisible();
         const total = await tx.exitRequest.count({ where });
-        const ids = { activity_id: true, student_id: true } as const;
+        const ids = { activity_id: true, student_id: true, item_label:true } as const;
         const rosterIdentity = {
           ...ids, student: { select: { student_no: true, account: { select: { display_name: true } } } },
         } as const;
@@ -171,8 +173,8 @@ export class RecruitmentRequests {
           if (kind === 'restoration') {
             const approved = approvedContent(activity!);
             if (!(await enabledStudents(tx, [r.student_id])).size || !canRecruit(approved)) wrongState();
-            if ((await occupiedSeats(tx, r.activity_id)) >= approved!.capacity)
-              throw new BusinessError(409, 'capacity_conflict', '当前名额已满，恢复申请仍待处理');
+            await checkCapacity(tx,r.activity_id,approved!,[{item_id:r.item_id,id:r.id,status:'accepted',previous:'exited'}]);
+            await checkReactivation(tx,r.activity_id,approved!,[r]);
           }
           const current = await tx.registration.update({
             where: { id: r.id },
@@ -184,7 +186,7 @@ export class RecruitmentRequests {
           });
           await recordChanges(tx, [r], [current], new Date(), actor.account_id);
           if (kind === 'restoration') await queueGathering(tx, r.activity_id, [current]);
-          else
+          else if (!await tx.registration.count({where:{activity_id:r.activity_id,student_id:r.student_id,status:'accepted'}}))
             await tx.noticeReceipt.updateMany({
               where: {
                 student_id: r.student_id,
@@ -219,7 +221,7 @@ export class RecruitmentRequests {
               event_key: 'request_decided:' + id,
               payload: {
                 kind,
-                student_id: r.student_id,
+                student_id: r.student_id, item_label:r.item_label,
                 status: updated.status,
                 decision_reason: updated.decision_reason,
                 actor_id: actor.account_id,

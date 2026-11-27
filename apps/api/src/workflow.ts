@@ -96,13 +96,8 @@ export class Workflow {
         if (!ids.length || locked.length !== ids.length) invisible();
       } else if (target) {
         const id = await targetActivityId(tx, target);
-        if (access === 'apply') {
-          await tx.$queryRaw`SELECT id FROM activity WHERE id=${id}::uuid FOR SHARE`;
-          // Distinct command keys for the same applicant still serialize on the unique relation.
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${id + '/' + account_id},0))`;
-        } else {
-          await tx.$queryRaw`SELECT id FROM activity WHERE id=${id}::uuid FOR UPDATE`;
-        }
+        // Enrollment, promotion and restoration compete for the same item capacity.
+        await tx.$queryRaw`SELECT id FROM activity WHERE id=${id}::uuid FOR UPDATE`;
         row = await tx.activity.findUnique({ where: { id }, include: includeView });
         if (!row) invisible();
       }

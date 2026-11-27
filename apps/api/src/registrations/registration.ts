@@ -1,4 +1,4 @@
-import { canChangeRegistration } from '@hongyan/contracts/activity';
+import { activeRegistrationStatuses, canChangeRegistration } from '@hongyan/contracts/activity';
 import { audit } from '../audit.js';
 import type {
   ActivityPublicationContent,
@@ -6,45 +6,54 @@ import type {
   BulkRegistrationDecision,
   RegistrationInput,
 } from '@hongyan/contracts/types';
-import type { Prisma, Registration } from '../generated/prisma/client.js';
+import type { Prisma, Registration, QuestionnaireResponse, QuestionnaireAnswer } from '../generated/prisma/client.js';
 import { occurrences } from '../activities/schedule.js';
 import { publishedRevision, type LoadedActivity } from '../activities/read.js';
 import { wrongState, BusinessError, invalid, invisible } from '../http.js';
 import { type Tx } from '../database.js';
 
+import { answerView, checkCapacity, checkReactivation, checkSelections, pools, responseFor, wholeItemId } from './enrollment.js';
+
+export const includeResponse = { response: { include: { answers: { orderBy: { position: 'asc' } } } } } as const;
 export const rosterOrderBy = [
   { submitted_at: 'asc' },
   { id: 'asc' },
 ] satisfies Prisma.RegistrationOrderByWithRelationInput[];
 
 /** 名单页面和导出共用的搜索条件；状态过滤由调用方决定是否叠加。 */
-export function rosterSearchWhere(filters: {
-  activity_id: string;
-  q?: string;
-  registration_ids?: string[];
-}): Prisma.RegistrationWhereInput {
+type RosterFilters = {
+  activity_id: string; q?: string; item_id?: string; answer_filters?: string; registration_ids?: string[]; status?: string;
+};
+const uuid = /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
+function answerConditions(value?: string): Prisma.RegistrationWhereInput[] {
+  if (value === undefined) return [];
+  if (typeof value !== 'string' || value.length > 32000) invalid('answer_filters','答案筛选格式无效');
+  let conditions: unknown;
+  try { conditions = JSON.parse(value); } catch { invalid('answer_filters','答案筛选格式无效'); }
+  if (!Array.isArray(conditions) || conditions.length > 100) invalid('answer_filters','答案筛选格式无效');
+  return conditions.map(c => {
+    if (!c || typeof c.question_id !== 'string' || !uuid.test(c.question_id) ||
+        (c.option_id !== undefined && (typeof c.option_id !== 'string' || !uuid.test(c.option_id))) ||
+        (c.answer_text !== undefined && (typeof c.answer_text !== 'string' || !c.answer_text.trim())) ||
+        (Boolean(c.option_id) === Boolean(c.answer_text)))
+      invalid('answer_filters','请选择题目和选项或填写关键词');
+    return {response:{answers:{some:{question_id:c.question_id,
+      ...(c.option_id ? {option_ids:{has:c.option_id}} : {text:{contains:c.answer_text.trim(),mode:'insensitive'}}),
+    }}}};
+  });
+}
+export function rosterSearchWhere(filters: RosterFilters): Prisma.RegistrationWhereInput {
   const search = filters.q?.trim();
+  if (filters.item_id !== undefined && (typeof filters.item_id !== 'string' || !uuid.test(filters.item_id)))
+    invalid('item_id','报名项编号无效');
   return {
-    activity_id: filters.activity_id,
+    activity_id: filters.activity_id, item_id: filters.item_id, AND: answerConditions(filters.answer_filters),
     ...(filters.registration_ids && { id: { in: filters.registration_ids } }),
-    ...(search && {
-      student: {
-        OR: [{ student_no: { contains: search } }, { account: { display_name: { contains: search } } }],
-      },
-    }),
+    ...(search && {student: {OR: [{ student_no: { contains: search } }, { account: { display_name: { contains: search } } }]}}),
   };
 }
-
-export function rosterWhere(filters: {
-  activity_id: string;
-  q?: string;
-  registration_ids?: string[];
-  status?: string;
-}): Prisma.RegistrationWhereInput {
-  return {
-    ...rosterSearchWhere(filters),
-    ...(filters.status && { status: filters.status }),
-  };
+export function rosterWhere(filters: RosterFilters): Prisma.RegistrationWhereInput {
+  return {...rosterSearchWhere(filters), status:filters.status};
 }
 
 export function approvedContent(activity: LoadedActivity) {
@@ -52,7 +61,9 @@ export function approvedContent(activity: LoadedActivity) {
   return revision?.content as unknown as ActivityPublicationContent | undefined;
 }
 
-export function registrationView(row: Registration): View {
+export function registrationView(row: Registration & {
+  response?: (QuestionnaireResponse & {answers?:QuestionnaireAnswer[]}) | null;
+}): View {
   return {
     id: row.id,
     activity_id: row.activity_id,
@@ -60,7 +71,8 @@ export function registrationView(row: Registration): View {
     version: row.version,
     status: row.status as View['status'],
     submitted_at: row.submitted_at.toISOString(),
-    ...(row.statement !== null && { statement: row.statement }),
+    ...(row.item_id !== wholeItemId && { item_id:row.item_id, item_label:row.item_label ?? undefined }),
+    ...(row.response?.answers && {questionnaire_version:row.response.questionnaire_version,answers:row.response.answers.map(answerView)}),
     ...(row.decision_reason !== null && { decision_reason: row.decision_reason }),
   };
 }
@@ -87,7 +99,10 @@ export async function recordChanges(
     UPDATE notice n SET is_current = false, version = n.version + 1, updated_at = CURRENT_TIMESTAMP
     FROM notification_event e WHERE n.source_event_id = e.id AND n.is_current
       AND e.event_type = 'registration_decided' AND e.resource_id = ANY(${previousIds}::uuid[])`;
-  await tx.registrationHistory.createMany({ data: current.map(r => history(r, time, actor)) });
+  if (current.length) {
+    await tx.registrationHistory.createMany({ data: current.map(r => history(r, time, actor)) });
+    await tx.$queryRaw`SELECT pg_notify('registration_changed', ${current[0].activity_id})::text`;
+  }
 }
 
 export function canWithdraw(activityStatus: string, registrationStatus: string) {
@@ -98,7 +113,11 @@ export function canDecide(activityStatus: string, approved: ActivityPublicationC
   return activityStatus === 'published' && canRecruit(approved);
 }
 
-export function canRequest(kind: 'exit' | 'restoration', activityStatus: string, status: string, approved: ActivityPublicationContent | undefined) {
+export function canRequest(kind: 'exit' | 'restoration', activityStatus: string, status: string, approved: ActivityPublicationContent | undefined, itemId?:string) {
+  if (kind === 'exit' && itemId && approved?.registration_mode === 'batch') {
+    const start = approved.registration_items?.find(item=>item.id.toLowerCase()===itemId)?.starts_at;
+    if (start) return status === 'accepted' && activityStatus === 'published' && Date.now()<Date.parse(start);
+  }
   if (kind === 'restoration') return status === 'exited' && canDecide(activityStatus, approved);
   return status === 'accepted' && activityStatus === 'published' && canRecruit(approved, true);
 }
@@ -119,28 +138,37 @@ export async function apply(
   if (!(opens < closes)) wrongState();
   if (received.getTime() < opens) throw new BusinessError(409, 'registration_not_open', '尚未到报名开放时间');
   if (received.getTime() >= closes) throw new BusinessError(409, 'registration_closed', '报名已截止');
-  const relation = { activity_id: activity.id, student_id };
-  const previous = await tx.registration.findUnique({
-    where: { activity_id_student_id: relation },
-  });
-  if (previous && previous.status !== 'withdrawn') {
-    if (['submitted', 'waitlisted', 'accepted'].includes(previous.status)) return registrationView(previous);
-    wrongState();
+  const available = new Map(pools(approved).map(pool => [pool.id, pool]));
+  const ids = input.item_ids?.map(id => id.toLowerCase()) ?? [];
+  if (approved.registration_mode === 'batch') {
+    if (!ids.length || new Set(ids).size !== ids.length || ids.some(id => !available.has(id)))
+      invalid('item_ids','请选择有效且不同的报名项');
+  } else {
+    if (ids.length) invalid('item_ids','整批报名无需选择岗位或时段');
+    ids.push(wholeItemId);
   }
-  const data = {
-    status: 'submitted',
-    submitted_at: received,
-    statement: input.statement ?? null,
-    decision_reason: null,
-  };
-  const current = previous
-    ? await tx.registration.update({
-        where: { id: previous.id },
-        data: { ...data, version: { increment: 1 } },
-      })
-    : await tx.registration.create({ data: { ...relation, ...data } });
-  await recordChanges(tx, previous ? [previous] : [], [current], received, actor);
-  return registrationView(current);
+  const relation = { activity_id: activity.id, student_id };
+  const previous = await tx.registration.findMany({where:relation,include:includeResponse});
+  const byItem = new Map(previous.map(row => [row.item_id,row]));
+  const selected = ids.map(id => byItem.get(id));
+  if (selected.some(row => row && ![...activeRegistrationStatuses,'withdrawn'].includes(row.status))) wrongState();
+  const fresh = ids.filter(id => !byItem.has(id) || byItem.get(id)!.status === 'withdrawn');
+  if (!fresh.length) return {items:ids.map(id => registrationView(byItem.get(id)!))};
+  checkSelections(approved,[...previous.filter(row=>activeRegistrationStatuses.some(s=>s===row.status)).map(row=>row.item_id), ...fresh]);
+  await checkCapacity(tx,activity.id,approved,fresh.map(item_id=>({item_id,status:'submitted'})));
+  const response_id = await responseFor(tx,activity.id,student_id,approved.questions ?? [],input);
+  const changed = [];
+  for (const item_id of fresh) {
+    const old = byItem.get(item_id);
+    const data = {status:'submitted',submitted_at:received,decision_reason:null,response_id,
+      item_label:item_id === wholeItemId ? null : available.get(item_id)!.label};
+    const current = old ? await tx.registration.update({where:{id:old.id},data:{...data,version:{increment:1}},include:includeResponse})
+      : await tx.registration.create({data:{...data,...relation,item_id},include:includeResponse});
+    byItem.set(item_id,current);
+    changed.push(current);
+  }
+  await recordChanges(tx,selected.filter((r): r is NonNullable<typeof r> => !!r && r.status === 'withdrawn'),changed,received,actor);
+  return {items:ids.map(id => registrationView(byItem.get(id)!))};
 }
 
 export function canRecruit(content: ActivityPublicationContent | undefined, exit = false, now = new Date()) {
@@ -215,20 +243,9 @@ export async function decideBatch(
   if (failures.length) throw new BusinessError(409, failures[0].code, failures[0].message, failures);
   const occupied = await occupiedSeats(tx, activity.id);
   const accepting = input.decision === 'accepted';
-  if (accepting && occupied + rows.length > approved!.capacity) {
-    const message = `剩余 ${Math.max(0, approved!.capacity - occupied)} 个名额，所选 ${rows.length} 人均未录取`;
-    throw new BusinessError(
-      409,
-      'capacity_conflict',
-      message,
-      ids.map((resource_id, i) => ({
-        field: 'items',
-        row: i + 1,
-        resource_id,
-        code: 'capacity_conflict',
-        message,
-      })),
-    );
+  if (input.decision !== 'rejected') {
+    await checkCapacity(tx,activity.id,approved!,rows.map(r => ({id:r.id,item_id:r.item_id,status:input.decision,previous:r.status})));
+    await checkReactivation(tx,activity.id,approved!,rows.filter(row=>row.status==='rejected'));
   }
   const changed = await tx.registration.updateManyAndReturn({
     where: { id: { in: ids } },
@@ -241,7 +258,7 @@ export async function decideBatch(
       event_key: `registration_decision:${r.id}:${r.version}`,
       activity_id: activity.id, resource_id: r.id,
       payload: { student_id: r.student_id, registration_version: r.version, status: r.status,
-        actor_id: actor, decision_reason: input.reason ?? null },
+        actor_id: actor, decision_reason: input.reason ?? null, item_label:r.item_label },
     })),
   });
   await audit(tx, {
