@@ -5,7 +5,7 @@ import { activityFields as fields } from '@hongyan/ui/activityFields';
 import { serviceDates } from '@hongyan/contracts/activity';
 
 export function formValues(item?: ActivityRevision['content']) {
-  const values: Record<string, unknown> = { ...item, ...serviceDates(item?.schedule) };
+  const values: Record<string, unknown> = { waitlist_capacity: 0, ...item, ...serviceDates(item?.schedule) };
   return Object.fromEntries(
     fields
       .filter(([key]) => key !== 'contacts')
@@ -58,7 +58,6 @@ export function buildPatch(
   if (source && original) {
     for (const k of ['registration_opens_at', 'registration_closes_at'] as const)
       if (v[k] === original[k] && source[k] !== saved?.[k]) result[k] = source[k] ?? null;
-    if (saved?.selection_text !== source.selection_text) result.selection_text = source.selection_text ?? null;
   }
   const converting =
     saved?.schedule?.schedule_type === 'continuous' &&
@@ -69,4 +68,43 @@ export function buildPatch(
     if (v.hours_import_date) result.hours_import_date = v.hours_import_date;
   }
   return result;
+}
+
+export function recruitmentValues(input?: ActivityRevision['content']) {
+  return {
+    registration_mode: input?.registration_mode ?? 'whole' as const,
+    allow_multiple_roles: input?.allow_multiple_roles ?? false,
+    allow_multiple_slots: input?.allow_multiple_slots ?? false,
+    registration_items: (input?.registration_items ?? []).map(item => {
+      const start = item.starts_at ? beijingInput(item.starts_at) : '';
+      const end = item.ends_at ? beijingInput(item.ends_at) : '';
+      const allDay = start.endsWith('T00:00') && end.endsWith('T00:00') &&
+        Date.parse(item.ends_at!) - Date.parse(item.starts_at!) === 86400000;
+      return { id: item.id, role: item.role ?? '', allDay, start, end,
+        capacity: item.capacity, waitlist_capacity: item.waitlist_capacity };
+    }),
+    questions: (input?.questions ?? []).map(q => ({
+      ...q, description: q.description ?? '', options: (q.options ?? []).map(o => ({ ...o })),
+    })),
+  };
+}
+
+export type RecruitmentForm = ReturnType<typeof recruitmentValues>;
+
+export function recruitmentPatch(config: RecruitmentForm) {
+  return {
+    registration_mode: config.registration_mode,
+    allow_multiple_roles: config.allow_multiple_roles,
+    allow_multiple_slots: config.allow_multiple_slots,
+    registration_items: config.registration_mode === 'whole' ? [] : config.registration_items.map(item => {
+      const starts_at = item.start ? beijingISO(item.allDay ? item.start.slice(0,10) + 'T00:00' : item.start) : undefined;
+      const ends_at = item.allDay
+        ? starts_at && new Date(Date.parse(starts_at) + 86400000).toISOString()
+        : item.end ? beijingISO(item.end) : undefined;
+      return { id: item.id, role: item.role.trim() || undefined, starts_at, ends_at,
+        capacity: Number(item.capacity), waitlist_capacity: Number(item.waitlist_capacity) };
+    }),
+    questions: config.questions.map(q => ({ ...q, title: q.title.trim(), description: q.description.trim() || undefined,
+      options: q.type === 'text' ? undefined : q.options.map(o => ({ ...o, label: o.label.trim() })) })),
+  };
 }

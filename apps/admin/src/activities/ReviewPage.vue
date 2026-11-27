@@ -271,6 +271,16 @@ onUnmounted(() => {
           </dl>
           <p v-else>与原公开版本一致</p>
         </section>
+        <section v-if="review.item_availability?.length" aria-label="报名人数汇总">
+          <h3>报名人数汇总</h3>
+          <div class="table-scroll"><table>
+            <thead><tr><th scope="col">报名项</th><th scope="col">待处理</th><th scope="col">已录取 / 名额</th><th scope="col">候补 / 名额</th></tr></thead>
+            <tbody><tr v-for="item in review.item_availability" :key="item.item_id || 'whole'">
+              <th scope="row">{{ item.item_label }}</th><td>{{ item.submitted_count }}</td>
+              <td>{{ item.accepted_count }} / {{ item.capacity }}</td><td>{{ item.waitlisted_count }} / {{ item.waitlist_capacity }}</td>
+            </tr></tbody>
+          </table></div>
+        </section>
         <details :open="!review.previous_published_snapshot">
           <summary>冻结内容</summary>
           <ActivitySnapshot :content="review.snapshot.content" />

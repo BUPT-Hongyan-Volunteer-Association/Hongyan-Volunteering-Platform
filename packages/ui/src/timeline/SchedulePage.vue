@@ -15,7 +15,6 @@ import {
   localDate,
   localDateTime,
   activityPrimaryStatus,
-  phaseLabels,
   phaseOptions,
   statusLabels,
   timelineColors,

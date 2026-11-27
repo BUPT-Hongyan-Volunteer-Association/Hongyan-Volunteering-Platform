@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { serviceDateText } from '@hongyan/contracts/activity';
-import { computed } from 'vue';
+import { activityBounds, serviceDateText } from '@hongyan/contracts/activity';
+import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { listManagedActivities } from '@hongyan/contracts';
 import { useRoute, useRouter } from 'vue-router';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
@@ -13,6 +13,21 @@ const page = computed(() => pageNumber(route.query.page));
 const sourceQuery = computed(() => ({ page: page.value > 1 ? page.value : undefined }));
 const { data, loading, error, refresh: load } = usePageRead(page, async signal =>
   (await listManagedActivities({ query: { scope: 'managed', page: page.value, page_size: 20 }, signal, throwOnError: true })).data.data);
+function refreshVisible() {
+  if (!document.hidden) void load(false);
+}
+watch(data, (rows, _previous, cleanup) => {
+  if (!rows?.items.length) return;
+  const evaluated = Date.parse(rows.items[0].state_evaluated_at ?? '');
+  const next = rows.items.flatMap(item => {
+    const bounds = activityBounds(item.schedule);
+    return [bounds?.start, bounds?.end, Date.parse(item.registration_opens_at ?? ''), Date.parse(item.registration_closes_at ?? '')];
+  }).filter((time): time is number => typeof time === 'number' && time > evaluated);
+  const timer = window.setTimeout(refreshVisible, Math.min(60000, ...next.map(time => time - evaluated + 1)));
+  cleanup(() => window.clearTimeout(timer));
+});
+onMounted(() => document.addEventListener('visibilitychange', refreshVisible));
+onUnmounted(() => document.removeEventListener('visibilitychange', refreshVisible));
 </script>
 
 <template>
@@ -20,7 +35,7 @@ const { data, loading, error, refresh: load } = usePageRead(page, async signal =
     <div class="page-heading">
       <h1>我的管理活动</h1>
     </div>
-    <p v-if="loading" class="notice" role="status">正在读取活动…</p>
+    <p v-if="loading && !data" class="notice" role="status">正在读取活动…</p>
     <p v-else-if="error" role="alert">{{ error }} <button @click="load()">刷新</button></p>
     <div v-else-if="!data?.items.length" class="empty-state">
       <UiIcon name="FolderOpened" />

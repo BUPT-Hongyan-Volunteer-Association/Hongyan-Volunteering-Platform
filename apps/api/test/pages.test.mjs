@@ -131,7 +131,7 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
           '异常记录',
         ]) {
           const nav = owner.getByRole('navigation', { name: '活动工作区' });
-          const parent = { '退出与恢复': '报名名单', '漏记反馈': '时长台账', '错帐修复': '时长台账', '异常记录': '现场人员记录' }[tab];
+          const parent = { '漏记反馈': '时长台账', '错帐修复': '时长台账', '异常记录': '现场人员记录' }[tab];
           if (parent) await link(nav, parent).click();
           await link(parent ? owner.getByRole('main') : nav, tab).click();
           await visible(nav.locator('a.current').filter({ hasText: parent ?? tab }));
@@ -1718,12 +1718,10 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         beneficiaries: '在校师生',
         meeting_point: '图书馆一层服务台',
         transport_notes: '校内步行到达',
-        eligibility_text: '本学院学生，按要求参加培训',
-        selection_text: '负责人审核',
+        precautions: '请携带工作手套',
+        related_notes: '书架按馆藏区分组',
         hours_rule_text: '以实际服务记录为准',
         capacity: 30,
-        expected_hours: '2.0',
-        expected_hours_basis: 'per_occurrence',
         registration_opens_at: dateAt(-1) + 'T09:00:00+08:00',
         registration_closes_at: dateAt(firstSaturday - 1) + 'T18:00:00+08:00',
         schedule: {
@@ -1767,7 +1765,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       const label = student.locator('.facts dt').filter({hasText:'报名截止'});
       assert.equal(await label.evaluate(el => { const r = document.createRange(); r.selectNodeContents(el.lastChild); return r.getClientRects().length; }), 1);
       await visible(student.getByText('报名中', { exact: true }));
-      await visible(student.getByText(/每次 2.0 小时/));
+      await visible(student.getByText('请携带工作手套', {exact:true}));
+      await visible(student.getByText('书架按馆藏区分组', {exact:true}));
       await fits(student);
       const cutoff = await student.locator('.facts mark').boundingBox();
       const action = await button(student, '申请报名').boundingBox();
@@ -1816,6 +1815,28 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         时长认定说明: '以实际服务为准',
       }))
         await owner.getByLabel(label, { exact: true }).fill(value);
+      assert.equal(await button(owner,'展开选填项').count(),0);
+      await owner.getByLabel('注意事项',{exact:true}).fill('进馆前签到');
+      await owner.getByLabel('相关说明',{exact:true}).fill('资料由馆方提供');
+      await pickOption(owner,'报名方式','分批报名');
+      await button(owner,'添加报名项').click();
+      const batch = owner.getByRole('group',{name:'报名项 1',exact:true});
+      await batch.getByLabel('第 1 项岗位').fill('图书整理');
+      await batch.getByLabel('录取人数').fill('9');
+      await batch.getByLabel('候补人数').fill('6');
+      await batch.getByLabel('全天').check();
+      await batch.getByLabel('服务日期').fill('2027-05-01');
+      await batch.getByRole('button',{name:'复制报名项'}).click();
+      const dayTwo = owner.getByRole('group',{name:'报名项 2',exact:true});
+      await dayTwo.getByLabel('服务日期').fill('2027-05-02');
+      await owner.getByLabel('允许多时段').check();
+      await button(owner,'添加题目').click();
+      await owner.getByLabel('第 1 题题目').fill('是否参加过培训');
+      await owner.getByLabel('第 1 题选项 1').fill('参加过');
+      await owner.getByLabel('第 1 题选项 2').fill('首次参加');
+      await button(owner,'添加题目').click();
+      await pickOption(owner,'第 2 题题型','填空题');
+      await owner.getByLabel('第 2 题题目').fill('可协助的工作');
       await button(owner, '新增联系方式').click();
       await owner.getByLabel('联系方式 2', {exact:true}).fill('Library_old');
       await button(owner, '新增联系方式').click();
@@ -1888,6 +1909,8 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       const activityId = new URL(editUrl).pathname.split('/')[2];
       const review = await db.activityReview.findFirstOrThrow({where:{activity_id:activityId,status:'pending'}});
       await teacher.goto(admin + '/reviews/' + review.id);
+      await visible(teacher.getByRole('heading',{name:'报名人数汇总'}));
+      await visible(teacher.getByText(/是否参加过培训[\s\S]*首次参加/).last());
       await button(teacher,'批准发布').click();
       await visible(teacher.getByText('已批准发布',{exact:true}));
       await student.goto(web + '/activities/' + activityId);

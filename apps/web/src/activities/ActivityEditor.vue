@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import ActivityDateField from '@hongyan/ui/ActivityDateField.vue';
-import { formValues, buildPatch } from './activityForm';
+import RecruitmentEditor from './RecruitmentEditor.vue';
+import { formValues, buildPatch, recruitmentValues, recruitmentPatch } from './activityForm';
 import { campuses } from '@hongyan/contracts/activity';
 import { ref, computed, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -22,7 +23,7 @@ import {
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 import { noAccess } from '@hongyan/ui/usePageRead';
 import ActivityHistory from './ActivityHistory.vue';
-import { fieldGroups, activityFields as fields } from '@hongyan/ui/activityFields';
+import { fieldGroups, fieldLabel, activityFields as fields } from '@hongyan/ui/activityFields';
 import {
   revisionLabels,
 } from '@hongyan/ui/activityDisplay';
@@ -55,7 +56,10 @@ async function changeContactRows(remove?: number) {
   const index = Math.min(remove ?? contactRows.value.length - 1, contactRows.value.length - 1);
   document.getElementById('activity-contact-' + index)?.focus();
 }
-const optionalOpen = ref<Record<string, boolean>>({});
+const recruitment = ref(recruitmentValues());
+const savedRecruitment = computed(() => recruitmentValues(detail.value?.working_snapshot.content));
+const changedRecruitment = computed(() => JSON.stringify(recruitment.value) !== JSON.stringify(savedRecruitment.value));
+const quotaField = (key: string) => key === 'capacity' || key === 'waitlist_capacity';
 const reason = ref(''),
   message = ref(''),
   confirmation = ref<{ id: string; text: string }>(),
@@ -99,18 +103,9 @@ const options = [
 ];
 function requirement(key: string) {
   if (['group_join_instructions', 'group_qr_id'].includes(key)) return '至少一项';
-  if (['expected_hours', 'eligibility_text', 'safety_notes'].includes(key)) return '选填';
-  if (key === 'expected_hours_basis') return form.value.expected_hours ? '必填' : '选填';
+  if (['precautions', 'related_notes', 'safety_notes'].includes(key)) return '选填';
   return '';
 }
-function optionalField(key: string) {
-  return ['eligibility_text', 'safety_notes', 'expected_hours', 'expected_hours_basis'].includes(key);
-}
-watch(fieldErrors, errors => {
-  for (const group of fieldGroups) {
-    if (group.fields.some(([key]) => optionalField(key) && errors[key])) optionalOpen.value[group.title] = true;
-  }
-}, { flush: 'sync' });
 function selectImage(event: Event) {
   const input = event.target as HTMLInputElement,
     file = input.files?.[0];
@@ -139,11 +134,13 @@ function selectImage(event: Event) {
 function restoreVersion(item: ActivityRevision['content']) {
   restore.value = item;
   resetContacts(item);
+  recruitment.value = recruitmentValues(item);
   form.value = formValues(item);
 }
 let serial = 0;
 async function load(preserve = false, snapshot?: ManagedActivityDetail) {
   const keepContacts = preserve && contactsChanged.value;
+  const keepRecruitment = preserve && changedRecruitment.value;
   const n = ++serial,
     local = Object.entries(form.value).filter(([k, v]) => v !== base.value[k]);
   loading.value = true;
@@ -162,6 +159,7 @@ async function load(preserve = false, snapshot?: ManagedActivityDetail) {
     if (!preserve) restore.value = undefined;
     if (data && !snapshot) emit('loaded', data);
     if (!keepContacts) resetContacts(data?.working_snapshot.content);
+    if (!keepRecruitment) recruitment.value = recruitmentValues(data?.working_snapshot.content);
     base.value = formValues(data?.working_snapshot.content);
     form.value = { ...base.value, ...(preserve ? Object.fromEntries(local) : {}) };
   } catch (e) {
@@ -196,8 +194,14 @@ function report(e: unknown) {
   }
 }
 function payload(partial: boolean) {
-  return buildPatch(form.value, base.value, detail.value?.working_snapshot.content, restore.value,
+  const patch = buildPatch(form.value, base.value, detail.value?.working_snapshot.content, restore.value,
     contactsChanged.value ? contacts.value : undefined, partial);
+  if (!partial || changedRecruitment.value) Object.assign(patch, recruitmentPatch(recruitment.value));
+  if (recruitment.value.registration_mode === 'batch') {
+    delete patch.capacity;
+    delete patch.waitlist_capacity;
+  }
+  return patch;
 }
 const command = createCommand();
 async function run(action: 'save' | 'submit' | 'withdraw') {
@@ -307,7 +311,7 @@ watch(
 const dirty = computed(
   () =>
     !!restore.value ||
-    contactsChanged.value ||
+    contactsChanged.value || changedRecruitment.value ||
     fields.some(([k]) => form.value[k] !== base.value[k]),
 );
 watch([() => props.snapshot, busy, loading], ([snapshot]) => {
@@ -371,8 +375,8 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
     </div>
     <p v-if="!readonly" class="editor-hint">填写标题即可保存草稿。送审时请补齐各组字段，选填项和二选一项已标注</p>
     <ul v-if="Object.keys(fieldErrors).length" class="error-summary" aria-label="待修正字段">
-      <li v-for="[key, title] in fields.filter(([k]) => fieldErrors[k])" :key="key">
-        {{ title }} · {{ fieldErrors[key] }}
+      <li v-for="(error, key) in fieldErrors" :key="key">
+        {{ fieldLabel(key) }} · {{ error }}
       </li>
     </ul>
     <form id="activity-form" class="activity-form" @submit.prevent="run('save')">
@@ -381,15 +385,22 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
           <UiIcon :name="group.icon" />{{ group.title }}
           <small v-if="group.icon === 'Calendar'">北京时间</small>
         </legend>
-        <button v-if="group.fields.some(([key]) => optionalField(key))" class="quiet optional-toggle" type="button"
-          :aria-expanded="!!optionalOpen[group.title]" @click="optionalOpen[group.title] = !optionalOpen[group.title]">
-          {{ optionalOpen[group.title] ? '收起选填项' : '展开选填项' }}
-        </button>
+        <RecruitmentEditor v-if="group.icon === 'User'" v-model="recruitment" :disabled="!!readonly || busy">
+          <template #whole>
+            <div class="field-grid quota-fields">
+              <div v-for="[key,title] in group.fields.filter(([k]) => quotaField(k))" :key="key" class="field" :class="{invalid:fieldErrors[key]}">
+                <label :for="'activity-' + key">{{ title }}</label>
+                <input :id="'activity-' + key" v-model="form[key]" type="number" :min="key === 'capacity' ? 1 : 0"
+                  step="1" :aria-invalid="!!fieldErrors[key]">
+                <small v-if="fieldErrors[key]" role="alert">{{ fieldErrors[key] }}</small>
+              </div>
+            </div>
+          </template>
+        </RecruitmentEditor>
         <div class="field-grid">
           <div
-            v-for="[key, title, type] in group.fields"
+            v-for="[key, title, type] in group.fields.filter(([k]) => !quotaField(k))"
             :key="key"
-            v-show="!optionalField(key) || optionalOpen[group.title] || !!fieldErrors[key]"
             class="field"
             :class="{ wide: type === 'textarea' || type === 'contacts', invalid: fieldErrors[key] }"
           >
@@ -398,20 +409,12 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
               ><small v-if="requirement(key)" class="requirement">{{ requirement(key) }}</small></label
             >
             <UiSelect
-              v-if="type === 'campus' || type === 'select'"
+              v-if="type === 'campus'"
               :id="'activity-' + key"
               :label="title"
               v-model="form[key]"
               :disabled="!!readonly || busy"
-              :options="
-                type === 'campus'
-                  ? options
-                  : [
-                      { value: '', label: '请选择口径' },
-                      { value: 'per_occurrence', label: '单次' },
-                      { value: 'whole_activity', label: '整期' },
-                    ]
-              "
+              :options="options"
             />
             <ActivityDateField
               v-else-if="type === 'date' || type === 'datetime-local'"
@@ -507,14 +510,6 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
             }}</small>
           </div>
         </div>
-        <p
-          v-if="
-            group.icon === 'User' && (restore || detail?.working_snapshot.content)?.selection_text
-          "
-          class="editor-hint"
-        >
-          原录取说明　{{ (restore || detail?.working_snapshot.content)?.selection_text }}
-        </p>
       </fieldset>
     </form>
     <div class="editor-actions">
@@ -567,7 +562,7 @@ watch([() => props.snapshot, busy, loading], ([snapshot]) => {
   justify-self: start;
 }
 
-.optional-toggle { justify-self: start; }
+.quota-fields { width: 100%; }
 .version-strip {
   display: flex;
   align-items: center;
