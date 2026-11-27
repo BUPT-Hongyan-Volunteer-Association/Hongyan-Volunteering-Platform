@@ -122,11 +122,14 @@ export class RegistrationController {
 
   @Sse('organizer/activities/:id/registration-events')
   async events(@Req() req: SessionRequest, @Param('id', ParseUUIDPipe) id: string, @Query('scope') requested?: string) {
-    const scope = workspaceScope(req.actor,requested);
-    if (!await this.db.activity.count({where:{id,...scope}})) invisible();
+    const scope = workspaceScope(req.actor, requested);
+    if (!await this.db.activity.count({where: {id, ...scope}})) invisible();
     // Only an invalidation travels over the stream. Reads always reauthorize; reconnects renew the session check.
-    return merge(of('*'),this.changes).pipe(filter(changed => changed === '*' || changed === id),
-      map(changed => ({data:changed === '*' ? 'connected' : 'changed'})),takeUntil(timer(60_000)));
+    return merge(of('*'), this.changes).pipe(
+      filter(changed => changed === '*' || changed === id),
+      map(changed => ({data: changed === '*' ? 'connected' : 'changed'})),
+      takeUntil(timer(60_000)),
+    );
   }
 
   @Get('organizer/activities/:id/registrations') roster(
@@ -147,7 +150,7 @@ export class RegistrationController {
         if (q.q !== undefined && typeof q.q !== 'string') invalid('q', '请输入姓名或学号');
         const answersVisible = req.actor.roles.includes('organizer') && q.scope !== 'all';
         if (!answersVisible && q.answer_filters !== undefined) denied();
-        const matching = rosterSearchWhere({ activity_id: id, q:q.q, item_id:q.item_id, answer_filters:q.answer_filters });
+        const matching = rosterSearchWhere({ activity_id: id, q: q.q, item_id: q.item_id, answer_filters: q.answer_filters });
         const counts = { ...zeroCounts };
         const grouped = await tx.registration.groupBy({
           by: ['status'],
@@ -169,16 +172,34 @@ export class RegistrationController {
                 select: { content: true },
               });
         const content = approved?.content as unknown as ActivityPublicationContent | undefined;
-        const inventory = await registrationInventory(tx,id,content);
+        const inventory = await registrationInventory(tx, id, content);
         const visiblePools = q.item_id ? inventory.filter(p => p.item_id === q.item_id) : inventory;
-        const where = {...matching,status};
-        const unique_student_count = await tx.student.count({where:{registrations:{some:where}}});
-        const schemas = answersVisible ? await tx.$queryRaw<{questionnaire_version:string;questions:unknown}[]>`
-          SELECT DISTINCT ON (questionnaire_version) questionnaire_version, questions FROM questionnaire_response
-          WHERE activity_id=${id}::uuid ORDER BY questionnaire_version` : [];
-        if (content?.questions?.length) {
-          const version = questionnaireVersion(content.questions);
-          if (!schemas.some(q=>q.questionnaire_version===version)) schemas.push({questionnaire_version:version,questions:content.questions});
+        const where = { ...matching, status };
+        const unique_student_count = await tx.student.count({where: {registrations: {some: where}}});
+        const currentQuestions = content?.questions ?? [];
+        const currentVersion = questionnaireVersion(currentQuestions);
+        const schemas = answersVisible ? await tx.$queryRaw<{
+          questionnaire_version: string; questions: unknown; submitted_at: Date | null;
+        }[]>`
+          SELECT v.questionnaire_version, response.questions, v.submitted_at FROM (
+            SELECT DISTINCT ON (q.questionnaire_version) q.questionnaire_version, q.id, h.submitted_at
+            FROM registration r
+            JOIN registration_history h ON h.registration_id = r.id AND h.response_id IS NOT NULL
+            JOIN questionnaire_response q ON q.id = h.response_id
+            WHERE r.activity_id = ${id}::uuid
+            ORDER BY q.questionnaire_version, h.submitted_at DESC
+          ) v JOIN questionnaire_response response ON response.id = v.id
+          ORDER BY v.submitted_at DESC, v.questionnaire_version` : [];
+        const question_versions = schemas.map(s => ({
+          questionnaire_version: s.questionnaire_version, questions: s.questions,
+          submitted_at: s.submitted_at?.toISOString(), is_current: s.questionnaire_version === currentVersion,
+        }));
+        if (currentQuestions.length) {
+          const i = question_versions.findIndex(s => s.is_current);
+          const current = i < 0 ? {
+            questionnaire_version: currentVersion, questions: currentQuestions, is_current: true, submitted_at: undefined,
+          } : question_versions.splice(i, 1)[0];
+          question_versions.unshift(current);
         }
         const rows =
           skip < total
@@ -200,9 +221,11 @@ export class RegistrationController {
           page_size,
           total,
           status_counts: counts,
-          accepted_count:visiblePools.reduce((n,p)=>n+p.accepted_count,0),
-          capacity:visiblePools.reduce((n,p)=>n+p.capacity,0),
-          item_availability:inventory, unique_student_count, question_versions:schemas,
+          accepted_count: visiblePools.reduce((n, p) => n + p.accepted_count, 0),
+          capacity: visiblePools.reduce((n, p) => n + p.capacity, 0),
+          item_availability: inventory,
+          unique_student_count,
+          question_versions,
           can_decide: canDecide(activity.status, content),
           items: rows.map((r) => ({
             ...registrationView(r),

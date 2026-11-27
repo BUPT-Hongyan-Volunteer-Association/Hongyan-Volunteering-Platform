@@ -17,8 +17,11 @@ import { answerView, checkCapacity, checkReactivation, checkSelections, pools, r
 const responseWithAnswers = { include: { answers: { orderBy: { position: 'asc' } } } } as const;
 export const includeResponse = {
   response: responseWithAnswers,
-  history: { where: { response_id: { not: null } }, orderBy: { version: 'desc' },
-    select: { submitted_at: true, response: responseWithAnswers } },
+  history: {
+    where: { response_id: { not: null } },
+    orderBy: { version: 'desc' },
+    select: { submitted_at: true, response: responseWithAnswers },
+  },
 } as const;
 export const rosterOrderBy = [
   { submitted_at: 'asc' },
@@ -27,41 +30,67 @@ export const rosterOrderBy = [
 
 /** 名单页面和导出共用的搜索条件；状态过滤由调用方决定是否叠加。 */
 type RosterFilters = {
-  activity_id: string; q?: string; item_id?: string; answer_filters?: string; registration_ids?: string[]; status?: string;
+  activity_id: string;
+  q?: string;
+  item_id?: string;
+  answer_filters?: string;
+  registration_ids?: string[];
+  status?: string;
 };
 const uuid = /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 function answerConditions(value?: string): Prisma.RegistrationWhereInput[] {
   if (value === undefined) return [];
-  if (typeof value !== 'string' || value.length > 32000) invalid('answer_filters','答案筛选格式无效');
+  if (typeof value !== 'string' || value.length > 32000) invalid('answer_filters', '答案筛选格式无效');
   let conditions: unknown;
-  try { conditions = JSON.parse(value); } catch { invalid('answer_filters','答案筛选格式无效'); }
-  if (!Array.isArray(conditions) || conditions.length > 100) invalid('answer_filters','答案筛选格式无效');
-  const entries: Prisma.QuestionnaireResponseWhereInput[] = conditions.map(c => {
-    if (!c || typeof c.question_id !== 'string' || !uuid.test(c.question_id) ||
-        (c.option_id !== undefined && (typeof c.option_id !== 'string' || !uuid.test(c.option_id))) ||
-        (c.answer_text !== undefined && (typeof c.answer_text !== 'string' || !c.answer_text.trim())) ||
-        (Boolean(c.option_id) === Boolean(c.answer_text)))
-      invalid('answer_filters','请选择题目和选项或填写关键词');
-    return {answers:{some:{question_id:c.question_id,
-      ...(c.option_id ? {option_ids:{has:c.option_id}} : {text:{contains:c.answer_text.trim(),mode:'insensitive'}}),
-    }}};
+  try {
+    conditions = JSON.parse(value);
+  } catch {
+    invalid('answer_filters', '答案筛选格式无效');
+  }
+  if (!Array.isArray(conditions) || conditions.length > 100) invalid('answer_filters', '答案筛选格式无效');
+  const entries: Prisma.QuestionnaireResponseWhereInput[] = conditions.map((c) => {
+    if (
+      !c ||
+      typeof c.question_id !== 'string' ||
+      !uuid.test(c.question_id) ||
+      (c.questionnaire_version !== undefined && (typeof c.questionnaire_version !== 'string' || !/^[0-9a-f]{64}$/.test(c.questionnaire_version))) ||
+      (c.option_id !== undefined && (typeof c.option_id !== 'string' || !uuid.test(c.option_id))) ||
+      (c.answer_text !== undefined && (typeof c.answer_text !== 'string' || !c.answer_text.trim())) ||
+      Boolean(c.option_id) === Boolean(c.answer_text)
+    )
+      invalid('answer_filters', '请选择题目和选项或填写关键词');
+    return {
+      questionnaire_version: c.questionnaire_version,
+      answers: {
+        some: {
+          question_id: c.question_id,
+          ...(c.option_id
+            ? { option_ids: { has: c.option_id } }
+            : { text: { contains: c.answer_text.trim(), mode: 'insensitive' } }),
+        },
+      },
+    };
   });
   if (!entries.length) return [];
   const response = { AND: entries };
-  return [{ OR: [{response}, {history:{some:{response}}}] }];
+  return [{ OR: [{ response }, { history: { some: { response } } }] }];
 }
 export function rosterSearchWhere(filters: RosterFilters): Prisma.RegistrationWhereInput {
   const search = filters.q?.trim();
   if (filters.item_id !== undefined && (typeof filters.item_id !== 'string' || !uuid.test(filters.item_id)))
-    invalid('item_id','报名项编号无效');
+    invalid('item_id', '报名项编号无效');
   return {
-    activity_id: filters.activity_id, item_id: filters.item_id, AND: answerConditions(filters.answer_filters),
+    activity_id: filters.activity_id,
+    item_id: filters.item_id,
+    AND: answerConditions(filters.answer_filters),
     ...(filters.registration_ids && { id: { in: filters.registration_ids } }),
-    ...(search && {student: {OR: [{ student_no: { contains: search } }, { account: { display_name: { contains: search } } }]}}),
+    ...(search && {
+      student: { OR: [{ student_no: { contains: search } }, { account: { display_name: { contains: search } } }] },
+    }),
   };
 }
 export function rosterWhere(filters: RosterFilters): Prisma.RegistrationWhereInput {
-  return {...rosterSearchWhere(filters), status:filters.status};
+  return { ...rosterSearchWhere(filters), status: filters.status };
 }
 
 export function approvedContent(activity: LoadedActivity) {
@@ -69,18 +98,25 @@ export function approvedContent(activity: LoadedActivity) {
   return revision?.content as unknown as ActivityPublicationContent | undefined;
 }
 
-type LoadedResponse = QuestionnaireResponse & {answers?: QuestionnaireAnswer[]};
-export function registrationView(row: Registration & {
-  response?: LoadedResponse | null;
-  history?: {submitted_at:Date;response?:LoadedResponse|null}[];
-}): View {
+type LoadedResponse = QuestionnaireResponse & { answers?: QuestionnaireAnswer[] };
+export function registrationView(
+  row: Registration & {
+    response?: LoadedResponse | null;
+    history?: { submitted_at: Date; response?: LoadedResponse | null }[];
+  },
+): View {
   const seen = new Set([row.response_id]);
-  const answer_history = (row.history ?? []).flatMap(h => {
+  const answer_history = (row.history ?? []).flatMap((h) => {
     const response = h.response;
     if (!response?.answers || seen.has(response.id)) return [];
     seen.add(response.id);
-    return [{submitted_at:h.submitted_at.toISOString(),questionnaire_version:response.questionnaire_version,
-      answers:response.answers.map(answerView)}];
+    return [
+      {
+        submitted_at: h.submitted_at.toISOString(),
+        questionnaire_version: response.questionnaire_version,
+        answers: response.answers.map(answerView),
+      },
+    ];
   });
   return {
     id: row.id,
@@ -89,9 +125,12 @@ export function registrationView(row: Registration & {
     version: row.version,
     status: row.status as View['status'],
     submitted_at: row.submitted_at.toISOString(),
-    ...(row.item_id !== wholeItemId && { item_id:row.item_id, item_label:row.item_label ?? undefined }),
-    ...(answer_history.length && {answer_history}),
-    ...(row.response?.answers && {questionnaire_version:row.response.questionnaire_version,answers:row.response.answers.map(answerView)}),
+    ...(row.item_id !== wholeItemId && { item_id: row.item_id, item_label: row.item_label ?? undefined }),
+    ...(answer_history.length && { answer_history }),
+    ...(row.response?.answers && {
+      questionnaire_version: row.response.questionnaire_version,
+      answers: row.response.answers.map(answerView),
+    }),
     ...(row.decision_reason !== null && { decision_reason: row.decision_reason }),
   };
 }
@@ -129,22 +168,40 @@ export function canWithdraw(activityStatus: string, registrationStatus: string) 
   return activityStatus === 'published' && ['submitted', 'waitlisted'].includes(registrationStatus);
 }
 
-function itemTime(approved:ActivityPublicationContent|undefined,id?:string) {
-  return approved?.registration_mode === 'batch' ? approved.registration_items?.find(item=>item.id===id) : undefined;
+function itemTime(approved: ActivityPublicationContent | undefined, id?: string) {
+  return approved?.registration_mode === 'batch'
+    ? approved.registration_items?.find((item) => item.id === id)
+    : undefined;
 }
 
-export function canDecide(activityStatus: string, approved: ActivityPublicationContent | undefined, itemId?:string, now=Date.now()) {
+export function canDecide(
+  activityStatus: string,
+  approved: ActivityPublicationContent | undefined,
+  itemId?: string,
+  now = Date.now(),
+) {
   const bounds = activityBounds(approved?.schedule);
-  const end = itemTime(approved,itemId)?.ends_at;
+  const end = itemTime(approved, itemId)?.ends_at;
   return activityStatus === 'published' && !!bounds && now < bounds.end && (!end || now < Date.parse(end));
 }
 
-export function canRequest(kind: 'exit' | 'restoration', activityStatus: string, status: string, approved: ActivityPublicationContent | undefined, itemId?:string) {
+export function canRequest(
+  kind: 'exit' | 'restoration',
+  activityStatus: string,
+  status: string,
+  approved: ActivityPublicationContent | undefined,
+  itemId?: string,
+) {
   if (activityStatus !== 'published') return false;
-  if (kind === 'restoration') return status === 'exited' && (approved?.registration_mode === 'batch'
-    ? canDecide(activityStatus,approved,itemId) : canRecruit(approved));
-  const start = itemTime(approved,itemId)?.starts_at;
-  return status === 'accepted' && (start ? Date.now() < Date.parse(start) : canRecruit(approved,true));
+  if (kind === 'restoration')
+    return (
+      status === 'exited' &&
+      (approved?.registration_mode === 'batch'
+        ? canDecide(activityStatus, approved, itemId)
+        : canRecruit(approved))
+    );
+  const start = itemTime(approved, itemId)?.starts_at;
+  return status === 'accepted' && (start ? Date.now() < Date.parse(start) : canRecruit(approved, true));
 }
 
 export async function apply(
@@ -163,37 +220,71 @@ export async function apply(
   if (!(opens < closes)) wrongState();
   if (received.getTime() < opens) throw new BusinessError(409, 'registration_not_open', '尚未到报名开放时间');
   if (received.getTime() >= closes) throw new BusinessError(409, 'registration_closed', '报名已截止');
-  const available = new Map(pools(approved).map(pool => [pool.id, pool]));
-  const ids = input.item_ids?.map(id => id.toLowerCase()) ?? [];
+  const available = new Map(pools(approved).map((pool) => [pool.id, pool]));
+  const ids = input.item_ids?.map((id) => id.toLowerCase()) ?? [];
   if (approved.registration_mode === 'batch') {
-    if (!ids.length || new Set(ids).size !== ids.length || ids.some(id => !available.has(id)))
-      invalid('item_ids','请选择有效且不同的报名项');
+    if (!ids.length || new Set(ids).size !== ids.length || ids.some((id) => !available.has(id)))
+      invalid('item_ids', '请选择有效且不同的报名项');
   } else {
-    if (ids.length) invalid('item_ids','整批报名无需选择岗位或时段');
+    if (ids.length) invalid('item_ids', '整批报名无需选择岗位或时段');
     ids.push(wholeItemId);
   }
   const relation = { activity_id: activity.id, student_id };
-  const previous = await tx.registration.findMany({where:relation,include:includeResponse});
-  const byItem = new Map(previous.map(row => [row.item_id,row]));
-  const selected = ids.map(id => byItem.get(id));
-  if (selected.some(row => row && ![...activeRegistrationStatuses,'withdrawn'].includes(row.status))) wrongState();
-  const fresh = ids.filter(id => !byItem.has(id) || byItem.get(id)!.status === 'withdrawn');
-  if (!fresh.length) return {items:ids.map(id => registrationView(byItem.get(id)!))};
-  checkSelections(approved,[...previous.filter(row=>activeRegistrationStatuses.some(s=>s===row.status)).map(row=>row.item_id), ...fresh]);
-  await checkCapacity(tx,activity.id,approved,fresh.map(item_id=>({item_id,status:'submitted'})));
-  const response_id = await responseFor(tx,activity.id,student_id,approved.questions ?? [],input);
-  const changed = [];
-  for (const item_id of fresh) {
-    const old = byItem.get(item_id);
-    const data = {status:'submitted',submitted_at:received,decision_reason:null,response_id,
-      item_label:item_id === wholeItemId ? null : available.get(item_id)!.label};
-    const current = old ? await tx.registration.update({where:{id:old.id},data:{...data,version:{increment:1}},include:includeResponse})
-      : await tx.registration.create({data:{...data,...relation,item_id},include:includeResponse});
-    byItem.set(item_id,current);
-    changed.push(current);
+  const previous = await tx.registration.findMany({
+    where: relation,
+    select: { id: true, item_id: true, status: true },
+  });
+  const byItem = new Map(previous.map((row) => [row.item_id, row]));
+  const selected = ids.flatMap((id) => byItem.get(id) ?? []);
+  if (selected.some((row) => ![...activeRegistrationStatuses, 'withdrawn'].includes(row.status))) wrongState();
+  const withdrawn = selected.filter((row) => row.status === 'withdrawn');
+  const fresh = ids.filter((id) => !byItem.has(id));
+  if (withdrawn.length || fresh.length) {
+    const adding = [...fresh, ...withdrawn.map((row) => row.item_id)];
+    checkSelections(approved, [
+      ...previous
+        .filter((row) => activeRegistrationStatuses.some((s) => s === row.status))
+        .map((row) => row.item_id),
+      ...adding,
+    ]);
+    await checkCapacity(
+      tx,
+      activity.id,
+      approved,
+      adding.map((item_id) => ({ item_id, status: 'submitted' })),
+    );
+    const response_id = await responseFor(tx, activity.id, student_id, approved.questions ?? [], input);
+    const data = {
+      status: 'submitted',
+      submitted_at: received,
+      decision_reason: null,
+      statement: null,
+      response_id,
+    };
+    const resumed = withdrawn.length
+      ? await tx.registration.updateManyAndReturn({
+          where: { id: { in: withdrawn.map((row) => row.id) } },
+          data: { ...data, version: { increment: 1 } },
+        })
+      : [];
+    const created = fresh.length
+      ? await tx.registration.createManyAndReturn({
+          data: fresh.map((item_id) => ({
+            ...data,
+            ...relation,
+            item_id,
+            item_label: item_id === wholeItemId ? null : available.get(item_id)!.label,
+          })),
+        })
+      : [];
+    await recordChanges(tx, [], [...resumed, ...created], received, actor);
   }
-  await recordChanges(tx,selected.filter((r): r is NonNullable<typeof r> => !!r && r.status === 'withdrawn'),changed,received,actor);
-  return {items:ids.map(id => registrationView(byItem.get(id)!))};
+  const rows = await tx.registration.findMany({
+    where: { ...relation, item_id: { in: ids } },
+    include: includeResponse,
+  });
+  const result = new Map(rows.map((row) => [row.item_id, registrationView(row)]));
+  return { items: ids.map((id) => result.get(id)!) };
 }
 
 export function canRecruit(content: ActivityPublicationContent | undefined, exit = false, now = new Date()) {

@@ -451,6 +451,10 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     const changed = await roster('item_id='+role+'&answer_filters='+filters);
     assert.equal(changed.items.find(r=>r.id!==bRow.id).answers[0].title,'培训');
     assert.equal(changed.question_versions.length,2);
+    assert.deepEqual(changed.question_versions.map(q=>[q.questionnaire_version,q.is_current]),[[newVersion,true],[version,false]]);
+    const byVersion = v => encodeURIComponent(JSON.stringify([{questionnaire_version:v,question_id:single,option_id:opt.id}]));
+    assert.deepEqual((await roster('item_id='+role+'&answer_filters='+byVersion(newVersion))).items.map(r=>r.id),[bRow.id]);
+    assert.equal((await roster('item_id='+role+'&answer_filters='+byVersion(version))).items[0].answers[0].labels[0],'培训已完成');
     const reapplyId = supplemental.id;
     success(await write(alice,'/me/registrations/'+reapplyId+'/withdraw',{expected_version:supplemental.version}));
     const updatedAnswers = [{question_id:single,option_ids:[other.id]},answers[1],{question_id:fill,text:'可协助摄影'}];
