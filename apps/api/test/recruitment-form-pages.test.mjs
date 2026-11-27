@@ -7,7 +7,7 @@ test('手机共答问卷、按项目报名，负责人实时筛选与逐项办�
   await withPages(t, async ({ first, db, owner, student, helper, web }) => {
     const base = await db.activityRevision.findFirstOrThrow({ where: { activity_id: first.id, revision: first.published_revision } });
     const ownerMember = await db.activityMember.findFirstOrThrow({ where: {activity_id:first.id, member_role:'owner'} });
-    const items = ['讲解岗', '签到岗', '布展岗'].map(role => ({ id: randomUUID(), role,
+    const items = ['讲解岗', '签到岗', '布展岗', '咨询岗'].map(role => ({ id: randomUUID(), role,
       starts_at:base.content.schedule.starts_at, ends_at:base.content.schedule.ends_at, capacity:1, waitlist_capacity:1 }));
     const option = label => ({ id:randomUUID(), label });
     const questionTitle = '是否有讲解经验，能够面向不同年龄段的读者介绍天文展品、安排参观路线，并在团队到场前独立完成设备检查？';
@@ -22,7 +22,7 @@ test('手机共答问卷、按项目报名，负责人实时筛选与逐项办�
       members:{create:{account_id:ownerMember.account_id,member_role:'owner'}},
       revisions:{create:{revision:1,revision_state:'approved',created_by:ownerMember.account_id,approved_at:new Date(),
         content:{...base.content,title,registration_mode:'batch',registration_items:items,allow_multiple_roles:true,
-          allow_multiple_slots:false,questions,capacity:3,waitlist_capacity:3,precautions:'请携带学生证',related_notes:'提前十分钟集合'}}},
+          allow_multiple_slots:false,questions,capacity:4,waitlist_capacity:4,precautions:'请携带学生证',related_notes:'提前十分钟集合'}}},
     }});
     await owner.setViewportSize({width:1440,height:900});
     await owner.goto(web + '/managed');
@@ -113,19 +113,26 @@ test('手机共答问卷、按项目报名，负责人实时筛选与逐项办�
     await link(helper, title).click();
     const other = helper.locator('form.signup');
     await other.getByRole('checkbox', {name:/讲解岗/}).check();
+    await other.getByRole('checkbox', {name:/咨询岗/}).check();
     await other.getByRole('radio', {name:'有经验'}).check();
     await other.getByRole('checkbox', {name:'接待',exact:true}).check();
     await other.getByRole('textbox', {name:'备注'}).fill('保留这段内容');
     const revision = await db.activityRevision.findFirstOrThrow({where:{activity_id:activity.id,revision:1}});
     const revised = structuredClone(questions);
     revised[0].options[0].label = '仅限周日';
+    const revisedItems = items.map(item => item.role === '咨询岗'
+      ? {...item, starts_at:new Date(Date.parse(item.starts_at) + 30 * 60000).toISOString()}
+      : item);
     await db.$transaction([
       db.activityRevision.create({data:{activity_id:activity.id,revision:2,revision_state:'approved',created_by:ownerMember.account_id,
-        approved_at:new Date(),content:{...revision.content,questions:revised}}}),
+        approved_at:new Date(),content:{...revision.content,questions:revised,registration_items:revisedItems}}}),
       db.activity.update({where:{id:activity.id},data:{working_revision:2,published_revision:2,version:{increment:1}}}),
     ]);
     await button(helper,'申请报名').click();
-    await visible(other.getByText('问卷已更新，请复核后提交'));
+    await visible(other.getByText('报名项目和问卷已更新，请重新选择变更的项目并复核答案'));
+    assert.equal(await other.getByRole('checkbox', {name:/咨询岗/}).isChecked(), false);
+    assert.equal(await other.getByRole('checkbox', {name:/讲解岗/}).isChecked(), true);
+    assert.equal(await db.registration.count({where:{activity_id:activity.id,item_id:items[3].id}}),0);
     assert.equal(await other.getByRole('textbox',{name:'备注'}).inputValue(), '保留这段内容');
     assert.ok(await other.getByRole('checkbox',{name:'接待',exact:true}).isChecked());
     assert.ok(!await other.getByRole('radio',{name:'仅限周日'}).isChecked());
