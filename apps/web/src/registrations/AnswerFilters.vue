@@ -21,6 +21,9 @@ const versionOptions = computed(() => {
 });
 const types = { text:'填空', single:'单选', multiple:'多选' };
 const questions = computed(() => versionsById.value.get(versionId.value)?.questions ?? []);
+const questionOptions = computed(() => questions.value.map(q => ({
+  value: q.id, label: q.title + '（' + types[q.type] + '）',
+})));
 function question(rule: Rule) {
   return questions.value.find(q => q.id === rule.question);
 }
@@ -54,7 +57,7 @@ function add() {
       <UiSelect label="筛选问卷版本" :model-value="versionId" :options="versionOptions" @update:model-value="setVersion" />
     </label>
     <div v-for="(rule, index) in rules" :key="rule.key" class="answer-rule">
-      <UiSelect label="筛选题目" :options="questions.map(q => ({value:q.id, label:q.title + '（' + types[q.type] + '）'}))"
+      <UiSelect label="筛选题目" class="question-filter" wrap-label :options="questionOptions"
         :model-value="rule.question" @update:model-value="setQuestion(rule, $event)" />
       <input v-if="question(rule)?.type === 'text'" type="search" placeholder="答案关键词" aria-label="答案关键词" v-model="rule.text" />
       <UiSelect v-else label="筛选答案" :options="[{value:'',label:'请选择答案'}, ...(question(rule)?.options ?? []).map(o => ({value:o.id,label:o.label}))]" v-model="rule.option" />
@@ -66,4 +69,5 @@ function add() {
 <style scoped>
 .answer-filters { margin: 8px 0; }
 .answer-rule { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:8px; --select-width:16rem; }
+.question-filter { --select-width: min(32rem, 100%); }
 </style>

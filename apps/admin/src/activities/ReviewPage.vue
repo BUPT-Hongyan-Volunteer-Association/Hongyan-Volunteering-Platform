@@ -41,8 +41,8 @@ function scheduleReturn() {
   const origin = window.history.state?.scheduleReturn;
   return typeof origin === 'string' && /^\/schedule(?:\?|$)/.test(origin) ? origin : undefined;
 }
-let serial = 0,
-  savedScroll = 0;
+let detailRequest: AbortController | undefined;
+let savedScroll = 0;
 const command = createCommand();
 const canDecide = computed(
   () =>
@@ -53,78 +53,88 @@ const canDecide = computed(
 let completed: ActivityReview | undefined;
 const queueError = ref('');
 const queueLoading = ref(false);
-let queueSerial = 0;
-async function loadQueue() {
-  const turn = ++queueSerial;
+let queueRequest: AbortController | undefined;
+const queueReady = ref(false);
+async function loadQueue(reset = false, restoreScroll = false) {
+  queueRequest?.abort();
+  const request = queueRequest = new AbortController();
   queueError.value = '';
   queueLoading.value = true;
-  rows.value = [];
+  if (reset) {
+    rows.value = [];
+    total.value = 0;
+    queueReady.value = false;
+  }
   try {
     const { data } = await listActivityReviews({
       query: { status: status.value, page: page.value },
-      throwOnError: true,
+      signal: request.signal, throwOnError: true,
     });
-    if (turn === queueSerial) {
-      rows.value = data.data.items;
-      total.value = data.data.total;
-      pageSize.value = data.data.page_size;
+    if (request.signal.aborted) return;
+    rows.value = data.data.items;
+    total.value = data.data.total;
+    pageSize.value = data.data.page_size;
+    queueReady.value = true;
+    if (restoreScroll && !route.params.id) {
+      await nextTick();
+      if (!request.signal.aborted) window.scrollTo(0, savedScroll);
     }
   } catch (e) {
-    if (turn === queueSerial) {
-      queueError.value = e instanceof Error ? e.message : '审核队列读取失败';
-      if (noAccess(e) && route.params.id) {
-        ++serial;
-        review.value = undefined;
-        currentPending.value = false;
-        loading.value = false;
-        error.value = queueError.value;
-      }
+    if (request.signal.aborted) return;
+    queueError.value = e instanceof Error ? e.message : '审核队列读取失败';
+    if (noAccess(e)) {
+      rows.value = [];
+      total.value = 0;
+      queueReady.value = false;
+      detailRequest?.abort();
+      review.value = undefined;
+      currentPending.value = false;
+      loading.value = false;
+      if (route.params.id) error.value = queueError.value;
     }
   } finally {
-    if (turn === queueSerial) {
-      queueLoading.value = false;
-      if (!route.params.id) {
-        await nextTick();
-        if (turn === queueSerial) window.scrollTo(0, savedScroll);
-      }
-    }
+    if (!request.signal.aborted) queueLoading.value = false;
   }
 }
 async function load() {
-  const n = ++serial;
-  loading.value = true;
+  detailRequest?.abort();
+  const id = route.params.id ? String(route.params.id) : '';
+  if (review.value?.id !== id) {
+    review.value = undefined;
+    currentPending.value = false;
+  }
   error.value = '';
-  review.value = undefined;
-  currentPending.value = false;
+  loading.value = !!id;
+  if (!id) return;
+  const request = detailRequest = new AbortController();
   try {
-    if (route.params.id) {
-      const id = String(route.params.id);
-      const r = (await getActivityReview({ path: { id }, throwOnError: true })).data.data;
-      if (n !== serial) return;
-      review.value = r;
-      currentPending.value = r.is_current_pending === true;
-      if (completed?.id === id) {
-        const origin = scheduleReturn();
-        if (origin)
-          await router.push({
-            path: '/schedule',
-            query: router.resolve(origin).query,
-            state: { scheduleNotice: notice.value },
-          });
-        else await router.push({ path: '/reviews', query: route.query });
-      }
+    const r = (await getActivityReview({ path: { id }, signal: request.signal, throwOnError: true })).data.data;
+    if (request.signal.aborted) return;
+    review.value = r;
+    currentPending.value = r.is_current_pending === true;
+    if (completed?.id === id) {
+      const origin = scheduleReturn();
+      if (origin)
+        await router.push({
+          path: '/schedule', query: router.resolve(origin).query,
+          state: { scheduleNotice: notice.value },
+        });
+      else await router.push({ path: '/reviews', query: route.query });
     }
   } catch (e) {
-    if (n === serial) {
-      error.value = '读取最新数据失败：' + (e instanceof Error ? e.message : '请重试');
-      if (noAccess(e)) void loadQueue();
+    if (request.signal.aborted) return;
+    error.value = '读取最新数据失败：' + (e instanceof Error ? e.message : '请重试');
+    currentPending.value = false;
+    if (noAccess(e)) {
+      review.value = undefined;
+      void loadQueue(true);
     }
   } finally {
-    if (n === serial) loading.value = false;
+    if (!request.signal.aborted) loading.value = false;
   }
 }
 async function decide(decision: 'approved' | 'rejected') {
-  if (!review.value || busy.value) return;
+  if (!review.value || !canDecide.value || loading.value || busy.value) return;
   if (decision === 'rejected' && !reason.value.trim()) {
     error.value = '请填写驳回原因';
     return;
@@ -175,7 +185,8 @@ watch(
     if (id && completed?.id !== id) notice.value = '';
     completed = undefined;
     reason.value = '';
-    if (!id || filter !== lastFilter || number !== lastPage) void loadQueue();
+    const changed = filter !== lastFilter || number !== lastPage;
+    if (!id || changed) void loadQueue(changed, !id);
     void load();
   },
   { immediate: true },
@@ -183,8 +194,8 @@ watch(
 onMounted(() => window.addEventListener('focus', refresh));
 onUnmounted(() => {
   window.removeEventListener('focus', refresh);
-  ++serial;
-  ++queueSerial;
+  detailRequest?.abort();
+  queueRequest?.abort();
 });
 </script>
 
@@ -200,7 +211,6 @@ onUnmounted(() => {
   </div>
   <p v-if="notice" role="status" class="notice">{{ notice }}</p>
   <p v-if="error" role="alert">{{ error }} <button @click="refresh">刷新</button></p>
-  <p v-if="loading" role="status">正在读取…</p>
   <RecordWorkspace :selected="!!route.params.id">
     <template #list>
       <StatusFilter v-if="!route.params.id" label="审核状态" :model-value="status"
@@ -209,7 +219,7 @@ onUnmounted(() => {
       <p v-if="queueError" role="alert">
         {{ queueError }} <button @click="refresh">重新读取队列</button>
       </p>
-      <p v-else-if="queueLoading" role="status">正在读取审核队列…</p>
+      <p v-else-if="queueLoading && !queueReady" role="status">正在读取审核队列…</p>
       <div v-else-if="rows.length" class="entry-list reading-area">
         <RouterLink
           v-for="r in rows"
@@ -236,7 +246,7 @@ onUnmounted(() => {
         <p>暂无匹配的审核</p>
       </div>
       <Pager
-        v-if="total > pageSize && !queueError && !queueLoading"
+        v-if="total > pageSize && !queueError"
         :page="page"
         :size="pageSize"
         :total="total"
@@ -244,6 +254,7 @@ onUnmounted(() => {
       />
     </template>
     <template #detail>
+      <p v-if="loading && !review" role="status">正在读取审核详情…</p>
       <article v-if="review" class="review-detail">
         <div class="page-title">
           <h2>{{ review.snapshot.content.title }} · 送审版本 {{ review.revision }}</h2>
@@ -292,8 +303,8 @@ onUnmounted(() => {
         <form v-if="canDecide" class="decision-form" @submit.prevent="decide('approved')">
           <label>审核意见（驳回必填）<textarea v-model="reason" rows="2" /></label>
           <div class="page-actions">
-            <button type="button" :disabled="busy" @click="decide('rejected')">驳回</button>
-            <button class="primary" type="submit" :disabled="busy">
+            <button type="button" :disabled="busy || loading" @click="decide('rejected')">驳回</button>
+            <button class="primary" type="submit" :disabled="busy || loading">
               <UiIcon name="Check" />批准发布
             </button>
           </div>

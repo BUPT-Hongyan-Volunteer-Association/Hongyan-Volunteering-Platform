@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { button, fits, link, openOptions, pickOption, visible, withPages } from './page-environment.mjs';
+import { button, fits, holdResponse, link, openOptions, pickOption, settleRender, visible, withPages } from './page-environment.mjs';
 
 test('手机共答问卷、按项目报名，负责人实时筛选与逐项办理', async t => {
   await withPages(t, async ({ first, db, owner, student, helper, web }) => {
@@ -10,8 +10,9 @@ test('手机共答问卷、按项目报名，负责人实时筛选与逐项办�
     const items = ['讲解岗', '签到岗', '布展岗'].map(role => ({ id: randomUUID(), role,
       starts_at:base.content.schedule.starts_at, ends_at:base.content.schedule.ends_at, capacity:1, waitlist_capacity:1 }));
     const option = label => ({ id:randomUUID(), label });
+    const questionTitle = '是否有讲解经验，能够面向不同年龄段的读者介绍天文展品、安排参观路线，并在团队到场前独立完成设备检查？';
     const questions = [
-      { id:randomUUID(),type:'single',title:'是否有讲解经验',required:true,options:[option('有经验'),option('初次参加')] },
+      { id:randomUUID(),type:'single',title:questionTitle,required:true,options:[option('有经验'),option('初次参加')] },
       { id:randomUUID(),type:'multiple',title:'熟悉的任务',required:true,options:[option('接待'),option('记录')] },
       { id:randomUUID(),type:'text',title:'备注',required:true },
     ];
@@ -59,6 +60,22 @@ test('手机共答问卷、按项目报名，负责人实时筛选与逐项办�
     const studentCount = await db.questionnaireResponse.count({where:{activity_id:activity.id}});
     assert.equal(studentCount,1);
     await button(owner,'按答卷筛选').click();
+    const selectedQuestion = owner.locator('.question-filter');
+    for (const width of [320, 390, 1440]) {
+      await owner.setViewportSize({width, height:900});
+      await settleRender(owner);
+      assert.equal(await selectedQuestion.getByRole('combobox').getAttribute('aria-expanded'), 'false');
+      const shown = await selectedQuestion.evaluate(control => {
+        const label = control.querySelector('.el-select__placeholder span');
+        const range = document.createRange();
+        range.selectNodeContents(label);
+        const box = control.getBoundingClientRect();
+        return { text: label.textContent, visible: [...range.getClientRects()].every(line =>
+          line.left >= box.left && line.right <= box.right + 1 && line.top >= box.top && line.bottom <= box.bottom + 1) };
+      });
+      assert.deepEqual(shown, {text:questionTitle + '（单选）', visible:true});
+      await fits(owner);
+    }
     await pickOption(owner,'筛选题目','备注（填空）');
     await owner.getByRole('searchbox',{name:'答案关键词'}).fill('不存在');
     await visible(owner.getByText('暂无匹配的报名'));
@@ -126,5 +143,44 @@ test('手机共答问卷、按项目报名，负责人实时筛选与逐项办�
     await visible(owner.getByText('共 2 人次、1 人', {exact:false}));
     assert.equal(await owner.getByRole('cell', {name:'0000000004', exact:true}).count(), 0);
     assert.equal(await owner.getByRole('cell', {name:'0000000001', exact:true}).count(), 2);
+  });
+});
+
+test('审核队列和详情在焦点复核时保持原位，切换记录和失权清除旧详情', async t => {
+  await withPages(t, async ({teacher, admin, db}) => {
+    const pending = await db.activityReview.findFirstOrThrow({where:{status:'pending'}});
+    const approved = await db.activityReview.findFirstOrThrow({where:{status:'approved'}});
+    await teacher.goto(admin + '/reviews/' + pending.id);
+    const pane = teacher.locator('.review-detail');
+    const row = teacher.locator('.record-list-pane .entry-list a').first();
+    await visible(pane);
+    await visible(row);
+    const note = teacher.getByLabel('审核意见（驳回必填）');
+    await note.fill('已核对服务安排，稍后提交');
+    const queue = await holdResponse(teacher, url => url.pathname === '/api/v1/admin/activity-reviews');
+    const same = await holdResponse(teacher, url => url.pathname.endsWith('/' + pending.id));
+    try {
+      await teacher.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await Promise.all([same.received, queue.received]);
+      assert.ok(await pane.isVisible());
+      assert.ok(await row.isVisible());
+      assert.equal(await note.inputValue(), '已核对服务安排，稍后提交');
+      assert.ok(await button(teacher, '批准发布').isDisabled());
+    } finally {
+      await Promise.all([queue.release(), same.release()]);
+    }
+    await teacher.getByRole('button',{name:'批准发布',disabled:false}).waitFor();
+    const denied = await holdResponse(teacher, url => url.pathname.endsWith('/' + approved.id), {status:403});
+    try {
+      await teacher.evaluate(id => {
+        history.pushState(history.state, '', '/reviews/' + id);
+        dispatchEvent(new PopStateEvent('popstate', {state:history.state}));
+      }, approved.id);
+      await denied.received;
+      assert.equal(await pane.count(),0);
+      assert.equal(await button(teacher,'批准发布').count(),0);
+    } finally { await denied.release(); }
+    await visible(teacher.getByRole('alert').filter({hasText:'读取最新数据失败'}));
+    assert.equal(await pane.count(),0);
   });
 });
