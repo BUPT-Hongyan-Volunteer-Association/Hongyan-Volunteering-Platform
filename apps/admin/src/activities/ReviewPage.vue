@@ -283,7 +283,7 @@ onUnmounted(() => {
           <p v-else>与原公开版本一致</p>
         </section>
         <section v-if="review.item_availability?.length" aria-label="报名人数汇总">
-          <h3>报名人数汇总</h3>
+          <h3>报名人数汇总 · {{ review.published_registration_revision == null ? '送审版 ' + review.revision : '当前公开版 ' + review.published_registration_revision }}</h3>
           <div class="table-scroll"><table>
             <thead><tr><th scope="col">报名项</th><th scope="col">待处理</th><th scope="col">已录取 / 名额</th><th scope="col">候补 / 名额</th></tr></thead>
             <tbody><tr v-for="item in review.item_availability" :key="item.item_id || 'whole'">

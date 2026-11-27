@@ -11,7 +11,14 @@ type Condition = { questionnaire_version:string; question_id:string; option_id?:
 const rules = ref<Rule[]>([]);
 let sequence = 0;
 const versionId = ref('');
+const notice = ref('');
 const versionsById = computed(() => new Map(props.versions.map(version => [version.questionnaire_version, version])));
+watch(versionsById, versions => {
+  if (!rules.value.length || versions.has(versionId.value)) return;
+  rules.value = [];
+  versionId.value = '';
+  notice.value = '问卷已更新，原筛选条件已清除。';
+});
 const versionOptions = computed(() => {
   let historic = 0;
   return props.versions.map(version => ({
@@ -47,11 +54,13 @@ function setVersion(version: string) {
   for (const rule of rules.value) setQuestion(rule, question(rule)?.id ?? questions.value[0]?.id ?? '');
 }
 function add() {
+  notice.value = '';
   if (!rules.value.length) versionId.value = props.versions[0]?.questionnaire_version ?? '';
   rules.value.push({key:++sequence, question:questions.value[0]?.id ?? '', option:'', text:''});
 }
 </script>
 <template>
+  <p v-if="notice" role="status">{{ notice }}</p>
   <div v-if="versions.length" class="answer-filters">
     <label v-if="rules.length && versions.length > 1" class="answer-rule">问卷版本
       <UiSelect label="筛选问卷版本" :model-value="versionId" :options="versionOptions" @update:model-value="setVersion" />

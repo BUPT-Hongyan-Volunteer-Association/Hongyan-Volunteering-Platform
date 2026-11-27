@@ -99,7 +99,7 @@ export class ReviewController {
         });
         const config = (published?.content ?? item.snapshot.content) as unknown as ActivityPublicationContent;
         const item_availability = await registrationInventory(tx, review.activity_id, config);
-        return envelope({ ...item, item_availability, is_current_pending: isCurrentPending(review, review.activity, item.snapshot.revision_state) });
+        return envelope({ ...item, item_availability, published_registration_revision: review.activity.published_revision, is_current_pending: isCurrentPending(review, review.activity, item.snapshot.revision_state) });
       },
       { isolationLevel: 'RepeatableRead' },
     );

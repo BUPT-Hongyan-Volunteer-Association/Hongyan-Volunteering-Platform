@@ -1,5 +1,5 @@
 import { Client } from 'pg';
-import { Observable, share } from 'rxjs';
+import { map, Observable, ReplaySubject, share } from 'rxjs';
 
 // All open rosters on this API instance use one PostgreSQL listener. NOTIFY is delivered after commit.
 export function rosterEvents() {
@@ -20,5 +20,9 @@ export function rosterEvents() {
     return () => {
       void client.end().catch(() => undefined);
     };
-  }).pipe(share());
+  }).pipe(
+    share({ connector: () => new ReplaySubject<string>(1) }),
+    // Each new connection rereads its roster once the shared listener is ready.
+    map((event, index) => index === 0 ? '*' : event),
+  );
 }

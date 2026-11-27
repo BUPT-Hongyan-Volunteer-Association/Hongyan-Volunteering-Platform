@@ -1,5 +1,5 @@
 import { parseActivityFilters, publishedActivityFilter } from './filters.js';
-import { Controller, Get, Param, ParseUUIDPipe, Query, Req } from '@nestjs/common';
+import { Controller, Get, Header, Param, ParseUUIDPipe, Query, Req } from '@nestjs/common';
 import { Database } from '../database.js';
 import { envelope, invalid, invisible } from '../http.js';
 import type { SessionRequest } from '../auth/session.guard.js';
@@ -12,7 +12,9 @@ import { includeView, project } from './read.js';
 @Controller('activities')
 export class PublicController {
   constructor(private db: Database) {}
-  @Get() async list(@Req() req: SessionRequest, @Query() q: Record<string, string>) {
+  @Get()
+  @Header('Cache-Control', 'private, no-store')
+  async list(@Req() req: SessionRequest, @Query() q: Record<string, string>) {
     const scope = q.scope ?? 'public';
     if (scope !== 'public' && scope !== 'mine') invalid('scope', '公开查询范围无效');
     const range = parseActivityFilters(q, false);
@@ -20,7 +22,9 @@ export class PublicController {
     const where = publishedActivityFilter(scope, q.status, studentId);
     return envelope(await activityPage(this.db, where, 'public', q, { studentId, range }));
   }
-  @Get(':id') async detail(
+  @Get(':id')
+  @Header('Cache-Control', 'private, no-store')
+  async detail(
     @Req() req: SessionRequest,
     @Param('id', ParseUUIDPipe) id: string,
   ) {

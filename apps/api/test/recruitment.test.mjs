@@ -485,6 +485,18 @@ test('招募写入、最后一席竞争及通知回执使用独立库', async (t
     assert.equal((await roster('answer_filters='+filters+'&item_id='+later)).total,1);
     const incompatible = encodeURIComponent(JSON.stringify([{question_id:single,option_id:other.id},{question_id:fill,answer_text:'讲解'}]));
     assert.equal((await roster('answer_filters='+incompatible+'&item_id='+later)).total,0);
+    const myList = await alice.request('/me/registrations');
+    assert.ok(myList.data.items.some(r=>r.id===reapplyId));
+    assert.ok(myList.data.items.every(r=>!Object.hasOwn(r,'answers') && !Object.hasOwn(r,'answer_history')));
+    const [myDetail] = success(await alice.request('/me/registrations?id='+reapplyId)).items;
+    assert.deepEqual(myDetail.answers,updated.answers);
+    assert.deepEqual(myDetail.answer_history,updated.answer_history);
+    assert.deepEqual(await roster('item_id='+role.toUpperCase()), await roster('item_id='+role));
+    for (const [actor, url] of [[alice,'/activities'],[alice,path],[alice,'/me/registrations?id='+reapplyId],[owner,'/organizer'+path+'/registrations?scope=managed']]) {
+      const result = await actor.raw(url);
+      assert.equal(result.headers.get('cache-control'), 'private, no-store');
+      await result.body.cancel();
+    }
     const aliceRows = (await detail(alice)).my_registrations;
     const picked = aliceRows.filter(r=>[role,second].includes(r.item_id));
     const acceptedRows = success(await write(owner,'/organizer'+path+'/registration-decisions',{

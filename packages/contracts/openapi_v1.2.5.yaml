@@ -1428,7 +1428,7 @@ paths:
       parameters:
       - name: id
         in: query
-        description: 从本人记录中定位一条报名详情。
+        description: 从本人记录中定位一条报名详情，含本次答卷及历史答卷。列表仅返回报名摘要。
         schema:
           type: string
           format: uuid
@@ -7556,6 +7556,11 @@ components:
       type: object
       properties:
         item_availability: {type: array, items: {$ref: '#/components/schemas/item_inventory'}}
+        published_registration_revision:
+          type: [integer, 'null']
+          minimum: 1
+          readOnly: true
+          description: 单条审核详情中的人数汇总采用的公开版本号。尚未发布时为 null，此时按送审版本的名额展示。
         id:
           type: string
           format: uuid

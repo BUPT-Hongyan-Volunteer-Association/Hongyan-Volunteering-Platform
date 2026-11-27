@@ -148,9 +148,10 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
         expected.slice((page - 1) * 2, page * 2).map((r) => r.id),
       );
       for (const review of result.data.items) {
-        const { is_current_pending, item_availability, ...snapshot } = (await teacher.request(queue + '/' + review.id)).data;
+        const { is_current_pending, item_availability, published_registration_revision, ...snapshot } = (await teacher.request(queue + '/' + review.id)).data;
         assert.deepEqual(review, snapshot);
         assert.ok(Array.isArray(item_availability));
+        assert.ok(published_registration_revision === null || Number.isInteger(published_registration_revision));
         assert.equal(is_current_pending, review.status === 'pending');
         assert.equal(review.snapshot.activity_id, review.activity_id);
         seen.push(review);
@@ -350,7 +351,9 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     await edit({ registration_items:[firstItem,{...nextItem,waitlist_capacity:0}] });
     const changed = (await send()).data;
     assert.equal((await other.write('POST',publicPath + '/registrations',{published_revision:publicView.published_revision,item_ids:[nextItem.id]})).status,201);
-    const summary = (await teacher.request('/admin/activity-reviews/' + changed.id)).data.item_availability;
+    const {item_availability: summary, published_registration_revision} = (await teacher.request('/admin/activity-reviews/' + changed.id)).data;
+    assert.equal(published_registration_revision, publicView.published_revision);
+    assert.notEqual(published_registration_revision, changed.revision);
     assert.equal(summary.find(row=>row.item_id===nextItem.id).submitted_count,2);
     assert.equal((await decide(changed,'approved')).code,'capacity_conflict');
     assert.equal((await student.request(publicPath)).data.item_availability[1].waitlist_capacity,1);

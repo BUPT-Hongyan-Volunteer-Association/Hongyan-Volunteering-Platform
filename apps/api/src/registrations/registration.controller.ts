@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   Param,
   ParseUUIDPipe,
@@ -17,7 +18,7 @@ import type {
   RegistrationInput,
   RosterStatusCounts,
 } from '@hongyan/contracts/types';
-import { filter, map, merge, of, takeUntil, timer } from 'rxjs';
+import { filter, map, takeUntil, timer } from 'rxjs';
 import { rosterEvents } from './roster-events.js';
 import { registrationInventory, questionnaireVersion } from './enrollment.js';
 import { pagination, workspaceScope } from '../activities/read.js';
@@ -66,7 +67,9 @@ export class RegistrationController {
     );
   }
 
-  @Get('me/registrations') mine(@Req() req: SessionRequest, @Query() q: Record<string, string>) {
+  @Get('me/registrations')
+  @Header('Cache-Control', 'private, no-store')
+  mine(@Req() req: SessionRequest, @Query() q: Record<string, string>) {
     const student_id = studentId(req.actor);
     if (
       q.id !== undefined &&
@@ -85,7 +88,7 @@ export class RegistrationController {
                 orderBy: [{ submitted_at: 'desc' }, { id: 'asc' }],
                 skip,
                 take: page_size,
-                include: { ...includeResponse, activity: { select: { published_revision: true, status: true } }, exit_requests: { where: { status: 'pending' }, select: { id: true, kind: true } } },
+                include: { ...(q.id && includeResponse), activity: { select: { published_revision: true, status: true } }, exit_requests: { where: { status: 'pending' }, select: { id: true, kind: true } } },
               })
             : [];
         const versions = rows.flatMap((r) =>
@@ -125,14 +128,16 @@ export class RegistrationController {
     const scope = workspaceScope(req.actor, requested);
     if (!await this.db.activity.count({where: {id, ...scope}})) invisible();
     // Only an invalidation travels over the stream. Reads always reauthorize; reconnects renew the session check.
-    return merge(of('*'), this.changes).pipe(
+    return this.changes.pipe(
       filter(changed => changed === '*' || changed === id),
       map(changed => ({data: changed === '*' ? 'connected' : 'changed'})),
       takeUntil(timer(60_000)),
     );
   }
 
-  @Get('organizer/activities/:id/registrations') roster(
+  @Get('organizer/activities/:id/registrations')
+  @Header('Cache-Control', 'private, no-store')
+  roster(
     @Req() req: SessionRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Query() q: Record<string, string>,
@@ -173,7 +178,7 @@ export class RegistrationController {
               });
         const content = approved?.content as unknown as ActivityPublicationContent | undefined;
         const inventory = await registrationInventory(tx, id, content);
-        const visiblePools = q.item_id ? inventory.filter(p => p.item_id === q.item_id) : inventory;
+        const visiblePools = q.item_id ? inventory.filter(p => p.item_id === q.item_id.toLowerCase()) : inventory;
         const where = { ...matching, status };
         const unique_student_count = await tx.student.count({where: {registrations: {some: where}}});
         const currentQuestions = content?.questions ?? [];
