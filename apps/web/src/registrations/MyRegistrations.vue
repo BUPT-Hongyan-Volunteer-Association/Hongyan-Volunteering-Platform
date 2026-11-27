@@ -42,7 +42,7 @@ const rows = computed(() =>
     summary: [
       row.pending_exit_request_id && '退出申请待处理',
       row.pending_restoration_request_id && '恢复申请待处理',
-      row.statement && '申请说明 · ' + row.statement,
+      row.item_label,
       row.decision_reason && '处理说明 · ' + row.decision_reason,
     ]
       .filter(Boolean)
@@ -92,7 +92,12 @@ onUnmounted(() => {
         </template>
       </RecordSummaryList>
       <p v-else>{{ item ? '未找到该报名记录' : '暂无符合条件的报名记录' }}</p>
-      <RequestQueue v-if="item && result.items[0]" :registration="result.items[0]" :writes-paused="refreshing"
+      <dl v-if="item && result.items[0]?.answers?.length" class="registration-answers" aria-label="我的答卷">
+        <template v-for="answer in result.items[0].answers" :key="answer.question_id">
+          <dt>{{ answer.title }}</dt><dd>{{ answer.text || answer.labels?.join('、') || '未填写' }}</dd>
+        </template>
+      </dl>
+      <RequestQueue :key="item" v-if="item && result.items[0]" :registration="result.items[0]" :writes-paused="refreshing"
         @changed="msg => { feedback = msg; load(); }" />
       <Pager
         v-if="!item"
@@ -104,3 +109,7 @@ onUnmounted(() => {
     </template>
   </section>
 </template>
+
+<style scoped>
+.registration-answers dd { white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>

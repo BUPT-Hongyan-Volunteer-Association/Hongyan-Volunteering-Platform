@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { serviceDates, serviceDateText } from '@hongyan/contracts/activity';
+import { activityBounds, serviceDates, serviceDateText } from '@hongyan/contracts/activity';
 import { hasStudentAccess } from '../identity';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
@@ -14,7 +14,7 @@ import {
 } from '@hongyan/contracts';
 import { dateWindow, validDate, validUnit, windowLabel } from '@hongyan/ui/timeWindow';
 import {
-  localDate,
+  activityPrimaryStatus, localDate,
   phaseLabels,
   phaseOptions,
 } from '@hongyan/ui/activityDisplay';
@@ -89,8 +89,7 @@ async function load(keepDetail = false) {
   const index = ++serial;
   busy.value = true;
   error.value = '';
-  if (!keepDetail) detail.value = undefined;
-  rows.value = [];
+  if (!keepDetail) { detail.value = undefined; rows.value = []; }
   search.value = String(route.query.q ?? '');
   try {
     if (route.params.id) {
@@ -134,13 +133,15 @@ async function load(keepDetail = false) {
     }
   }
 }
-function applied(record: Registration) {
-  if (detail.value?.id !== record.activity_id) return;
-  detail.value = { ...detail.value, my_registration_status: record.status };
+function applied(records: Registration[]) {
+  if (!detail.value || !records.length || records.some(record => record.activity_id !== detail.value?.id)) return;
+  const own = new Map((detail.value.my_registrations ?? []).map(row => [row.id, row]));
+  for (const record of records) own.set(record.id, record);
+  detail.value = { ...detail.value, my_registrations: [...own.values()], my_registration_status: records[0].status };
   void load(true);
 }
 function refreshDetail() {
-  if (route.params.id) void load(true);
+  void load(true);
 }
 watch(
   () => route.fullPath,
@@ -148,18 +149,17 @@ watch(
   { immediate: true },
 );
 // Re-read at the next server-evaluated boundary even if the student keeps this tab open.
-watch(detail, (activity, _, cleanup) => {
-  if (!activity) return;
-  const boundary =
-    activity.registration_phase === 'not_open'
-      ? activity.registration_opens_at
-      : activity.registration_phase === 'open'
-        ? activity.registration_closes_at
-        : undefined;
-  if (!boundary || !activity.state_evaluated_at) return;
-  const delay = Date.parse(boundary) - Date.parse(activity.state_evaluated_at);
-  if (!Number.isFinite(delay)) return;
-  const timer = window.setTimeout(refreshDetail, Math.min(2147483647, Math.max(1, delay)));
+watch([detail, rows], ([current, list], _, cleanup) => {
+  let delay = Infinity;
+  for (const activity of current ? [current] : list) {
+    if (!activity.state_evaluated_at || activity.status !== 'published') continue;
+    const now = Date.parse(activity.state_evaluated_at);
+    const bounds = activityBounds(activity.schedule);
+    const boundaries = [Date.parse(activity.registration_opens_at ?? ''), Date.parse(activity.registration_closes_at ?? ''), bounds?.start, bounds?.end];
+    for (const at of boundaries) if (at !== undefined && at > now) delay = Math.min(delay, at - now);
+  }
+  if (delay === Infinity) return;
+  const timer = window.setTimeout(refreshDetail, Math.min(2147483647, delay));
   cleanup(() => window.clearTimeout(timer));
 });
 onMounted(() => window.addEventListener('focus', refreshDetail));
@@ -178,7 +178,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
       v-if="detail"
       :activity="detail"
       :key="detail.id"
-      :refreshing="busy"
+      :refreshing="busy" :student="profile.student" @refresh="refreshDetail"
       @applied="applied"
       :show-registrations="hasStudentAccess(profile)"
     />
@@ -317,7 +317,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
                   v-if="row.registration_phase"
                   class="state-chip"
                   :class="{ neutral: row.registration_phase !== 'open' }"
-                  >{{ phaseLabels[row.registration_phase] }}</span
+                  >{{ activityPrimaryStatus(row) }}</span
                 >
               </div>
               <p class="entry-description" v-if="row.description">{{ row.description }}</p>

@@ -2,63 +2,22 @@
 import { serviceDateText } from '@hongyan/contracts/activity';
 import { computed, ref } from 'vue';
 import UiIcon, { type IconName } from '@hongyan/ui/UiIcon.vue';
-import { localDateTime as date } from '@hongyan/ui/activityDisplay';
+import ActivitySignup from './ActivitySignup.vue';
+import { activityPrimaryStatus, localDateTime as date } from '@hongyan/ui/activityDisplay';
 import {
-  applyForActivity,
-  createCommand,
   listMyNotices,
-  type Activity,
+  type Activity, type Student,
   type Registration,
 } from '@hongyan/contracts';
 import { usePageRead } from '@hongyan/ui/usePageRead';
-import { registrationLabels } from '../registrations/labels';
 const props = defineProps<{
   activity: Activity;
   showRegistrations: boolean;
   refreshing: boolean;
+  student?: Student;
 }>();
-const emit = defineEmits<{ applied: [registration: Registration] }>();
-const saving = ref(false);
-const applyError = ref('');
-const command = createCommand();
-const showSignupDates = computed(() => props.showRegistrations && props.activity.status === 'published' &&
-  (!props.activity.my_registration_status || props.activity.my_registration_status === 'withdrawn'));
-const canApply = computed(
-  () =>
-    props.showRegistrations &&
-    props.activity.registration_phase === 'open' &&
-    (!props.activity.my_registration_status ||
-      props.activity.my_registration_status === 'withdrawn'),
-);
-const buttonLabel = computed(() => {
-  if (saving.value) return '正在提交…';
-  const status = props.activity.my_registration_status;
-  return status === 'withdrawn' && canApply.value
-    ? '重新申请报名'
-    : status
-      ? registrationLabels[status]
-      : '申请报名';
-});
-async function submit() {
-  if (!canApply.value || saving.value || props.refreshing) return;
-  saving.value = true;
-  applyError.value = '';
-  const id = props.activity.id;
-  try {
-    const { data } = await applyForActivity({
-      path: { id },
-      body: {},
-      headers: command.headers('apply_for_activity', id, {}),
-      throwOnError: true,
-    });
-    command.confirmed();
-    emit('applied', data.data);
-  } catch (e) {
-    applyError.value = e instanceof Error ? e.message : '报名提交失败，请重试';
-  } finally {
-    saving.value = false;
-  }
-}
+const emit = defineEmits<{ applied: [registrations: Registration[]]; refresh: [] }>();
+const showSignupDates = computed(() => props.showRegistrations && props.activity.status === 'published');
 const origin = window.history.state?.scheduleReturn;
 const scheduleReturn =
   typeof origin === 'string' && /^\/(?:mine\/)?schedule(?:\?|$)/.test(origin) ? origin : undefined;
@@ -81,17 +40,10 @@ const { data: pendingNotices } = usePageRead(
       })).data.data.total
     : 0,
 );
-const phases = {
-  open: '报名中',
-  not_open: '尚未开放',
-  closed: '报名已截止',
-  unavailable: '当前不可报名',
-};
 const conditions: [keyof Activity, string, IconName][] = [
   ['meeting_point', '集合地点', 'Location'],
   ['transport_notes', '交通', 'Guide'],
-  ['eligibility_text', '报名条件', 'User'],
-  ['safety_notes', '安全说明', 'Warning'],
+  ['safety_notes', '安全或培训说明', 'Warning'],
   ['group_join_instructions', '入群方式', 'Message'],
 ];
 </script>
@@ -115,7 +67,7 @@ const conditions: [keyof Activity, string, IconName][] = [
       <div class="detail-intro">
         <div class="page-actions">
           <span v-if="activity.registration_phase" class="phase">{{
-            phases[activity.registration_phase]
+            activityPrimaryStatus(activity)
           }}</span>
         </div>
         <h1>{{ activity.title }}</h1>
@@ -128,6 +80,10 @@ const conditions: [keyof Activity, string, IconName][] = [
           <dd>{{ serviceDateText(activity.schedule) }}</dd>
           <dt><UiIcon name="User" />录取名额</dt>
           <dd>{{ activity.capacity }} 人</dd>
+          <dt><UiIcon name="User" />候补名额</dt><dd>{{ activity.waitlist_capacity ?? 0 }} 人</dd>
+          <template v-if="activity.registration_mode !== 'batch' && activity.item_availability?.[0]">
+            <dt>剩余可报</dt><dd>{{ activity.item_availability[0].remaining }} 人</dd>
+          </template>
           <template v-if="showSignupDates && activity.registration_opens_at">
             <dt><UiIcon name="Calendar" />报名开放</dt>
             <dd><time :datetime="activity.registration_opens_at">{{ date(activity.registration_opens_at) }}</time></dd>
@@ -137,13 +93,9 @@ const conditions: [keyof Activity, string, IconName][] = [
             <dd><mark><time :datetime="activity.registration_closes_at">{{ date(activity.registration_closes_at) }}</time></mark></dd>
           </template>
         </dl>
-        <section v-if="activity.expected_hours || activity.hours_import_date || activity.hours_rule_text" class="service-hours">
+        <section v-if="activity.hours_import_date || activity.hours_rule_text" class="service-hours">
           <h2>服务时长</h2>
           <dl>
-            <template v-if="activity.expected_hours">
-              <dt>预计时长</dt>
-              <dd>{{ activity.expected_hours_basis === 'whole_activity' ? '整期' : '每次' }} {{ activity.expected_hours }} 小时</dd>
-            </template>
             <template v-if="activity.hours_rule_text">
               <dt>时长认定</dt>
               <dd>{{ activity.hours_rule_text }}</dd>
@@ -161,6 +113,8 @@ const conditions: [keyof Activity, string, IconName][] = [
           <p v-if="activity.description">{{ activity.description }}</p>
           <p v-if="activity.beneficiaries">服务对象 · {{ activity.beneficiaries }}</p>
         </section>
+        <section v-if="activity.precautions"><h2>注意事项</h2><p class="description">{{ activity.precautions }}</p></section>
+        <section v-if="activity.related_notes"><h2>相关说明</h2><p class="description">{{ activity.related_notes }}</p></section>
         <section v-if="activity.group_qr_id || conditions.some(([key]) => activity[key])">
           <h2>集合与参与条件</h2>
           <dl class="conditions">
@@ -175,20 +129,9 @@ const conditions: [keyof Activity, string, IconName][] = [
         </section>
       </div>
     </div>
-    <footer class="detail-footer">
-      <button class="primary" :disabled="!canApply || saving || refreshing" @click="submit">
-        {{ buttonLabel }}
-      </button>
-      <small v-if="applyError" role="alert">{{ applyError }}</small>
-      <small v-else-if="!showRegistrations">需要学生身份才能报名</small>
-      <small
-        v-else-if="!activity.my_registration_status && !canApply && activity.registration_phase"
-        >{{ phases[activity.registration_phase] }}</small
-      >
-      <button v-if="activity.contacts?.length" class="contact-btn" @click="contact?.showModal()">
-        <UiIcon name="Message" />联系负责人
-      </button>
-    </footer>
+    <ActivitySignup :activity="activity" :student="showRegistrations ? student : undefined" :refreshing="refreshing" @applied="emit('applied', $event)" @refresh="emit('refresh')">
+      <button v-if="activity.contacts?.length" type="button" class="contact-btn" @click="contact?.showModal()"><UiIcon name="Message" />联系负责人</button>
+    </ActivitySignup>
     <dialog ref="contact" aria-labelledby="contact-title">
       <h2 id="contact-title">联系负责人</h2>
       <p v-for="(value,index) in activity.contacts" :key="index">{{ value }}</p>
@@ -299,22 +242,7 @@ p {
 .service-hours time {
   white-space: nowrap;
 }
-.detail-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  padding-block: 14px;
-  border-top: 1px solid var(--line);
-  background: white;
-}
-.detail-footer .primary {
-  min-width: 170px;
-}
-.detail-footer small {
-  color: var(--muted);
-}
+.description { white-space: pre-wrap; }
 dialog {
   width: min(370px, calc(100vw - 32px));
   color: var(--ink);
@@ -353,34 +281,7 @@ dialog button {
   .detail-top a {
     min-height: 44px;
   }
-  .detail-footer {
-    position: fixed;
-    z-index: 4;
-    inset: auto 0 0;
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 3px 8px;
-    padding: 8px 16px max(6px, env(safe-area-inset-bottom));
-  }
-  .detail-footer .primary {
-    grid-column: 1;
-    grid-row: 1;
-    min-width: 0;
-    width: 100%;
-  }
-  .detail-footer small {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    text-align: center;
-    font-size: 12px;
-  }
-  .detail-footer .contact-btn {
-    grid-column: 2;
-    grid-row: 1;
-  }
-  .detail-footer:not(:has(.contact-btn)) {
-    grid-template-columns: 1fr;
-  }
+
 }
 .notice-callout {
   display: flex;
