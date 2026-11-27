@@ -1755,7 +1755,7 @@ paths:
   /me/exit-requests:
     post:
       operationId: create_exit_request
-      summary: 录取后申请退出整项活动
+      summary: 录取后申请退出对应报名项
       description: 本人accepted且活动published、尚可办理时申请退出该报名项。日期活动在北京时间开始日零点关闭新退出申请。每个报名最多一个pending退出。pending保留录取及名额，批准后exited释放名额。单次请假在群内处理，本接口不提供整期请假类型。
       tags:
       - 报名
@@ -1894,7 +1894,7 @@ paths:
   /organizer/exit-requests/{id}/decision:
     post:
       operationId: decide_exit_request
-      summary: 处理退出整项活动申请
+      summary: 处理报名项退出申请
       description: 批准时原报名改为exited并释放名额。驳回仍为accepted。与名额更新同一事务，结果生成通知。
       tags:
       - 报名
@@ -7760,6 +7760,16 @@ components:
     registration:
       type: object
       properties:
+        answer_history:
+          type: array
+          description: 撤回后以新版问卷重报时保留的以往答卷，限本人及负责人查看
+          items:
+            type: object
+            required: [submitted_at, questionnaire_version, answers]
+            properties:
+              submitted_at: {type: string, format: date-time}
+              questionnaire_version: {type: string}
+              answers: {type: array, items: {$ref: '#/components/schemas/survey_answer'}}
         item_label: {type: string}
         item_id: {type: string, format: uuid}
         questionnaire_version: {type: string}
@@ -11342,7 +11352,7 @@ components:
         accepted_count:
           type: integer
           minimum: 0
-          description: 整项活动已占用名额，独立于检索词、所选状态和分页。
+          description: 当前报名项范围的已录取人数，独立于人员与答卷筛选、所选状态和分页。
         capacity:
           type: integer
           minimum: 0

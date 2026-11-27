@@ -2,7 +2,7 @@ import type { ExportInput, SurveyQuestion } from '@hongyan/contracts/types';
 import { type Actor, studentId } from '../auth/session.guard.js';
 import type { ExportJob } from '../generated/prisma/client.js';
 import { managedScope, staff } from '../activities/read.js';
-import { includeResponse, rosterOrderBy, rosterWhere } from '../registrations/registration.js';
+import { includeResponse, registrationView, rosterOrderBy, rosterWhere } from '../registrations/registration.js';
 import { studentWhere } from '../students/query.js';
 import type { Tx } from '../database.js';
 import { denied, invalid, invisible } from '../http.js';
@@ -226,14 +226,16 @@ async function rosterContent(tx: Tx, scope: StoredScope): Promise<ExportContent>
     const questions = row.response?.questions as SurveyQuestion[] | undefined;
     for (const q of questions ?? []) columns.set(columnKey(q.id, q.title), q.title);
   }
+  const history = rows.map(row => registrationView(row).answer_history ?? []);
+  const hasHistory = history.some(versions => versions.length > 0);
   const answerColumns = [...columns.keys()];
   return {
     fileName: '报名名单_' + fileNamePart(activity.activity_code) + '_' + workbookDate() + '.xlsx',
     sheet: {
       name: '报名名单',
-      headers: ['姓名', '学号', '申请时间', '当前报名状态', '报名项', ...columns.values()],
-      widths: [18, 18, 22, 20, 32, ...answerColumns.map(() => 28)],
-      rows: rows.map(row => {
+      headers: ['姓名', '学号', '申请时间', '当前报名状态', '报名项', ...columns.values(), ...(hasHistory ? ['以往答卷'] : [])],
+      widths: [18, 18, 22, 20, 32, ...answerColumns.map(() => 28), ...(hasHistory ? [60] : [])],
+      rows: rows.map((row, index) => {
         const answers = new Map(row.response?.answers.map(answer => [
           columnKey(answer.question_id, answer.title), answer.text ?? answer.labels.join('、'),
         ]));
@@ -241,6 +243,10 @@ async function rosterContent(tx: Tx, scope: StoredScope): Promise<ExportContent>
           row.student.account.display_name, row.student.student_no, dateTimeText(row.submitted_at),
           registrationLabels[row.status] ?? row.status, row.item_label ?? '整批报名',
           ...answerColumns.map(key => answers.get(key) ?? ''),
+          ...(hasHistory ? [history[index].map(version => [
+            dateTimeText(new Date(version.submitted_at)), ...version.answers.map(answer =>
+              answer.title + '：' + (answer.text ?? answer.labels?.join('、') ?? '')),
+          ].join(' · ')).join(' / ')] : []),
         ];
       }),
     },
