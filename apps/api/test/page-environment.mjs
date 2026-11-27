@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { launchBrowser } from '../scripts/browser.mjs';
 import { preview } from 'vite';
+import { apiProxy } from '../../../config/vite.shared.ts';
 import { createApp } from '../dist/app.js';
 import { prepareTestDatabase } from './prepare-test-database.mjs';
 import { Database } from '../dist/database.js';
@@ -149,7 +150,7 @@ export async function withPages(t, run) {
           port: 0,
           strictPort: false,
           host: '127.0.0.1',
-          proxy: { '/api/v1': apiOrigin },
+          proxy: apiProxy(apiOrigin),
         },
       });
       servers.push(server);
