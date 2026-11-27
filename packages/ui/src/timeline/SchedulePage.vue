@@ -85,9 +85,10 @@ const query = computed<Query>(() => ({
 }));
 
 const pageSize = 20;
-const readPage = async (page: number) => {
+const readPage = async (page: number, signal: AbortSignal) => {
   const { data, response } = await getTimeline({
     query: { ...query.value, page, page_size: pageSize },
+    signal,
     throwOnError: true,
   });
   const rangeKey = response.headers.get('X-Timeline-Range');
@@ -268,7 +269,10 @@ watch(
 );
 watch(
   [() => JSON.stringify(query.value), () => props.scope, revision, locateOnEntry],
-  ([, scope, version], [, previousScope, previousVersion]) => {
+  ([key, scope, version, autoLocate], [previousKey, previousScope, previousVersion]) => {
+    // Opening or closing an item changes the URL, but not the dates or the data scope.
+    if (key === previousKey && scope === previousScope && version === previousVersion &&
+        !(autoLocate && lastPage.value?.suggested_date)) return;
     selectionMessage.value = '';
     if (previousScope && (scope !== previousScope || version !== previousVersion) && route.query.item)
       clearSelection();
@@ -467,7 +471,7 @@ onUnmounted(() => {
         </div>
       </div>
     </template>
-    <p v-if="loading && !pages.length" class="notice" role="status">正在读取活动日程…</p>
+    <p v-if="(loading || switching) && (!pages.length || (locateOnEntry && lastPage?.suggested_date))" class="notice" role="status">正在读取活动日程…</p>
     <p v-else-if="error && !pages.length" role="alert">
       {{ error }} <button @click="load('initial')">重新读取</button>
     </p>

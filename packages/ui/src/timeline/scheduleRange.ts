@@ -62,7 +62,7 @@ function consistent(pages: Page[], size: number) {
   });
 }
 
-export function createScheduleRange(read: (page: number) => Promise<Page>, options: RangeOptions) {
+export function createScheduleRange(read: (page: number, signal: AbortSignal) => Promise<Page>, options: RangeOptions) {
   const { pageSize, maxInFlight } = options;
   if (!Number.isInteger(maxInFlight) || maxInFlight < 1 || !Number.isInteger(pageSize) || pageSize < 1)
     throw new RangeError('页大小与并发数须为正整数');
@@ -73,11 +73,13 @@ export function createScheduleRange(read: (page: number) => Promise<Page>, optio
   const hasMore = computed(() => pages.value.length * pageSize < total.value);
   const evaluatedAt = computed(() => pages.value[0]?.state_evaluated_at ?? '');
   let generation = 0;
+  let controller = new AbortController();
   let active: Promise<RangeOutcome> | undefined;
   let failed: RoundIntent | undefined;
 
   async function execute(intent: RoundIntent, retry: boolean, gen: number): Promise<RangeOutcome> {
     if (gen !== generation) return { status: 'aborted' };
+    const signal = controller.signal;
     const previous = pages.value;
     const target = Math.max(1, previous.length + (intent.kind === 'more' ? 1 : 0));
     running.value = true;
@@ -86,7 +88,7 @@ export function createScheduleRange(read: (page: number) => Promise<Page>, optio
     const readOne = async (number: number) => {
       if (gen !== generation) throw ABORT;
       try {
-        const page = await read(number);
+        const page = await read(number, signal);
         if (gen !== generation) throw ABORT;
         return page;
       } catch (e) {
@@ -161,7 +163,11 @@ export function createScheduleRange(read: (page: number) => Promise<Page>, optio
     }
   }
 
-  function cancel() { generation++; }
+  function cancel() {
+    generation++;
+    controller.abort();
+    controller = new AbortController();
+  }
   async function run(intent: RangeIntent): Promise<RangeOutcome> {
     if (intent.kind === 'initial') {
       cancel();
