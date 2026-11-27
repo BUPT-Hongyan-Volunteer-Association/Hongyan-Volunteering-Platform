@@ -1,4 +1,4 @@
-import type { ExportInput, SurveyQuestion } from '@hongyan/contracts/types';
+import type { ExportInput, SurveyAnswer } from '@hongyan/contracts/types';
 import { type Actor, studentId } from '../auth/session.guard.js';
 import type { ExportJob } from '../generated/prisma/client.js';
 import { managedScope, staff } from '../activities/read.js';
@@ -220,35 +220,40 @@ async function rosterContent(tx: Tx, scope: StoredScope): Promise<ExportContent>
     include: { ...includeResponse, student: { select: { student_no: true, account: { select: { display_name: true } } } } },
     orderBy: rosterOrderBy,
   });
-  const columnKey = (id: string, title: string) => JSON.stringify([id, title]);
   const columns = new Map<string, string>();
-  for (const row of rows) {
-    const questions = row.response?.questions as SurveyQuestion[] | undefined;
-    for (const q of questions ?? []) columns.set(columnKey(q.id, q.title), q.title);
-  }
-  const history = rows.map(row => registrationView(row).answer_history ?? []);
-  const hasHistory = history.some(versions => versions.length > 0);
-  const answerColumns = [...columns.keys()];
+  const values = rows.map(row => {
+    const applied = registrationView(row);
+    const cells = new Map<string, string>();
+    function addAnswers(answers: SurveyAnswer[], previous = 0) {
+      for (const answer of answers) {
+        const key = JSON.stringify([previous, answer.question_id, answer.type, answer.title]);
+        const title = previous ? `历史答卷 ${previous} · ${answer.title}` : answer.title;
+        columns.set(key, title);
+        cells.set(key, answer.text ?? answer.labels?.join('、') ?? '');
+      }
+    }
+    addAnswers(applied.answers ?? []);
+    for (const [index, version] of (applied.answer_history ?? []).entries()) {
+      const previous = index + 1;
+      const key = 'submitted_at_' + previous;
+      columns.set(key, `历史答卷 ${previous} · 提交时间`);
+      cells.set(key, dateTimeText(new Date(version.submitted_at)));
+      addAnswers(version.answers, previous);
+    }
+    return cells;
+  });
+  const keys = [...columns.keys()];
   return {
     fileName: '报名名单_' + fileNamePart(activity.activity_code) + '_' + workbookDate() + '.xlsx',
     sheet: {
       name: '报名名单',
-      headers: ['姓名', '学号', '申请时间', '当前报名状态', '报名项', ...columns.values(), ...(hasHistory ? ['以往答卷'] : [])],
-      widths: [18, 18, 22, 20, 32, ...answerColumns.map(() => 28), ...(hasHistory ? [60] : [])],
-      rows: rows.map((row, index) => {
-        const answers = new Map(row.response?.answers.map(answer => [
-          columnKey(answer.question_id, answer.title), answer.text ?? answer.labels.join('、'),
-        ]));
-        return [
-          row.student.account.display_name, row.student.student_no, dateTimeText(row.submitted_at),
-          registrationLabels[row.status] ?? row.status, row.item_label ?? '整批报名',
-          ...answerColumns.map(key => answers.get(key) ?? ''),
-          ...(hasHistory ? [history[index].map(version => [
-            dateTimeText(new Date(version.submitted_at)), ...version.answers.map(answer =>
-              answer.title + '：' + (answer.text ?? answer.labels?.join('、') ?? '')),
-          ].join(' · ')).join(' / ')] : []),
-        ];
-      }),
+      headers: ['姓名', '学号', '申请时间', '当前报名状态', '报名项', ...columns.values()],
+      widths: [18, 18, 22, 20, 32, ...keys.map(() => 28)],
+      rows: rows.map((row, index) => [
+        row.student.account.display_name, row.student.student_no, dateTimeText(row.submitted_at),
+        registrationLabels[row.status] ?? row.status, row.item_label ?? '整批报名',
+        ...keys.map(key => values[index].get(key) ?? ''),
+      ]),
     },
   };
 }

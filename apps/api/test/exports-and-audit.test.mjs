@@ -190,6 +190,14 @@ async function checkExports(t, db, app, { staffPassword, adminPassword, password
       activity_id: activity.id, student_id: student.id, item_id, item_label: index ? '问询' : '讲解',
       status: 'submitted', response_id: response.id,
     })) });
+    const old = await db.questionnaireResponse.create({ data: {
+      activity_id: activity.id, student_id: student.id, questions: [question], questionnaire_version: 'old',
+      answers: { create: { position: 0, question_id: question.id, title: question.title, type: 'text',
+        text: '天文观测', option_ids: [], labels: [] } },
+    } });
+    const reapplied = await db.registration.findFirstOrThrow({ where: { activity_id: activity.id, item_id: second } });
+    await db.registrationHistory.create({ data: { registration_id: reapplied.id, version: 1,
+      response_id: old.id, status: 'submitted', submitted_at: new Date('2025-11-02T03:00:00Z') } });
     const path = '/organizer/activities/' + activity.id;
     const people = result(await owner.request(path + '/attendance/participants'), 200);
     assert.equal(people.total, 1);
@@ -205,6 +213,7 @@ async function checkExports(t, db, app, { staffPassword, adminPassword, password
     assert.equal(others.length, 0);
     assert.equal(row[headers.indexOf('服务经验')], '天文讲解');
     assert.equal(row[headers.indexOf('报名项')], '问询');
+    assert.equal(row[headers.indexOf('历史答卷 1 · 服务经验')], '天文观测');
     const staff = await teacher.write('POST', '/exports', { type: 'activity_roster', activity_id: activity.id });
     assert.equal(staff.status, 403);
   });
