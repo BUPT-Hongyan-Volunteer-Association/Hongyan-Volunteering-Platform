@@ -666,6 +666,35 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
       assert.equal(await title.inputValue(), '尚未保存的标题');
     });
 
+    await t.test('新草稿只进入编辑送审，取消保留草稿、确认后从列表移除', async () => {
+      await owner.goto(web + '/managed/new');
+      await owner.getByLabel('活动标题', {exact:true}).fill('草稿删除演示');
+      await button(owner,'保存草稿').click();
+      await owner.waitForURL(/\/managed\/[^/]+\/edit$/);
+      await visible(owner.getByRole('heading',{name:'活动编辑与送审'}));
+      assert.equal(await owner.getByRole('navigation',{name:'活动工作区'}).count(),0);
+      const editUrl = owner.url();
+      await owner.goto(editUrl.replace(/edit$/, 'roster'));
+      await owner.waitForURL(editUrl);
+      await link(owner,'返回我的管理活动').click();
+      const row = owner.getByRole('listitem').filter({has:link(owner,'草稿删除演示')});
+      await visible(row);
+      assert.equal(new URL(await link(row,'编辑送审').getAttribute('href'),web).href,editUrl);
+      assert.equal(new URL(await link(row,'草稿删除演示').getAttribute('href'),web).href,editUrl);
+      assert.equal(await link(row,'现场人员记录').count(),0);
+      assert.equal(await link(row,'报名名单').count(),0);
+      await button(row,'删除').click();
+      const dialog=owner.getByRole('dialog',{name:'删除草稿'});
+      await visible(dialog.getByText(/确定删除「草稿删除演示」/));
+      await button(dialog,'取消').click();
+      await visible(row);
+      await button(row,'删除').click();
+      await button(dialog,'确认删除').click();
+      await visible(owner.getByText('已删除草稿「草稿删除演示」',{exact:true}));
+      await row.waitFor({state:'detached'});
+      await owner.goto(editUrl);
+      await visible(owner.getByText('当前账号无法访问此活动',{exact:true}));
+    });
     await t.test('管理活动的第二页及三种子页面保留来源', async () => {
       const account = await db.account.findUniqueOrThrow({ where: { username: '0000000002' } });
       const revision = await db.activityRevision.findFirstOrThrow({
@@ -678,13 +707,14 @@ test('三端页面、真实发布与报名录取流程', { timeout: 10 * 60_000 
         await db.activity.create({
           data: {
             activity_code: 'TEST-' + String(i).padStart(2, '0'),
-            status: 'draft',
+            status: i === 20 ? 'published' : 'draft',
+            published_revision: i === 20 ? 1 : null,
             working_revision: 1,
             members: { create: { account_id: account.id, member_role: 'owner' } },
             revisions: {
               create: {
                 revision: 1,
-                revision_state: 'draft',
+                revision_state: i === 20 ? 'approved' : 'draft',
                 created_by: account.id,
                 content: { ...revision.content, title: '分页样例' + i },
               },

@@ -1,4 +1,8 @@
-import type { ActivityInput, RegistrationItem, ActivitySchedule, DateRangeSchedule, Registration, RegistrationDecision } from './generated/types.gen.js';
+import type { Activity, ActivityInput, RegistrationItem, ActivitySchedule, DateRangeSchedule, Registration, RegistrationDecision } from './generated/types.gen.js';
+
+export function isUnpublishedDraft(activity: Pick<Activity, 'status' | 'published_revision'>) {
+  return activity.published_revision == null && activity.status === 'draft';
+}
 
 export const activeRegistrationStatuses: Registration['status'][] = ['submitted', 'waitlisted', 'accepted'];
 

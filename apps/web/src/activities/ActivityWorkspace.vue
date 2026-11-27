@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { serviceDateText } from '@hongyan/contracts/activity';
+import { isUnpublishedDraft, serviceDateText } from '@hongyan/contracts/activity';
 import ActivityMemberListView from '@hongyan/ui/ActivityMemberListView.vue';
 import TransferOwner from './TransferOwner.vue';
 import AddCollaborator from './AddCollaborator.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import UiIcon from '@hongyan/ui/UiIcon.vue';
 
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import {
   ApiError,
   getActivityMembers,
@@ -17,13 +17,19 @@ import {
 } from '@hongyan/contracts';
 
 const props = defineProps<{ profile: Profile }>();
-const route = useRoute();
+const route = useRoute(), router = useRouter();
 const origin = window.history.state?.scheduleReturn;
 const scheduleReturn =
   typeof origin === 'string' && /^\/managed-schedule(?:\?|$)/.test(origin) ? origin : undefined;
 const base = computed(() => '/managed/' + route.params.id);
 const detail = ref<ManagedActivityDetail>();
 const activity = computed(() => detail.value?.activity);
+const editingOnly = computed(() => !!activity.value && isUnpublishedDraft(activity.value));
+watch([editingOnly, () => route.fullPath], ([limited]) => {
+  if (limited && activity.value?.id === route.params.id && route.name !== 'activity-edit')
+    void router.replace({ path: base.value + '/edit', query: route.query,
+      state: scheduleReturn ? { scheduleReturn } : undefined });
+});
 function showDetail(next: ManagedActivityDetail) {
   if (
     next.activity.id === route.params.id &&
@@ -136,7 +142,7 @@ onUnmounted(() => {
       ><span v-if="activity.campus"><UiIcon name="Location" />{{ activity.campus }}</span
       ><span><UiIcon name="Calendar" />{{ serviceDateText(activity.schedule) }}</span>
     </p>
-    <nav class="section-nav" aria-label="活动工作区">
+    <nav v-if="!editingOnly" class="section-nav" aria-label="活动工作区">
       <RouterLink
         v-for="[path, label] in sections"
         :key="path"
@@ -146,7 +152,7 @@ onUnmounted(() => {
         >{{ label }}</RouterLink
       >
     </nav>
-    <RouterView v-if="route.name !== 'managed-overview'" v-slot="{ Component }">
+    <RouterView v-if="route.name === 'activity-edit' || (!editingOnly && route.name !== 'managed-overview')" v-slot="{ Component }">
       <component
         :is="Component"
         @denied="refresh"
@@ -161,7 +167,7 @@ onUnmounted(() => {
         :key="route.name === 'hour-batch' ? base + '/' + route.params.item : base"
       />
     </RouterView>
-    <section v-else class="reading-area">
+    <section v-else-if="!editingOnly" class="reading-area">
       <h2>活动成员</h2>
       <p v-if="transferMessage" class="notice" role="status">{{ transferMessage }}</p>
       <ActivityMemberListView :key="activity.id + self.member_role" :activity="activity" :team="team"

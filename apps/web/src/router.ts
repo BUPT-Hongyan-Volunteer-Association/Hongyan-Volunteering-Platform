@@ -21,7 +21,7 @@ export const router = createRouter({
   routes: [
     { path: '/', component: PublicActivities, meta: {title: '活动发现', nav: '/',  profile: true } },
     { path: '/activities/:id', component: PublicActivities, meta: {title: '活动详情', nav: '/',  profile: true } },
-    { path: '/managed', component: () => import('./activities/ManagedActivities.vue'), meta: {title: '我的管理活动', nav: '/managed',  organizer: true } },
+    { path: '/managed', component: () => import('./activities/ManagedActivities.vue'), meta: {title: '我的管理活动', nav: '/managed',  organizer: true, profile: true } },
     { path: '/managed/new', component: loadActivityEditor, meta: {title: '新建活动', nav: '/managed/new',  organizer: true } },
     {
       path: '/managed/:id',
