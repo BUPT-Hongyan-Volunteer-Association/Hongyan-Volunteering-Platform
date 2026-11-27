@@ -3,6 +3,7 @@
 let selectionClearedOnLeave = false;
 </script>
 <script setup lang="ts">
+import RegistrationAnswers from './RegistrationAnswers.vue';
 import AnswerFilters from './AnswerFilters.vue';
 import StatusFilter from '@hongyan/ui/StatusFilter.vue';
 import UiSelect from '@hongyan/ui/UiSelect.vue';
@@ -427,12 +428,12 @@ onUnmounted(() => {
       <dt>状态</dt>
       <dd>{{ labels[inspected.status] }}</dd>
       <template v-if="inspected.item_label"><dt>报名项目</dt><dd>{{ inspected.item_label }}</dd></template>
-      <template v-for="answer in inspected.answers" :key="answer.question_id"><dt>{{ answer.title }}</dt><dd>{{ answer.text || answer.labels?.join('、') || '未填写' }}</dd></template>
       <template v-if="inspected.decision_reason"
         ><dt>处理说明</dt>
         <dd>{{ inspected.decision_reason }}</dd></template
       >
     </dl>
+    <RegistrationAnswers :registration="inspected" />
     <template v-if="['submitted', 'waitlisted', 'rejected'].includes(inspected.status)">
       <label class="single-note">给{{ inspected.student_name }}的处理说明（选填）<textarea v-model="singleReason" maxlength="1000" rows="2" /></label>
       <button v-for="(label,key) in actions" :key="key"

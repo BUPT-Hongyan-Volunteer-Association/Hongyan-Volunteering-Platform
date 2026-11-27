@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { listMyRegistrations, type Registration } from '@hongyan/contracts';
 import RecordSummaryList from '@hongyan/ui/RecordSummaryList.vue';
+import RegistrationAnswers from './RegistrationAnswers.vue';
 import RequestQueue from './RequestQueue.vue';
 import { pageNumber, usePageRead } from '@hongyan/ui/usePageRead';
 import Pager from '@hongyan/ui/Pager.vue';
@@ -92,11 +93,7 @@ onUnmounted(() => {
         </template>
       </RecordSummaryList>
       <p v-else>{{ item ? '未找到该报名记录' : '暂无符合条件的报名记录' }}</p>
-      <dl v-if="item && result.items[0]?.answers?.length" class="registration-answers" aria-label="我的答卷">
-        <template v-for="answer in result.items[0].answers" :key="answer.question_id">
-          <dt>{{ answer.title }}</dt><dd>{{ answer.text || answer.labels?.join('、') || '未填写' }}</dd>
-        </template>
-      </dl>
+      <RegistrationAnswers v-if="item && result.items[0]" :registration="result.items[0]" />
       <RequestQueue :key="item" v-if="item && result.items[0]" :registration="result.items[0]" :writes-paused="refreshing"
         @changed="msg => { feedback = msg; load(); }" />
       <Pager
@@ -109,7 +106,3 @@ onUnmounted(() => {
     </template>
   </section>
 </template>
-
-<style scoped>
-.registration-answers dd { white-space: pre-wrap; overflow-wrap: anywhere; }
-</style>

@@ -16,7 +16,13 @@ const items = computed(() => props.activity.registration_items ?? []);
 const batch = computed(() => props.activity.registration_mode === 'batch');
 const questions = computed(() => props.activity.questions ?? []);
 const mine = computed(() => props.activity.my_registrations ?? []);
-const savedAnswer = computed(() => mine.value.find(r => r.questionnaire_version === props.activity.questionnaire_version && r.answers));
+const savedAnswer = computed(() => {
+  for (const row of mine.value) {
+    if (row.questionnaire_version === props.activity.questionnaire_version && row.answers) return row;
+    const previous = row.answer_history?.find(entry => entry.questionnaire_version === props.activity.questionnaire_version);
+    if (previous) return previous;
+  }
+});
 const existing = computed(() => new Map(mine.value.map(row => [row.item_id, row])));
 const inventory = computed(() => new Map((props.activity.item_availability ?? []).map(row => [row.item_id, row])));
 const isOpen = computed(() => !!props.student && props.activity.status === 'published' && props.activity.registration_phase === 'open');

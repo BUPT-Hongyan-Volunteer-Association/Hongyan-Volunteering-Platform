@@ -316,7 +316,7 @@ const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
                 <span
                   v-if="row.registration_phase"
                   class="state-chip"
-                  :class="{ neutral: row.registration_phase !== 'open' }"
+                  :class="{ neutral: !row.is_ongoing && row.registration_phase !== 'open' }"
                   >{{ activityPrimaryStatus(row) }}</span
                 >
               </div>
