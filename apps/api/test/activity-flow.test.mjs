@@ -292,6 +292,13 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
       schedule: { schedule_type: 'date_range', duration_start_date: date(-1), duration_end_date: date(1) },
       registration_items: [firstItem,nextItem], allow_multiple_slots: true,
     };
+    const tooLarge = await owner.write('POST','/organizer/activities',{ title:'整批', capacity:10001 });
+    assert.equal(tooLarge.status,422);
+    const largeBatch = await owner.write('POST','/organizer/activities',{
+      ...config,registration_items:[{...firstItem,capacity:6000},{...nextItem,capacity:6000}],
+    });
+    assert.equal(largeBatch.status,201);
+    assert.equal(largeBatch.data.capacity,12000);
     const made = await owner.write('POST', '/organizer/activities', config);
     assert.equal(made.status, 201);
     assert.equal(made.data.capacity, 2);
@@ -305,7 +312,8 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     assert.equal(publicView.is_ongoing, true);
     assert.equal(publicView.registration_phase,'open');
     assert.equal(publicView.item_availability[0].remaining,2);
-    assert.equal((await student.write('POST',publicPath + '/registrations',{item_ids:[nextItem.id]})).status,201);
+    const application = await student.write('POST',publicPath + '/registrations',{item_ids:[nextItem.id]});
+    assert.equal(application.status,201);
     await edit({ registration_items: [firstItem,{...nextItem,role:'校内引导'}] });
     assert.equal((await send()).status,409);
     await edit({ registration_items:[firstItem,{...nextItem,waitlist_capacity:0}] });
@@ -315,6 +323,20 @@ test('活动发布、修订、越权与旧命令在真实 PostgreSQL 上保持�
     assert.equal(summary.find(row=>row.item_id===nextItem.id).submitted_count,2);
     assert.equal((await decide(changed,'approved')).code,'capacity_conflict');
     assert.equal((await student.request(publicPath)).data.item_availability[1].waitlist_capacity,1);
+    const registration = application.data.items[0];
+    const accepted = await owner.write('POST','/organizer/registrations/' + registration.id + '/decision',{
+      expected_version:registration.version,decision:'accepted',
+    });
+    assert.equal(accepted.status,200);
+    const window = '&from=' + encodeURIComponent(at(-1,'00:00:00')) + '&to=' + encodeURIComponent(at(3,'00:00:00'));
+    const personal = (await student.request('/timeline?scope=mine' + window)).data.items.find(r=>r.activity_id===made.data.id);
+    assert.equal(personal.duration_start_date,date(-1));
+    assert.equal(personal.duration_end_date,date(1));
+    assert.equal(personal.my_item_labels.length,1);
+    assert.ok(personal.my_item_labels[0].includes(date(1)));
+    const publicItems = (await other.request('/timeline?scope=public' + window)).data.items;
+    assert.ok(publicItems.every(item => !('my_item_labels' in item)));
+
   });
   await t.test('活动列表跨批筛选后仍返回准确总数和稳定页序', async () => {
     const original = sample.revisions[0],

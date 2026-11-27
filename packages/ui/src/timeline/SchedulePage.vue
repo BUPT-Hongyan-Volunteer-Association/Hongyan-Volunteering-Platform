@@ -553,7 +553,7 @@ onUnmounted(() => {
           <div class="selected-title">
             <h2 tabindex="-1" ref="detailHeading">{{ selected.title }}</h2>
             <span class="state-chip">{{ activityPrimaryStatus(selected) }}</span>
-            <span v-if="!mobile || fullMobileDetail" class="state-chip neutral">{{
+            <span v-if="(!mobile || fullMobileDetail) && activityPrimaryStatus(selected) !== statusLabels[selected.status]" class="state-chip neutral">{{
               statusLabels[selected.status]
             }}</span>
           </div>
@@ -584,7 +584,9 @@ onUnmounted(() => {
               ><dt><UiIcon name="Timer" />报名截止</dt>
               <dd>{{ localDateTime(selected.registration_closes_at) }}</dd></template
             >
-            <template v-if="selected.is_ongoing"><dt>服务状态</dt><dd>进行中</dd></template>
+            <template v-if="selected.my_item_labels?.length"><dt>本人录取项</dt>
+              <dd><div v-for="label in selected.my_item_labels" :key="label">{{ label }}</div></dd>
+            </template>
             <template v-if="selected.has_planned_overlap"
               ><dt>计划提示</dt>
               <dd>与本人其他已录取活动的服务时间重叠</dd></template

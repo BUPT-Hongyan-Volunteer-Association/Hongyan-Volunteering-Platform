@@ -155,8 +155,8 @@ export class ReviewController {
         after: { ...source, status: action.decision, published_revision: afterPublic },
       });
       const result = reviewView(updated, decided);
+      if (approved) await tx.$queryRaw`SELECT pg_notify('registration_changed', ${row.id})::text`;
       if (approved && r.previous_revision !== null) {
-        await tx.$queryRaw`SELECT pg_notify('registration_changed', ${row.id})::text`;
         const changed_fields = result.changes
           .map((c) => c.field_path)
           .filter((k) => notifiedFields.has(k.split('.')[0]));

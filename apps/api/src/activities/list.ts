@@ -45,7 +45,7 @@ export async function activityViews(
   scope: Scope,
   q: Query,
   { studentId, showOwnerAvailability = false, range, outsideWindow }: ListOptions,
-  onView?: (view: View, matches: boolean) => void,
+  onView?: (view: View, matches: boolean, row: PageRow) => void,
 ) {
   const { page, page_size, skip } = pagination(q);
   const matches = contentFilter(q, range, outsideWindow);
@@ -85,7 +85,7 @@ export async function activityViews(
           select: { id: true, status: true },
         },
         registrations: studentId
-          ? { where: { student_id: studentId }, select: { status: true } }
+          ? { where: { student_id: studentId }, select: { status: true, item_id: true } }
           : false,
       },
     });
@@ -124,7 +124,7 @@ export async function activityViews(
       const view = project(data, scope, now);
       if (!view) continue;
       const matched = matches(view);
-      onView?.(view, matched);
+      onView?.(view, matched, data);
       if (!matched) continue;
       if (derived) {
         total++;

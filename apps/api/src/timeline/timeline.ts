@@ -3,7 +3,7 @@ import { servicePeriods } from '../activities/schedule.js';
 import { localDate, serviceDates } from '@hongyan/contracts/activity';
 import { createHash } from 'node:crypto';
 import type {
-  Activity,
+  Activity, ActivityInput,
   TimelineActivity,
   TimelineActivityPage,
 } from '@hongyan/contracts/types';
@@ -11,7 +11,8 @@ import type { Prisma } from '../generated/prisma/client.js';
 import type { Database, Tx } from '../database.js';
 import type { Actor } from '../auth/session.guard.js';
 import { invalid } from '../http.js';
-import { managedScope } from '../activities/read.js';
+import { itemLabel } from '../registrations/enrollment.js';
+import { managedScope, publishedRevision } from '../activities/read.js';
 import { activityViews } from '../activities/list.js';
 
 export type TimelineScope = 'public' | 'mine' | 'managed' | 'all';
@@ -44,7 +45,7 @@ function plannedOverlapIds(periods: Period[]) {
   return overlapping;
 }
 
-function toActivity(view: Activity, scope: TimelineScope, overlaps?: Set<string>): TimelineActivity | null {
+function toActivity(view: Activity, scope: TimelineScope, labels?: string[], overlaps?: Set<string>): TimelineActivity | null {
   const { duration_start_date, duration_end_date } = serviceDates(view.schedule);
   if (!duration_start_date || !duration_end_date) return null;
   return {
@@ -63,6 +64,7 @@ function toActivity(view: Activity, scope: TimelineScope, overlaps?: Set<string>
     owner_display_name: view.owner_display_name,
     color_index: colorIndex(view.id),
     duration_start_date, duration_end_date,
+    ...(labels?.length && { my_item_labels: labels }),
     ...(overlaps && { has_planned_overlap: overlaps.has(view.id) }),
     is_ongoing: view.is_ongoing,
     ...((scope === 'managed' || scope === 'all') && {
@@ -130,20 +132,33 @@ export async function timelinePage(
     if (end <= from) lastEnd = Math.max(lastEnd, end);
   }
   const periods: Period[] = [];
+  const myItems = new Map<string,string[]>();
   const { views, owners } = await db.$transaction(async tx => {
-    const views = await activityViews(tx, where, management ? revision : 'public', q, { range, outsideWindow }, (view, matched) => {
-      if (scope === 'mine' && overlappingStatuses.includes(view.status)) {
-        for (const period of servicePeriods(view.schedule, from, to))
-          periods.push({ activityId: view.id, ...period });
+    const views = await activityViews(tx, where, management ? revision : 'public', q, { range, outsideWindow, studentId }, (view, matched, row) => {
+      if (scope === 'mine') {
+        const approved = publishedRevision(row)?.content as unknown as ActivityInput;
+        const accepted = new Set(row.registrations?.filter(r => r.status === 'accepted').map(r => r.item_id));
+        const mine = approved.registration_items?.filter(item => accepted.has(item.id)) ?? [];
+        if (matched && mine.length) myItems.set(view.id, mine.map(itemLabel));
+        if (overlappingStatuses.includes(view.status)) {
+          if (!mine.length || mine.some(item => !item.starts_at)) {
+            for (const period of servicePeriods(view.schedule, from, to)) periods.push({ activityId: view.id, ...period });
+          }
+          for (const item of mine) {
+            if (!item.starts_at || !item.ends_at) continue;
+            const start = Date.parse(item.starts_at), end = Date.parse(item.ends_at);
+            if (start < to && end > from) periods.push({ activityId: view.id, start, end });
+          }
+        }
       }
-      if (matched) digest.update(JSON.stringify(toActivity(view, scope)));
+      if (matched) digest.update(JSON.stringify(toActivity(view, scope, myItems.get(view.id))));
     });
     const owners = management ? await ownerChoices(tx, actor, scope) : undefined;
     return { views, owners };
   }, { isolationLevel: 'RepeatableRead' });
   const overlaps = scope === 'mine' ? plannedOverlapIds(periods) : undefined;
   const items = views.items
-    .map((view) => toActivity(view, scope, overlaps))
+    .map((view) => toActivity(view, scope, myItems.get(view.id), overlaps))
     .filter((item): item is TimelineActivity => item !== null);
   const suggestedTime = Number.isFinite(nextStart) ? nextStart : lastEnd - 1;
   const page = {

@@ -39,6 +39,8 @@ export function prepareRecruitment(a: ActivityInput, publication: boolean) {
     }
   }
   if (a.registration_mode === 'whole') {
+    if ((a.capacity ?? 0) > 10000) invalid('capacity', '计划名额最多为 10000 人');
+    if (a.waitlist_capacity > 10000) invalid('waitlist_capacity', '候补人数最多为 10000 人');
     delete a.registration_items;
     delete a.allow_multiple_roles;
     delete a.allow_multiple_slots;

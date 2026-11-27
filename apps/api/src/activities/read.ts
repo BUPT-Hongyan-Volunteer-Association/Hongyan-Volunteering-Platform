@@ -50,7 +50,7 @@ export type PageRow = {
   members: LoadedActivity['members'];
   revisions: LoadedActivity['revisions'];
   reviews: { id: string; status: string }[];
-  registrations?: { status: string }[];
+  registrations?: { status: string; item_id: string }[];
 };
 
 export function publishedRevision(row: Pick<PageRow, 'published_revision' | 'revisions'>) {
